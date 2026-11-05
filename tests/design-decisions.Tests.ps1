@@ -3,7 +3,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $design = Get-Content (Join-Path $root 'docs/design/mvp-decisions.md') -Raw
 
 # 每轮已确认决策都要可检索，避免后续轮次覆盖先前约束。
-foreach ($round in @('Q1–Q6', 'Q7–Q12', 'Q13–Q18', 'Q19–Q24', 'Q25–Q30', 'Q31–Q36', 'Q37–Q42')) {
+foreach ($round in @('Q1–Q6', 'Q7–Q12', 'Q13–Q18', 'Q19–Q24', 'Q25–Q30', 'Q31–Q36', 'Q37–Q42', 'Q43–Q48')) {
     if (-not $design.Contains($round)) { throw "Missing decision round: $round" }
 }
 
@@ -49,5 +49,14 @@ $glossary = Get-Content (Join-Path $root 'GLOSSARY.md') -Raw
 $terms = @([regex]::Matches($glossary, '(?m)^\*\*([^（\r\n]+)（') | ForEach-Object { $_.Groups[1].Value })
 $duplicates = @($terms | Group-Object | Where-Object { $_.Count -gt 1 })
 if ($duplicates.Count -gt 0) { throw "Duplicate glossary terms: $($duplicates.Name -join ', ')" }
+
+# 运行规则按已确认题号完整收录，防止用户的修订落在历史摘要里却遗漏正文。
+$reception = Get-Content (Join-Path $root 'docs/design/reception-rules.md') -Raw
+$questions = @([regex]::Matches($reception, '(?m)^## Q(\d+)：') | ForEach-Object { [int]$_.Groups[1].Value })
+foreach ($number in 37..48) {
+    if (@($questions | Where-Object { $_ -eq $number }).Count -ne 1) {
+        throw "Reception decision must have one section: Q$number"
+    }
+}
 
 Write-Output 'Design decision consistency validation passed.'
