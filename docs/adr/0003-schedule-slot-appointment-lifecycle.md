@@ -2,6 +2,8 @@
 
 状态：accepted
 
+适用范围更新：本 ADR 描述早期 MVP 的号源和状态模型，完整产品的线上、线下与现场登记范围见 [完整产品目标](../design/product-vision.md)；停诊审批职责已由 [ADR-0009](0009-suspension-review-chain.md) 细化。首版是否加入支付及候诊时序仍待确认。
+
 平台将医生的 Schedule 与患者实际可占用的 Slot 分开建模。管理员发布可预约的 Slot；医生可以提交 Schedule change request，但不能直接改变已发布的患者承诺。Appointment 只引用一个 Slot，并通过 `requested`、`confirmed`、`completed`、`cancelled` 和 `no-show` 表达生命周期；MVP 不做候补队列。这样可以把医生排班意图、平台可售号源和患者预约记录分开，避免取消、调班和审批互相覆盖。
 
 ## 后果
