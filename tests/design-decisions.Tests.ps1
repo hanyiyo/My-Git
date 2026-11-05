@@ -3,7 +3,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $design = Get-Content (Join-Path $root 'docs/design/mvp-decisions.md') -Raw
 
 # 每轮已确认决策都要可检索，避免后续轮次覆盖先前约束。
-foreach ($round in @('Q1–Q6', 'Q7–Q12', 'Q13–Q18', 'Q19–Q24', 'Q25–Q30')) {
+foreach ($round in @('Q1–Q6', 'Q7–Q12', 'Q13–Q18', 'Q19–Q24', 'Q25–Q30', 'Q31–Q36')) {
     if (-not $design.Contains($round)) { throw "Missing decision round: $round" }
 }
 
