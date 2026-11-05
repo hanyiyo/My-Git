@@ -3,7 +3,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $design = Get-Content (Join-Path $root 'docs/design/mvp-decisions.md') -Raw
 
 # 每轮已确认决策都要可检索，避免后续轮次覆盖先前约束。
-foreach ($round in @('Q1–Q6', 'Q7–Q12', 'Q13–Q18', 'Q19–Q24', 'Q25–Q30', 'Q31–Q36')) {
+foreach ($round in @('Q1–Q6', 'Q7–Q12', 'Q13–Q18', 'Q19–Q24', 'Q25–Q30', 'Q31–Q36', 'Q37–Q42')) {
     if (-not $design.Contains($round)) { throw "Missing decision round: $round" }
 }
 
@@ -30,6 +30,12 @@ $documentation = @(
 )
 foreach ($document in $documentation) {
     $body = Get-Content -LiteralPath $document.FullName -Raw
+    # 同一文档重复标题会令锚点及决策入口含糊，访谈追加章节时需要避免。
+    $headings = @([regex]::Matches($body, '(?m)^## ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value })
+    $duplicateHeadings = @($headings | Group-Object | Where-Object { $_.Count -gt 1 })
+    if ($duplicateHeadings.Count -gt 0) {
+        throw "Duplicate section headings in $($document.Name): $($duplicateHeadings.Name -join ', ')"
+    }
     foreach ($link in [regex]::Matches($body, '\[[^\]]+\]\(([^)]+\.md)\)')) {
         $target = Join-Path $document.DirectoryName $link.Groups[1].Value
         if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
