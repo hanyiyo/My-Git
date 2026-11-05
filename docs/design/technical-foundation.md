@@ -1,6 +1,6 @@
 # 已确认的技术基础
 
-Q52–Q54 已确认。范围见 [当前 MVP](current-mvp.md)；完整模块图和状态图将在访谈收敛后汇总。
+Q52–Q54 已确认；后续 R1/R2 修订加入 Redis 和登录图形验证码。范围见 [当前 MVP](current-mvp.md)，模块和状态汇总见 [架构草案](architecture.md)。
 
 ## 图文消息和通知
 
@@ -10,7 +10,7 @@ REST 提交图文消息，成功入库后通过 SSE 推送新消息、叫号和�
 
 ## 持久化后台任务
 
-AI 分析、占号超时、退款重试、替诊确认超时使用 MySQL 持久化任务，由 Spring Boot 后台执行器和定时扫描处理，支持抢占、超时恢复、有限重试和幂等。首版不依赖 Redis 或消息中间件。
+AI 分析、占号超时、退款重试、替诊确认超时继续用 MySQL 持久任务，由 Spring Boot 执行器和扫描处理，支持抢占、恢复、有限重试、幂等。Redis 已加入登录模块，但持久任务不依赖 Redis，不引入消息中间件。
 
 执行按至少一次处理设计，恢复或重复执行不能造成重复占号、退款或通知业务记录。业务变更和任务写入应有一致性边界；预约有效性以事务中校验的数据库状态与截止时间为准，不依赖扫描器及时执行。不能长期占用医疗业务事务等待外部 AI 网络调用。
 
@@ -24,6 +24,8 @@ AI 分析、占号超时、退款重试、替诊确认超时使用 MySQL 持久�
 
 ## 部署边界
 
-Windows 开发演示、单台 Linux 部署，一个 Vue 应用、一个 Spring Boot 后端和 MySQL。默认 mock/local AI，外部提供方需配置启用和患者授权；真实支付、短信和身份核验不在首版。
+Windows 开发演示、单台 Linux 部署，一个 Vue 应用、一个 Spring Boot 后端、MySQL、Redis 和私有附件目录。默认 mock/local AI，外部提供方需配置启用和患者授权；真实支付、短信和身份核验不在首版。
 
-决策背景见 [ADR-0013](../adr/0013-single-node-durable-runtime.md)。
+三端实际图形验证码登录用 Redis 保存短期挑战并做原子消费；获取和登录限流也使用 Redis。账户、角色、refresh 会话仍在 MySQL。Redis 重启后重新获取验证码，故障不绕过校验，不改变业务订单/任务状态；运行规则见 [登录与 Redis](login-security.md)。
+
+决策背景见 [ADR-0013](../adr/0013-single-node-durable-runtime.md)，新增 Redis 的替代说明见 [ADR-0014](../adr/0014-redis-login-image-captcha.md)。

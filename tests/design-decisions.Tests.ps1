@@ -7,6 +7,21 @@ foreach ($round in @('Q1–Q6', 'Q7–Q12', 'Q13–Q18', 'Q19–Q24', 'Q25–Q30
     if (-not $design.Contains($round)) { throw "Missing decision round: $round" }
 }
 
+$revisions = Get-Content (Join-Path $root 'docs/design/mvp-decisions.md') -Raw
+foreach ($revision in @('R1', 'R2')) {
+    if (-not $revisions.Contains($revision)) { throw "Missing design revision: $revision" }
+}
+
+$login = Get-Content (Join-Path $root 'docs/design/login-security.md') -Raw
+foreach ($phrase in @('图形验证码', 'Redis', '一次', '不发送短信或邮件')) {
+    if (-not $login.Contains($phrase)) { throw "Missing login security rule: $phrase" }
+}
+
+$architecture = Get-Content (Join-Path $root 'docs/design/architecture.md') -Raw
+if (-not $architecture.Contains('Redis') -or -not $architecture.Contains('登录图形验证码')) {
+    throw 'Architecture must include Redis and login captcha'
+}
+
 # ADR 链接不能指向不存在的决策。
 foreach ($reference in [regex]::Matches($design, 'ADR-(\d{4})')) {
     $number = $reference.Groups[1].Value

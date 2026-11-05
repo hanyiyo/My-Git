@@ -16,7 +16,9 @@
 
 首版采用 Spring Boot 模块化单体、MySQL 和一个 Vue 应用；REST 写消息，SSE 推事件，失败回退轮询；MySQL 持久化后台任务，本地私有目录保存附件。详见 [技术基础](technical-foundation.md) 和 [ADR-0013](../adr/0013-single-node-durable-runtime.md)。
 
-首版仅成年本人挂号，使用虚构身份与医疗数据；验证码、找回密码、实名认证为明确标识的演示适配器，不发送短信邮件。Windows 本机开发，提供单台 Linux 部署方案；优先桌面，患者页面兼容手机浏览器，无小程序或原生 App。
+R1/R2 最新修订：引入 Redis，三端账号密码登录增加实际图形验证码校验；Redis 存短期验证码和登录限流，故障不放行。刷新会话、预约、支付、排队、任务仍在 MySQL。详见 [登录与 Redis](login-security.md) 和 [ADR-0014](../adr/0014-redis-login-image-captcha.md)。
+
+首版成年本人挂号，虚构身份与医疗数据；短信/邮箱验证码、找回密码、实名认证仍为演示适配器，不发送短信邮件。实际图形验证码不属于上述模拟范围。Windows 开发、单台 Linux 部署，均加入 Redis；桌面优先、患者手机浏览器兼容，无小程序或原生 App。
 
 ## 支付与号源
 
