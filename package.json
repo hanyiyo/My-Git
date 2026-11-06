@@ -1,1 +1,1 @@
-{"name":"medical-auth-foundation","private":true,"type":"module","scripts":{"test":"node --test","start":"node backend/src/server.js"}}
+{"name":"medical-mvp","private":true,"scripts":{"test":"pwsh -NoProfile -File scripts/verify.ps1","start":"pwsh -NoProfile -File scripts/start-backend.ps1","dev:frontend":"npm --prefix frontend run dev"}}

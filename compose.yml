@@ -1,0 +1,15 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Configure MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: medical_mvp
+      MYSQL_USER: medical
+      MYSQL_PASSWORD: ${MEDICAL_DB_PASSWORD:?Configure MEDICAL_DB_PASSWORD}
+    ports: ['127.0.0.1:3306:3306']
+    volumes: ['mysql-data:/var/lib/mysql']
+  redis:
+    image: redis:7.4
+    ports: ['127.0.0.1:6379:6379']
+volumes:
+  mysql-data:

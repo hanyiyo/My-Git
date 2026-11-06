@@ -5,6 +5,8 @@
 
 ## Agent skills
 
+Implementation and issue completion: read `docs/agents/implementation-gate.md` before changing code or closing an issue.
+
 ### Issue tracker
 
 Issues live in GitHub Issues and are managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.

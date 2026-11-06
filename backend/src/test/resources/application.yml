@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: ${MEDICAL_TEST_DB_URL}
+    username: ${MEDICAL_TEST_DB_USER:root}
+    password: ${MEDICAL_TEST_DB_PASSWORD:}
+  data:
+    redis:
+      host: 127.0.0.1
+      port: ${MEDICAL_TEST_REDIS_PORT}
+      timeout: 1s
+      connect-timeout: 1s
+  flyway:
+    enabled: true
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+medical:
+  jwt-secret: test-only-jwt-secret-at-least-32-characters
+  captcha-secret: test-only-captcha-secret-at-least-32-characters
+  cookie-secure: false
+  captcha-ttl: 2s
+  access-ttl: 15m
+  refresh-ttl: 7d
+  rate-window: 1m
+  captcha-limit: 50
+  login-limit: 15
+  bootstrap-identifier: admin-foundation-test
+  bootstrap-password: fictional-test-administrator-password

@@ -1,0 +1,36 @@
+name: Verify
+on: [push, pull_request]
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: fictional-ci-only
+          MYSQL_DATABASE: medical_identity_test
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping -pfictional-ci-only" --health-interval=5s --health-timeout=5s --health-retries=30
+      redis:
+        image: redis:7.4
+        ports: ['6379:6379']
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-retries=15
+    env:
+      MEDICAL_TEST_DB_URL: jdbc:mysql://127.0.0.1:3306/medical_identity_test?allowPublicKeyRetrieval=true&useSSL=false
+      MEDICAL_TEST_DB_USER: root
+      MEDICAL_TEST_DB_PASSWORD: fictional-ci-only
+      MEDICAL_TEST_REDIS_PORT: '6379'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm --prefix frontend ci
+      - run: node frontend/node_modules/@playwright/test/cli.js install --with-deps chromium
+      - run: pwsh -NoProfile -File scripts/verify.ps1

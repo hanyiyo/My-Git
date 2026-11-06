@@ -1,0 +1,33 @@
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: never
+spring:
+  datasource:
+    url: ${MEDICAL_DB_URL:jdbc:mysql://127.0.0.1:3306/medical_mvp?connectionTimeZone=Asia/Shanghai}
+    username: ${MEDICAL_DB_USER:medical}
+    password: ${MEDICAL_DB_PASSWORD:}
+  data:
+    redis:
+      host: ${MEDICAL_REDIS_HOST:127.0.0.1}
+      port: ${MEDICAL_REDIS_PORT:6379}
+      password: ${MEDICAL_REDIS_PASSWORD:}
+      timeout: 1s
+      connect-timeout: 1s
+  flyway:
+    enabled: true
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+medical:
+  jwt-secret: ${MEDICAL_JWT_SECRET:}
+  captcha-secret: ${MEDICAL_CAPTCHA_SECRET:}
+  cookie-secure: ${MEDICAL_COOKIE_SECURE:true}
+  captcha-ttl: 2m
+  access-ttl: 15m
+  refresh-ttl: 7d
+  rate-window: 1m
+  captcha-limit: 20
+  login-limit: 10
+  bootstrap-identifier: ${MEDICAL_BOOTSTRAP_IDENTIFIER:}
+  bootstrap-password: ${MEDICAL_BOOTSTRAP_PASSWORD:}
