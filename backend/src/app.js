@@ -80,6 +80,7 @@ export function createApp(options = {}) {
     departments: new Map(), doctors: new Map(), schedules: new Map()
   };
   const booking = { appointments: new Map(), payments: new Map(), refunds: new Map(), guards: new Map(), idempotency: new Map() };
+  const reception = { entries: new Map(), sequence: 0 };
   const catalogId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   const scheduleWindow = (halfDay) => halfDay === "AM" ? { start: "08:00", end: "12:00" } : { start: "14:00", end: "18:00" };
   const isAdmin = (role) => role === "admin";
@@ -91,6 +92,9 @@ export function createApp(options = {}) {
   const releaseBooking = (appointment) => {
     if (!appointment.released) { const schedule = catalog.schedules.get(appointment.scheduleId); if (schedule) schedule.remaining += 1; booking.guards.delete(appointment.guardKey); appointment.released = true; }
   };
+  const sessionWindow = (schedule) => ({ start: new Date(`${schedule.date}T${schedule.start}:00+08:00`).getTime(), end: new Date(`${schedule.date}T${schedule.end}:00+08:00`).getTime() });
+  const checkinWindow = (schedule) => { const window = sessionWindow(schedule); return { start: window.start - 30 * 60_000, end: window.end - 15 * 60_000 }; };
+  const doctorForAccount = (accountId) => [...catalog.doctors.values()].find((item) => item.accountId === accountId);
   const app = http.createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/api/v1/health") return json(res, 200, { status: "ok", redis: store.available ? "up" : "down" });
@@ -168,6 +172,33 @@ export function createApp(options = {}) {
         appointment.status = "CANCELLED"; releaseBooking(appointment); let refund = null; if (booking.payments.has(appointment.id)) { refund = { id: catalogId("refund"), appointmentId: appointment.id, amount: appointment.amount, status: "REFUND_SUCCEEDED", reason: "PATIENT_CANCELLED" }; booking.refunds.set(appointment.id, refund); } return json(res, 200, { appointment, refund });
       }
       if (req.method === "GET" && route === "/api/v1/bookings") return json(res, 200, { appointments: [...booking.appointments.values()].filter((item) => item.patientId === account.id).map((item) => ({ ...item, payment: booking.payments.get(item.id) ?? null, refund: booking.refunds.get(item.id) ?? null })) });
+      const checkinRoute = route.match(/^\/api\/v1\/reception\/check-in\/([^/]+)$/);
+      if (req.method === "POST" && checkinRoute) {
+        const appointment = booking.appointments.get(checkinRoute[1]); if (!appointment || appointment.patientId !== account.id) return json(res, 404, errorBody("NOT_FOUND", "预约不存在")); const schedule = catalog.schedules.get(appointment.scheduleId); const now = clock(); const window = checkinWindow(schedule);
+        if (appointment.status !== "CONFIRMED") return json(res, 409, errorBody("INVALID_APPOINTMENT", "预约当前不可签到")); if (now < window.start || now >= window.end) return json(res, 409, errorBody("CHECKIN_CLOSED", "当前不在签到窗口"));
+        const existing = [...reception.entries.values()].find((item) => item.appointmentId === appointment.id); if (existing) return json(res, 200, { entry: existing });
+        const entry = { id: catalogId("queue"), appointmentId: appointment.id, scheduleId: schedule.id, patientId: account.id, group: appointment.source === "WALK_IN" ? 2 : 1, enqueueSeq: ++reception.sequence, status: "WAITING", restoreCount: 0, checkedInAt: now }; reception.entries.set(entry.id, entry); appointment.queueStatus = "WAITING"; return json(res, 201, { entry });
+      }
+      if (req.method === "POST" && route === "/api/v1/reception/walk-in") {
+        if (account.role !== "patient") return json(res, 403, errorBody("FORBIDDEN", "仅患者可现场挂号")); const schedule = catalog.schedules.get(String(data.scheduleId ?? "")); const now = clock(); const window = schedule && sessionWindow(schedule); const cutoff = schedule && checkinWindow(schedule).end;
+        const localDate = new Date(now + 8 * 60 * 60_000).toISOString().slice(0, 10); if (!schedule?.active || schedule.mode !== "OFFLINE" || schedule.date !== localDate || now < window.start || now >= cutoff) return json(res, 409, errorBody("WALK_IN_CLOSED", "现场挂号当前不可用"));
+        const guardKey = `${account.id}:${schedule.date}:${schedule.halfDay}`; if (booking.guards.has(guardKey)) return json(res, 409, errorBody("HALF_DAY_CONFLICT", "同一日期半天已有有效登记")); if (schedule.remaining < 1) return json(res, 409, errorBody("SLOT_UNAVAILABLE", "号源不可用"));
+        const appointment = { id: catalogId("appointment"), patientId: account.id, scheduleId: schedule.id, date: schedule.date, halfDay: schedule.halfDay, mode: schedule.mode, amount: schedule.fee, status: "CONFIRMED", source: "WALK_IN", createdAt: now, released: false, guardKey }; schedule.remaining -= 1; booking.appointments.set(appointment.id, appointment); booking.guards.set(guardKey, appointment); const payment = { id: catalogId("payment"), appointmentId: appointment.id, amount: appointment.amount, status: "SUCCEEDED", createdAt: now }; booking.payments.set(appointment.id, payment); return json(res, 201, { appointment, payment });
+      }
+      if (req.method === "GET" && route === "/api/v1/reception/queue") {
+        const scheduleId = url.searchParams.get("scheduleId"); const entries = [...reception.entries.values()].filter((item) => (!scheduleId || item.scheduleId === scheduleId) && ["WAITING", "CALLED", "IN_SERVICE"].includes(item.status)).sort((a, b) => a.group - b.group || a.enqueueSeq - b.enqueueSeq); return json(res, 200, { entries });
+      }
+      if (req.method === "POST" && route === "/api/v1/reception/call-next") {
+        if (!isDoctor(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅医生可叫号")); const doctor = doctorForAccount(account.id); const schedule = catalog.schedules.get(String(data.scheduleId ?? "")); if (!doctor || !schedule || schedule.doctorId !== doctor.id) return json(res, 403, errorBody("FORBIDDEN", "无权操作该排班")); if ([...reception.entries.values()].some((item) => item.scheduleId === schedule.id && item.status === "IN_SERVICE")) return json(res, 409, errorBody("ENCOUNTER_ACTIVE", "已有患者接诊中")); const entry = [...reception.entries.values()].filter((item) => item.scheduleId === schedule.id && item.status === "WAITING").sort((a, b) => a.group - b.group || a.enqueueSeq - b.enqueueSeq)[0]; if (!entry) return json(res, 404, errorBody("QUEUE_EMPTY", "候诊队列为空")); entry.status = "CALLED"; entry.calledAt = clock(); return json(res, 200, { entry });
+      }
+      const queueAction = route.match(/^\/api\/v1\/reception\/([^/]+)\/(start|miss|restore)$/);
+      if (req.method === "POST" && queueAction) {
+        const entry = reception.entries.get(queueAction[1]); if (!entry) return json(res, 404, errorBody("NOT_FOUND", "候诊记录不存在")); const appointment = booking.appointments.get(entry.appointmentId); const schedule = catalog.schedules.get(entry.scheduleId); const doctor = doctorForAccount(account.id); if (!doctor || schedule.doctorId !== doctor.id) return json(res, 403, errorBody("FORBIDDEN", "无权操作该候诊记录"));
+        if (queueAction[2] === "start" && entry.status === "CALLED") { entry.status = "IN_SERVICE"; entry.startedAt = clock(); return json(res, 200, { entry }); }
+        if (queueAction[2] === "miss" && entry.status === "CALLED") { entry.status = "MISSED"; entry.missedAt = clock(); return json(res, 200, { entry }); }
+        if (queueAction[2] === "restore") { const now = clock(); if (entry.status !== "MISSED" || entry.restoreCount > 0) return json(res, 409, errorBody("RESTORE_UNAVAILABLE", "该预约不能再次恢复排队")); if (now >= sessionWindow(schedule).end) return json(res, 409, errorBody("SESSION_ENDED", "本次门诊时段已经结束，无法恢复排队")); entry.status = "WAITING"; entry.group = 3; entry.restoreCount = 1; entry.enqueueSeq = ++reception.sequence; entry.restoredAt = now; return json(res, 200, { entry }); }
+        return json(res, 409, errorBody("INVALID_QUEUE_STATE", "候诊状态不允许该操作"));
+      }
       if (req.method === "POST" && route === "/api/v1/admin/hospital") {
         if (!isAdmin(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅管理员可维护医院信息"));
         catalog.hospital = { ...catalog.hospital, name: String(data.name ?? catalog.hospital.name).trim(), address: String(data.address ?? "").trim(), process: String(data.process ?? "").trim() };
@@ -225,7 +256,7 @@ export function createApp(options = {}) {
       console.error(error); return json(res, 500, errorBody("INTERNAL_ERROR", "服务暂时不可用"));
     }
   });
-  app.store = store; app.accounts = accounts; app.catalog = catalog; app.booking = booking; return app;
+  app.store = store; app.accounts = accounts; app.catalog = catalog; app.booking = booking; app.reception = reception; return app;
 }
 
 function serveFrontend(res, relative) {
