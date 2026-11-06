@@ -6,9 +6,9 @@
 
 | 验收规则 | 公共 seam / 用例 | 结果与限制 |
 | --- | --- | --- |
-| 患者选择线上/线下、医生、日期、上午/下午排班后登记 | `BookingHttpTest.patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot`：HTTP 发布排班、创建登记、重新查询订单与可用号源 | 首个 ONLINE/AM/ADVANCE 切片通过（2026-11-06）；其他组合、支付和前端未验证 |
+| 患者选择线上/线下、医生、日期、上午/下午排班后登记 | `BookingHttpTest.patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot`：HTTP 发布排班、创建登记、重新查询订单与可用号源；现场登记边界用例 | HTTP 登记和快照已通过；支付和前端未实现 |
 | 同一患者同日期半天跨医生/模式仅一条有效登记；号源不超卖 | `sixPatientsCompetingForOneSlotCreateExactlyOneHold`、`onePatientCompetingAcrossDoctorsAndModesHoldsOnlyOneHalfDayRegistration`；真实 HTTP 并发、患者半天 guard | 已通过六人竞争一个号源、同一患者跨六位医生/两种模式仅一条登记成功；其余409 |
-| 截止=min(提交+10分钟,结束−15分钟)，提前预约开诊截止，现场挂号签到截止 | 可控 Clock + HTTP 精确边界、锁等待边界 | 首个切片只覆盖提前预约10分钟；其余待验证 |
+| 截止=min(提交+10分钟,结束−15分钟)，提前预约开诊截止，现场挂号签到截止 | `offlineWalkInUsesCurrentSessionAndEarlierOfTenMinutesOrCheckInCutoff`、精确到期复用用例；可控 Clock + HTTP | 已验证10分钟、17:35/17:40均在17:45截止、开诊起现场可登记、线上/未来/已过时段拒绝、开诊停止提前预约、签到截止右端排除；锁等待专项仍需最终审查确认 |
 | 模拟支付幂等、金额快照、预约凭证 | HTTP 重复支付、改变费用不影响订单 | 待实现/验证 |
 | 取消/停诊/迟到付款退款可追踪、幂等，失败可恢复 | HTTP 取消、停诊应用接口、支付适配器失败/重启；旧订单付款不释放新订单占用 | 待实现/验证 |
 | 患者订单 API/UI、权限及手机兼容 | 订单归属/RBAC HTTP；真实浏览器完整路径和手机视口 | 待实现/验证 |
@@ -28,3 +28,7 @@
 - 精确截止测试在到期时申请仍返回409，修复后到期前不可占、到期即可复用；不依赖后台扫描。号源租期与订单共用同一截止快照，历史订单读取为 `EXPIRED`，按订单标识释放患者半天 guard，不影响替代订单占用。
 - 六条预约 HTTP 用例通过，包含上述并发竞争及本人订单、外人404、角色403和匿名401。
 - 父工作单元 `npm test` 完整回归退出0：六项文档/架构检查、Vue 类型检查/构建、26条 Java 用例（0失败/错误/跳过），包含原有8条真实浏览器流程。此切片尚不包括现场截止、支付、退款或订单 UI，#4 保持未验收。
+
+## 现场登记截止切片
+
+2026-11-07（医院时区 Asia/Shanghai），新用例先以开诊时现场登记期望201、实际400复现未支持的来源；实现后仅当天线下本门诊时段可现场登记，锁后再次检查时间并共用截止快照。测试准备复用管理员会话以免反复登录触发限流，生产阈值不变。完整 `npm test` 退出0：27条 Java 测试（0失败/错误/跳过）、8条浏览器流程、文档检查和 Vue 类型检查/构建均通过。支付、退款、订单 UI 与远程验收仍待完成。

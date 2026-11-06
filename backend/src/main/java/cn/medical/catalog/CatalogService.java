@@ -35,7 +35,8 @@ public class CatalogService {
     }
 
     @Transactional
-    public SlotReservation reserveAdvanceSlot(String scheduleId, String appointmentId) {
+    public SlotReservation reserveSlot(String scheduleId, String appointmentId, String source) {
+        if (!Set.of("ADVANCE", "WALK_IN").contains(source)) throw new ApiFailure(400, "INVALID_INPUT", "登记来源无效");
         var initial = catalog.schedule(scheduleId);
         if (initial == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
         // Follow publication's doctor -> department -> schedule lock order before checking eligibility.
@@ -46,15 +47,19 @@ public class CatalogService {
             || !schedule.state().equals("PUBLISHED")
             || catalog.assignments().stream().noneMatch(value -> value.doctorId().equals(doctor.id()) && value.departmentId().equals(schedule.departmentId())))
             throw new ApiFailure(409, "SCHEDULE_UNAVAILABLE", "排班当前不可预约");
-        if (clock.millis() >= schedule.startsAt()) throw new ApiFailure(409, "REGISTRATION_CLOSED", "门诊已经开始，提前预约已截止");
+        if (!registrationOpen(schedule, source, clock.millis())) throw new ApiFailure(409, "REGISTRATION_CLOSED", "当前时间或服务方式不允许此类登记");
         var slot = catalog.lockAvailableSlot(scheduleId, clock.millis());
         long now = clock.millis();
-        if (now >= schedule.startsAt()) throw new ApiFailure(409, "REGISTRATION_CLOSED", "提前预约已截止");
+        if (!registrationOpen(schedule, source, now)) throw new ApiFailure(409, "REGISTRATION_CLOSED", "当前时间或服务方式不允许此类登记");
         long expiry = Math.min(now + Duration.ofMinutes(10).toMillis(), schedule.endsAt() - Duration.ofMinutes(15).toMillis());
         if (slot == null || catalog.reserveSlot(slot.id(), appointmentId, now, expiry) != 1)
             throw new ApiFailure(409, "NO_SLOTS", "号源已用完");
         return new SlotReservation(slot.id(), schedule.id(), schedule.doctorId(), schedule.departmentId(), schedule.clinicDate(),
             schedule.session(), schedule.serviceMode(), schedule.startsAt(), schedule.endsAt(), schedule.feeMinor(), now, expiry);
+    }
+    private boolean registrationOpen(CatalogMapper.Schedule schedule, String source, long now) {
+        return source.equals("ADVANCE") ? now < schedule.startsAt()
+            : schedule.serviceMode().equals("OFFLINE") && now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
     }
     public List<CatalogMapper.Department> departments(boolean management) {
         return catalog.departments().stream().filter(department -> management || department.active()).toList();

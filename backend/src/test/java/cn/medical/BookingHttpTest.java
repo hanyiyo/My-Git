@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Import({TestAnswers.class, BookingHttpTest.TimeControl.class})
 class BookingHttpTest extends HttpFixture {
     @LocalServerPort int port;
+    Browser administrator;
     @Autowired AdjustableClock clock;
     @BeforeEach @AfterEach void resetClock() { clock.now = Instant.now(); }
     static class AdjustableClock extends Clock {
@@ -43,9 +44,15 @@ class BookingHttpTest extends HttpFixture {
         return browser;
     }
     record Published(String id, String doctorId, long startsAt, long endsAt) {}
+    Browser administrator() throws Exception {
+        if (administrator == null) {
+            administrator = new Browser(port);
+            assertThat(administrator.login("admin-foundation-test", "fictional-test-administrator-password").status()).isEqualTo(200);
+        }
+        return administrator;
+    }
     Published published(String mode, String session, int capacity) throws Exception {
-        var admin = new Browser(port);
-        assertThat(admin.login("admin-foundation-test", "fictional-test-administrator-password").status()).isEqualTo(200);
+        var admin = administrator();
         var department = admin.call("POST", "/api/v1/admin/catalog/departments",
             Map.of("name", identifier(), "description", "虚构门诊", "active", true)).body().path("id").asText();
         var doctor = new Browser(port);
@@ -166,6 +173,43 @@ class BookingHttpTest extends HttpFixture {
         assertThat(queriedOld.body().path("state").asText()).isEqualTo("EXPIRED");
         assertThat(patientB.call("GET", "/api/v1/patient/appointments/" + replacement.body().path("id").asText(), null).body().path("state").asText()).isEqualTo("PENDING_PAYMENT");
         assertThat(patientA.call("POST", "/api/v1/patient/appointments", command(first, identifier())).status()).isEqualTo(409);
+    }
+    @Test void offlineWalkInUsesCurrentSessionAndEarlierOfTenMinutesOrCheckInCutoff() throws Exception {
+        var offline = published("OFFLINE", "PM", 3); var online = published("ONLINE", "PM", 1);
+        var atOpening = patient(); var at1735 = patient(); var at1740 = patient(); var rejected = patient();
+        clock.now = Instant.ofEpochMilli(offline.startsAt());
+        var advance = rejected.call("POST", "/api/v1/patient/appointments", command(offline, identifier()));
+        assertThat(advance.status()).isEqualTo(409);
+        assertThat(advance.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_CLOSED");
+        var opening = atOpening.call("POST", "/api/v1/patient/appointments",
+            Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier()));
+        assertThat(opening.status()).isEqualTo(201);
+        assertThat(opening.body().path("source").asText()).isEqualTo("WALK_IN");
+        assertThat(opening.body().path("holdExpiresAt").asLong()).isEqualTo(offline.startsAt() + 600_000);
+        long cutoff = offline.endsAt() - 900_000; // PM ends18:00, first check-in stops17:45.
+        clock.now = Instant.ofEpochMilli(cutoff - 600_000); //17:35 ->17:45 (ten minutes).
+        var tenMinutes = at1735.call("POST", "/api/v1/patient/appointments",
+            Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier()));
+        assertThat(tenMinutes.status()).isEqualTo(201);
+        assertThat(tenMinutes.body().path("holdExpiresAt").asLong()).isEqualTo(cutoff);
+        clock.now = Instant.ofEpochMilli(cutoff - 300_000); //17:40 ->17:45 (five minutes).
+        var fiveMinutes = at1740.call("POST", "/api/v1/patient/appointments",
+            Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier()));
+        assertThat(fiveMinutes.status()).isEqualTo(201);
+        assertThat(fiveMinutes.body().path("holdExpiresAt").asLong()).isEqualTo(cutoff);
+        assertThat(rejected.call("POST", "/api/v1/patient/appointments",
+            Map.of("scheduleId", online.id(), "source", "WALK_IN", "idempotencyKey", identifier())).status()).isEqualTo(409);
+        clock.now = Instant.ofEpochMilli(cutoff);
+        var closed = rejected.call("POST", "/api/v1/patient/appointments",
+            Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier()));
+        assertThat(closed.status()).isEqualTo(409);
+        assertThat(closed.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_CLOSED");
+        clock.now = Instant.ofEpochMilli(offline.startsAt() - 1);
+        assertThat(rejected.call("POST", "/api/v1/patient/appointments",
+            Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier())).status()).isEqualTo(409);
+        clock.now = Instant.ofEpochMilli(offline.endsAt() + 1);
+        assertThat(rejected.call("POST", "/api/v1/patient/appointments",
+            Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier())).status()).isEqualTo(409);
     }
 
     @Test void patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot() throws Exception {

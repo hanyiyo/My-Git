@@ -29,13 +29,13 @@ public class BookingService {
                 throw new ApiFailure(409, "IDEMPOTENCY_CONFLICT", "同一提交标识不能用于不同登记");
             return expireIfDue(original);
         }
-        if (!"ADVANCE".equals(source)) throw new ApiFailure(400, "INVALID_INPUT", "登记来源无效");
+        if (!java.util.Set.of("ADVANCE", "WALK_IN").contains(source)) throw new ApiFailure(400, "INVALID_INPUT", "登记来源无效");
         if (occupied != null) {
             var previous = expireIfDue(booking.own(occupied, patient));
             if (!previous.state().equals("EXPIRED")) throw new ApiFailure(409, "REGISTRATION_CONFLICT", "该半天已有有效登记");
         }
         String id = UUID.randomUUID().toString();
-        var slot = catalog.reserveAdvanceSlot(schedule, id);
+        var slot = catalog.reserveSlot(schedule, id, source);
         var appointment = new BookingMapper.Appointment(id, patient, schedule, slot.slotId(), slot.doctorId(), slot.departmentId(),
             slot.clinicDate(), slot.session(), slot.serviceMode(), source, slot.startsAt(), slot.endsAt(), slot.feeMinor(), slot.createdAt(), slot.holdExpiresAt(), "PENDING_PAYMENT", key);
         try { booking.insert(appointment); booking.occupyGuard(appointment); }
