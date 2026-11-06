@@ -1,0 +1,1 @@
+{"name":"medical-auth-foundation","private":true,"type":"module","scripts":{"test":"node --test","start":"node backend/src/server.js"}}
