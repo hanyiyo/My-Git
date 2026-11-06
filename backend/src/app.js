@@ -82,6 +82,9 @@ export function createApp(options = {}) {
   const booking = { appointments: new Map(), payments: new Map(), refunds: new Map(), guards: new Map(), idempotency: new Map() };
   const reception = { entries: new Map(), sequence: 0 };
   const clinical = { materials: new Map(), messages: new Map(), results: new Map(), corrections: new Map(), attachments: new Map(), grants: new Map() };
+  const ai = { facts: new Map(), consents: new Map(), tasks: new Map(), results: new Map(), calls: [] };
+  const governance = { changes: new Map(), audits: [] };
+  const delivery = { events: [], notifications: [], cursor: 0, tasks: new Map() };
   const catalogId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   const scheduleWindow = (halfDay) => halfDay === "AM" ? { start: "08:00", end: "12:00" } : { start: "14:00", end: "18:00" };
   const isAdmin = (role) => role === "admin";
@@ -202,6 +205,13 @@ export function createApp(options = {}) {
         if (req.method === "GET" && !clinicalRoute[2]) { if (!(account.id === appointment.patientId || isAssignedDoctor)) return json(res, 403, errorBody("FORBIDDEN", "无权访问问诊")); return json(res, 200, { appointment, materials: clinical.materials.get(appointment.id) ?? null, messages: clinical.messages.get(appointment.id) ?? [], result: clinical.results.get(appointment.id) ?? null, corrections: clinical.corrections.get(appointment.id) ?? [] }); }
       }
       if (req.method === "GET" && route.startsWith("/api/v1/clinical/attachments/")) { const attachment = clinical.attachments.get(route.split("/").pop()); if (!attachment) return json(res, 404, errorBody("NOT_FOUND", "附件不存在")); const appointment = booking.appointments.get(attachment.appointmentId); if (account.id !== appointment.patientId && !(account.role === "doctor" && doctorForAccount(account.id)?.id === catalog.schedules.get(appointment.scheduleId)?.doctorId)) return json(res, 403, errorBody("FORBIDDEN", "无权下载附件")); return json(res, 200, { attachment: { ...attachment, downloadUrl: `/api/v1/clinical/attachments/${attachment.id}/content` } }); }
+      if (req.method === "POST" && route === "/api/v1/ai/facts") { if (account.role !== "admin") return json(res, 403, errorBody("FORBIDDEN", "仅管理员可维护咨询事实")); const fact = { id: catalogId("fact"), topic: String(data.topic ?? ""), content: String(data.content ?? ""), active: true }; ai.facts.set(fact.id, fact); return json(res, 201, { fact }); }
+      if (req.method === "POST" && route === "/api/v1/ai/consult") { const text = String(data.text ?? ""); const personal = /症状|疼|痛|报告|化验|发烧|咳嗽/.test(text); if (personal && data.consent !== true) return json(res, 403, errorBody("CONSENT_REQUIRED", "预问诊外发前需要授权")); const facts = [...ai.facts.values()].filter((item) => item.active).map((item) => item.content); const result = { id: catalogId("ai-result"), mode: personal ? "PRECONSULTATION" : "BUSINESS", status: "SUCCEEDED", provider: options.aiProvider ?? "local-mock", text: personal ? "AI 辅助摘要：请由医生进一步判断。" : (facts.join(" ") || "暂无维护的医院事实"), createdAt: clock() }; ai.results.set(result.id, result); ai.calls.push({ id: catalogId("ai-call"), resultId: result.id, authorized: !personal || data.consent === true, provider: result.provider, createdAt: clock() }); return json(res, 200, { result, disclaimer: "AI 仅供辅助参考，不能诊断或开处方" }); }
+      if (req.method === "POST" && route === "/api/v1/governance/reviews") { if (!(["admin", "doctor"].includes(account.role))) return json(res, 403, errorBody("FORBIDDEN", "无审核权限")); const review = { id: catalogId("review"), subjectId: String(data.subjectId ?? ""), reason: String(data.reason ?? "").trim(), status: "APPROVED", reviewerId: account.id, createdAt: clock() }; if (!review.reason) return json(res, 400, errorBody("REASON_REQUIRED", "审核理由不能为空")); governance.changes.set(review.id, review); governance.audits.push({ action: "REVIEW", actorId: account.id, objectId: review.subjectId, reason: review.reason, at: clock() }); return json(res, 201, { review }); }
+      if (req.method === "POST" && route === "/api/v1/governance/restrict") { if (account.role !== "admin") return json(res, 403, errorBody("FORBIDDEN", "仅管理员可限制展示")); const item = { id: catalogId("restriction"), subjectId: String(data.subjectId ?? ""), restricted: true, reason: String(data.reason ?? ""), createdAt: clock() }; governance.changes.set(item.id, item); governance.audits.push({ action: "RESTRICT", actorId: account.id, objectId: item.subjectId, reason: item.reason, at: clock() }); return json(res, 200, { restriction: item }); }
+      if (req.method === "GET" && route === "/api/v1/events") { const after = Number(url.searchParams.get("after") ?? 0); return json(res, 200, { cursor: delivery.cursor, events: delivery.events.filter((event) => event.cursor > after) }); }
+      if (req.method === "POST" && route === "/api/v1/events") { const event = { cursor: ++delivery.cursor, id: catalogId("event"), type: String(data.type ?? "NOTICE"), payload: data.payload ?? {}, createdAt: clock() }; delivery.events.push(event); delivery.notifications.push({ ...event, delivered: false }); return json(res, 201, { event }); }
+      if (req.method === "GET" && route === "/api/v1/notifications") return json(res, 200, { notifications: delivery.notifications.filter((item) => item.payload?.accountId === account.id || !item.payload?.accountId) });
       if (req.method === "GET" && route === "/api/v1/reception/queue") {
         const scheduleId = url.searchParams.get("scheduleId"); const entries = [...reception.entries.values()].filter((item) => (!scheduleId || item.scheduleId === scheduleId) && ["WAITING", "CALLED", "IN_SERVICE"].includes(item.status)).sort((a, b) => a.group - b.group || a.enqueueSeq - b.enqueueSeq); return json(res, 200, { entries });
       }
@@ -273,7 +283,7 @@ export function createApp(options = {}) {
       console.error(error); return json(res, 500, errorBody("INTERNAL_ERROR", "服务暂时不可用"));
     }
   });
-  app.store = store; app.accounts = accounts; app.catalog = catalog; app.booking = booking; app.reception = reception; app.clinical = clinical; return app;
+  app.store = store; app.accounts = accounts; app.catalog = catalog; app.booking = booking; app.reception = reception; app.clinical = clinical; app.ai = ai; app.governance = governance; app.delivery = delivery; return app;
 }
 
 function serveFrontend(res, relative) {
