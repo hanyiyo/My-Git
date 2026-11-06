@@ -79,10 +79,18 @@ export function createApp(options = {}) {
     hospital: { id: "hospital-1", name: "示范医院", address: "", process: "" },
     departments: new Map(), doctors: new Map(), schedules: new Map()
   };
+  const booking = { appointments: new Map(), payments: new Map(), refunds: new Map(), guards: new Map(), idempotency: new Map() };
   const catalogId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   const scheduleWindow = (halfDay) => halfDay === "AM" ? { start: "08:00", end: "12:00" } : { start: "14:00", end: "18:00" };
   const isAdmin = (role) => role === "admin";
   const isDoctor = (role) => role === "doctor";
+  const cutoffFor = (schedule) => {
+    const endHour = schedule.halfDay === "AM" ? 12 : 18;
+    return new Date(`${schedule.date}T${String(endHour - 1).padStart(2, "0")}:45:00+08:00`).getTime();
+  };
+  const releaseBooking = (appointment) => {
+    if (!appointment.released) { const schedule = catalog.schedules.get(appointment.scheduleId); if (schedule) schedule.remaining += 1; booking.guards.delete(appointment.guardKey); appointment.released = true; }
+  };
   const app = http.createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/api/v1/health") return json(res, 200, { status: "ok", redis: store.available ? "up" : "down" });
@@ -132,6 +140,34 @@ export function createApp(options = {}) {
       const access = parseBearer(req); const session = access ? accessSessions.get(access) : null;
       if (!session || session.expiresAt <= clock()) return json(res, 401, errorBody("UNAUTHENTICATED", "请先登录"));
       const account = [...accounts.values()].find((item) => item.id === session.accountId); if (!account) return json(res, 401, errorBody("UNAUTHENTICATED", "请先登录"));
+      const holdRoute = route.match(/^\/api\/v1\/bookings\/holds$/);
+      if (req.method === "POST" && holdRoute) {
+        if (account.role !== "patient") return json(res, 403, errorBody("FORBIDDEN", "仅患者可登记"));
+        const idem = String(req.headers["idempotency-key"] ?? data.idempotencyKey ?? ""); if (idem && booking.idempotency.has(`${account.id}:${idem}`)) return json(res, 200, booking.idempotency.get(`${account.id}:${idem}`));
+        const schedule = catalog.schedules.get(String(data.scheduleId ?? "")); const now = clock();
+        if (!schedule?.active || schedule.remaining < 1) return json(res, 409, errorBody("SLOT_UNAVAILABLE", "号源不可用"));
+        if (now >= new Date(`${schedule.date}T${schedule.start}:00+08:00`).getTime()) return json(res, 409, errorBody("ADVANCE_CLOSED", "提前预约已截止"));
+        const guardKey = `${account.id}:${schedule.date}:${schedule.halfDay}`; const existing = booking.guards.get(guardKey); if (existing && existing.holdExpiresAt > now && !["CANCELLED", "EXPIRED"].includes(existing.status)) return json(res, 409, errorBody("HALF_DAY_CONFLICT", "同一日期半天已有有效登记"));
+        const holdExpiresAt = Math.min(now + 10 * 60_000, cutoffFor(schedule)); if (holdExpiresAt <= now) return json(res, 409, errorBody("CHECKIN_CLOSED", "签到窗口已结束"));
+        const appointment = { id: catalogId("appointment"), patientId: account.id, scheduleId: schedule.id, date: schedule.date, halfDay: schedule.halfDay, mode: schedule.mode, amount: schedule.fee, status: "PENDING_PAYMENT", holdExpiresAt, guardKey, released: false, source: "ADVANCE", createdAt: now };
+        schedule.remaining -= 1; booking.appointments.set(appointment.id, appointment); booking.guards.set(guardKey, appointment); const result = { appointment, paymentDeadline: new Date(holdExpiresAt).toISOString() }; if (idem) booking.idempotency.set(`${account.id}:${idem}`, result); return json(res, 201, result);
+      }
+      const payRoute = route.match(/^\/api\/v1\/bookings\/([^/]+)\/pay$/);
+      if (req.method === "POST" && payRoute) {
+        if (account.role !== "patient") return json(res, 403, errorBody("FORBIDDEN", "仅患者可支付")); const appointment = booking.appointments.get(payRoute[1]); if (!appointment || appointment.patientId !== account.id) return json(res, 404, errorBody("NOT_FOUND", "登记不存在"));
+        const idem = String(req.headers["idempotency-key"] ?? data.idempotencyKey ?? ""); if (idem && booking.idempotency.has(`${account.id}:${idem}`)) return json(res, 200, booking.idempotency.get(`${account.id}:${idem}`));
+        const existingPayment = booking.payments.get(appointment.id); if (existingPayment) return json(res, 200, { appointment, payment: existingPayment, refund: booking.refunds.get(appointment.id) ?? null });
+        const payment = { id: catalogId("payment"), appointmentId: appointment.id, amount: appointment.amount, status: "SUCCEEDED", createdAt: clock() }; booking.payments.set(appointment.id, payment);
+        let refund = null; if (clock() > appointment.holdExpiresAt || appointment.status !== "PENDING_PAYMENT") { appointment.status = "EXPIRED"; releaseBooking(appointment); refund = { id: catalogId("refund"), appointmentId: appointment.id, amount: payment.amount, status: "REFUND_SUCCEEDED", reason: "LATE_PAYMENT" }; booking.refunds.set(appointment.id, refund); } else appointment.status = "CONFIRMED";
+        const result = { appointment, payment, refund }; if (idem) booking.idempotency.set(`${account.id}:${idem}`, result); return json(res, 200, result);
+      }
+      const cancelRoute = route.match(/^\/api\/v1\/bookings\/([^/]+)\/cancel$/);
+      if (req.method === "POST" && cancelRoute) {
+        const appointment = booking.appointments.get(cancelRoute[1]); if (!appointment || appointment.patientId !== account.id) return json(res, 404, errorBody("NOT_FOUND", "登记不存在"));
+        if (["CANCELLED", "EXPIRED"].includes(appointment.status)) return json(res, 200, { appointment, refund: booking.refunds.get(appointment.id) ?? null });
+        appointment.status = "CANCELLED"; releaseBooking(appointment); let refund = null; if (booking.payments.has(appointment.id)) { refund = { id: catalogId("refund"), appointmentId: appointment.id, amount: appointment.amount, status: "REFUND_SUCCEEDED", reason: "PATIENT_CANCELLED" }; booking.refunds.set(appointment.id, refund); } return json(res, 200, { appointment, refund });
+      }
+      if (req.method === "GET" && route === "/api/v1/bookings") return json(res, 200, { appointments: [...booking.appointments.values()].filter((item) => item.patientId === account.id).map((item) => ({ ...item, payment: booking.payments.get(item.id) ?? null, refund: booking.refunds.get(item.id) ?? null })) });
       if (req.method === "POST" && route === "/api/v1/admin/hospital") {
         if (!isAdmin(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅管理员可维护医院信息"));
         catalog.hospital = { ...catalog.hospital, name: String(data.name ?? catalog.hospital.name).trim(), address: String(data.address ?? "").trim(), process: String(data.process ?? "").trim() };
@@ -189,7 +225,7 @@ export function createApp(options = {}) {
       console.error(error); return json(res, 500, errorBody("INTERNAL_ERROR", "服务暂时不可用"));
     }
   });
-  app.store = store; app.accounts = accounts; app.catalog = catalog; return app;
+  app.store = store; app.accounts = accounts; app.catalog = catalog; app.booking = booking; return app;
 }
 
 function serveFrontend(res, relative) {
