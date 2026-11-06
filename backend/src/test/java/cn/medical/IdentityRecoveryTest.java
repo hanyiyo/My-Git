@@ -52,4 +52,28 @@ class IdentityRecoveryTest extends HttpFixture {
             assertThat(browser.login(name, PASSWORD).status()).isEqualTo(200);
         }
     }
+
+    @Test void hospitalDoctorAndPublishedSlotsSurviveApplicationRestart() throws Exception {
+        Browser original; String doctorId; String scheduleId;
+        try (var first = start("--spring.data.redis.database=5", "--medical.captcha-ttl=2m")) {
+            original = new Browser(first.getWebServer().getPort());
+            assertThat(original.login("admin-foundation-test", "fictional-test-administrator-password").status()).isEqualTo(200);
+            assertThat(original.call("PUT", "/api/v1/admin/catalog/hospital", Map.of("name", "虚构重启测试医院", "address", "虚构重启路", "description", "重启持久化验证")).status()).isEqualTo(200);
+            String department = original.call("POST", "/api/v1/admin/catalog/departments", Map.of("name", identifier(), "description", "重启验证", "active", true)).body().path("id").asText();
+            doctorId = original.call("POST", "/api/v1/admin/accounts", Map.of("identifier", identifier(), "password", PASSWORD, "role", "DOCTOR")).body().path("account").path("id").asText();
+            assertThat(original.call("PUT", "/api/v1/admin/catalog/doctors/" + doctorId, Map.of("displayName", "虚构恢复医生", "title", "主治医师", "biography", "", "departmentId", department, "credentialStatus", "CERTIFIED")).status()).isEqualTo(200);
+            var published = original.call("POST", "/api/v1/admin/catalog/schedules", Map.of("doctorId", doctorId, "departmentId", department, "clinicDate", java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).plusDays(3).toString(), "session", "PM", "serviceMode", "OFFLINE", "capacity", 2, "feeMinor", 750));
+            assertThat(published.status()).isEqualTo(201); scheduleId = published.body().path("id").asText();
+        }
+        try (var restarted = start("--spring.data.redis.database=5", "--medical.captcha-ttl=2m")) {
+            var restored = original.copyCookies(restarted.getWebServer().getPort()); restored.access = original.access;
+            assertThat(restored.call("GET", "/api/v1/catalog/hospital", null).body().path("address").asText()).isEqualTo("虚构重启路");
+            var schedules = restored.call("GET", "/api/v1/catalog/schedules?doctorId=" + doctorId, null).body();
+            assertThat(schedules.size()).isEqualTo(1);
+            assertThat(schedules.get(0).path("id").asText()).isEqualTo(scheduleId);
+            assertThat(schedules.get(0).path("availableSlots").asInt()).isEqualTo(2);
+            assertThat(schedules.get(0).path("feeMinor").asInt()).isEqualTo(750);
+            assertThat(restored.call("GET", "/api/v1/catalog/doctors", null).body().toString()).contains(doctorId, "虚构恢复医生");
+        }
+    }
 }

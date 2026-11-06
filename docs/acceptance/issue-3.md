@@ -1,0 +1,30 @@
+# #3 MVP-02 医院目录与医生排班
+
+Source: original GitHub issue #3 read with `gh issue view` on 2026-11-06. Depends on #2; implementation starts at its accepted commit `db6f758` on a descendant of integration. #2 remote CI is tracked separately. Do not replace the issue body.
+
+## Acceptance cases and seams
+
+The agreed seams in `docs/design/mvp-spec.md` apply: real Spring Boot HTTP interfaces with MySQL/Redis, a controllable clock for clinic-time boundaries, and Vue browser flows. No internal component or mapper mocks.
+
+| Criterion | Public evidence | Observed result | Limitations |
+| --- | --- | --- | --- |
+| Administrators maintain hospital address, departments, doctor basics and department assignment | `CatalogHttpTest.administratorMaintainsHospitalAndDepartmentsWhilePatientCannotWrite`, `doctorSeesOwnStatusAndPatientSeesOnlyCertifiedActiveDepartmentMembers`; admin browser forms | Passed; create/edit/disable and forbidden writes verified | Existing unended schedules prevent changing a doctor's department; administrator status maintenance is not credential-file verification |
+| Doctors see their certification and schedules | Own-profile and own-schedule HTTP/browser paths; foreign doctor's schedule absent | Passed for pending and certified doctors; own historical/closed schedules remain visible | No schedule editing by doctors |
+| Schedules include mode, date, AM/PM and valid slots | V2–V4 Flyway migrations, `publishedSchedulesHaveRealSlotsRejectConflictsAndDisappearWhenResourcesBecomeInvalid`; `IdentityRecoveryTest.hospitalDoctorAndPublishedSlotsSurviveApplicationRestart` | Passed; time/fee/capacity snapshots and actual slot counts survive restart | Slots represent published capacity; actual booking/occupancy belongs to #4 |
+| Patients see active departments, certified doctors and valid schedules | Resource queries after disablement/certification change; `onlineAdvanceAndOfflineWalkInCloseAtExactHospitalTimeBoundaries`; `patientDefaultWindowIsSevenDaysAndExplicitDateCanQueryBeyondIt`; browser query after department deactivation | Passed; stale browser options disappear on query; exact opening and walk-in cutoff respected; default seven-day upper boundary excluded, explicit date retrieves later valid sessions | Resource lists refresh on query; delivery/SSE comes later |
+| Conflicts, duplicate publication and invalid capacity return visible errors | `concurrentPublicationAcrossModesCreatesOneScheduleAndOneSetOfSlots`; invalid capacity/fee/date/session and mismatched department cases; browser duplicate error | Passed; six competing online/offline publications create one schedule with one set of slots; invalid inputs return 400 and conflicts 409 | No suspension/substitution or published-schedule cancellation in #3 |
+| Management, patient queries, Vue and external tests complete | Full `scripts/verify.ps1`, Standards + Spec reviews | Passed locally; see below | Remote CI evidence is synchronized to GitHub after the implementation commit is published |
+
+Scope includes administrator certification status maintenance needed to publish certified doctors. Full credential attachments, suspension/substitution, booking and queue operations remain in later issues. Default hospital time zone is Asia/Shanghai; sessions are 08:00–12:00 and 14:00–18:00. Persist schedule time/fee/capacity snapshots and individual slots; changing a department or doctor's certification must immediately affect patient visibility. Protect conflicting publications with a database transaction and uniqueness across both service modes.
+
+## Verification and review
+
+On 2026-11-06, the final `pwsh -NoProfile -File scripts/verify.ps1` exited 0. Six documentation/runtime checks and Vue type checking/production build passed. Maven reported **20 tests, 0 failures, 0 errors, 0 skipped**: six catalog HTTP cases, nine identity HTTP cases, four recovery cases and one wrapper executing seven real-browser cases. Playwright's last-run result was `passed` without failed tests. The complete three-role catalog browser case includes mobile width, duplicate publication, and cross-browser department invalidation.
+
+Local versions: JDK25 targeting Java21, MySQL26.7.0, Redis5.0.14.1, Node24 and installed Chrome. Local Flyway version-support and Surefire native-output warnings remain as documented for #2; neither prevented successful migration or verification. Remote CI uses Java21/MySQL8.4/Redis7.4/Chromium and the same gate.
+
+Review base is the accepted #2 commit `db6f7580b33577cda29189e76f5e31cf41e49681`; review included all staged new files and subsequent working-tree fixes, not the empty base-to-HEAD diff. Standards review has no remaining blocker: the post-lock opening-time observation was fixed and checked at the exact opening boundary. Spec review identified the missing seven-day default, which was reproduced in a failing HTTP case, fixed, and re-reviewed. The optional positional command-parameter observation is nonblocking.
+
+The seven-day default is an exclusive upper bound of current time plus seven days; ordinary validity checks retain today's still-open offline walk-in resources. Explicit date and management/own-doctor queries are not limited by the default horizon. Publishing checks current time after acquiring resource locks, immediately before writing.
+
+GitHub #2 has already been closed with local and remote evidence. Preserve #3's original body and append this issue's own evidence only after its remote CI succeeds. No integration merge or completion of later issues is claimed.
