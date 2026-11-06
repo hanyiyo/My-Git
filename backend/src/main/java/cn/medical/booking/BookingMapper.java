@@ -11,8 +11,18 @@ public interface BookingMapper {
 
     @Insert("INSERT INTO appointment (id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key) VALUES (#{id}, #{patientId}, #{scheduleId}, #{slotId}, #{doctorId}, #{departmentId}, #{clinicDate}, #{session}, #{serviceMode}, #{source}, #{startsAt}, #{endsAt}, #{feeMinor}, #{createdAt}, #{holdExpiresAt}, #{state}, #{idempotencyKey})")
     void insert(Appointment appointment);
-    @Insert("INSERT INTO patient_session_guard (patient_id, clinic_date, clinic_session, appointment_id) VALUES (#{patientId}, #{clinicDate}, #{session}, #{id})")
-    void guard(Appointment appointment);
+    @Insert("INSERT INTO patient_session_guard (patient_id, clinic_date, clinic_session) VALUES (#{patient}, #{date}, #{session}) ON DUPLICATE KEY UPDATE patient_id=patient_id")
+    void ensureGuard(@Param("patient") String patient, @Param("date") LocalDate date, @Param("session") String session);
+    @Select("SELECT appointment_id FROM patient_session_guard WHERE patient_id=#{patient} AND clinic_date=#{date} AND clinic_session=#{session} FOR UPDATE")
+    String lockGuard(@Param("patient") String patient, @Param("date") LocalDate date, @Param("session") String session);
+    @Update("UPDATE patient_session_guard SET appointment_id=#{id} WHERE patient_id=#{patientId} AND clinic_date=#{clinicDate} AND clinic_session=#{session}")
+    void occupyGuard(Appointment appointment);
+    @Update("UPDATE patient_session_guard SET appointment_id=NULL WHERE patient_id=#{patientId} AND clinic_date=#{clinicDate} AND clinic_session=#{session} AND appointment_id=#{id}")
+    void releaseGuard(Appointment appointment);
+    @Update("UPDATE appointment SET state='EXPIRED' WHERE id=#{id} AND state='PENDING_PAYMENT' AND hold_expires_at <= #{now}")
+    int expire(@Param("id") String id, @Param("now") long now);
+    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key FROM appointment WHERE patient_id=#{patient} AND idempotency_key=#{key}")
+    Appointment byKey(@Param("patient") String patient, @Param("key") String key);
     @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key FROM appointment WHERE id=#{id} AND patient_id=#{patient}")
     Appointment own(@Param("id") String id, @Param("patient") String patient);
 }

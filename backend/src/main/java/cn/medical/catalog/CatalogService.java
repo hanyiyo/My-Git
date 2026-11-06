@@ -26,12 +26,18 @@ public class CatalogService {
     public CatalogService(CatalogMapper catalog, IdentityService identity, Clock clock) { this.catalog = catalog; this.identity = identity; this.clock = clock; }
     public CatalogMapper.Hospital hospital() { return catalog.hospital(); }
     public record SlotReservation(String slotId, String scheduleId, String doctorId, String departmentId,
-        LocalDate clinicDate, String session, String serviceMode, long startsAt, long endsAt, long feeMinor) {}
+        LocalDate clinicDate, String session, String serviceMode, long startsAt, long endsAt, long feeMinor, long createdAt, long holdExpiresAt) {}
+    public record RegistrationSession(LocalDate clinicDate, String session) {}
+    public RegistrationSession registrationSession(String id) {
+        var schedule = catalog.schedule(id);
+        if (schedule == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
+        return new RegistrationSession(schedule.clinicDate(), schedule.session());
+    }
 
     @Transactional
     public SlotReservation reserveAdvanceSlot(String scheduleId, String appointmentId) {
-        var initial = catalog.schedules().stream().filter(value -> value.id().equals(scheduleId)).findFirst()
-            .orElseThrow(() -> new ApiFailure(404, "NOT_FOUND", "排班不存在"));
+        var initial = catalog.schedule(scheduleId);
+        if (initial == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
         // Follow publication's doctor -> department -> schedule lock order before checking eligibility.
         var doctor = identity.lockDoctor(initial.doctorId());
         var department = catalog.lockDepartment(initial.departmentId());
@@ -41,11 +47,14 @@ public class CatalogService {
             || catalog.assignments().stream().noneMatch(value -> value.doctorId().equals(doctor.id()) && value.departmentId().equals(schedule.departmentId())))
             throw new ApiFailure(409, "SCHEDULE_UNAVAILABLE", "排班当前不可预约");
         if (clock.millis() >= schedule.startsAt()) throw new ApiFailure(409, "REGISTRATION_CLOSED", "门诊已经开始，提前预约已截止");
-        var slot = catalog.lockAvailableSlot(scheduleId);
-        if (slot == null || catalog.reserveSlot(slot.id(), appointmentId) != 1)
+        var slot = catalog.lockAvailableSlot(scheduleId, clock.millis());
+        long now = clock.millis();
+        if (now >= schedule.startsAt()) throw new ApiFailure(409, "REGISTRATION_CLOSED", "提前预约已截止");
+        long expiry = Math.min(now + Duration.ofMinutes(10).toMillis(), schedule.endsAt() - Duration.ofMinutes(15).toMillis());
+        if (slot == null || catalog.reserveSlot(slot.id(), appointmentId, now, expiry) != 1)
             throw new ApiFailure(409, "NO_SLOTS", "号源已用完");
         return new SlotReservation(slot.id(), schedule.id(), schedule.doctorId(), schedule.departmentId(), schedule.clinicDate(),
-            schedule.session(), schedule.serviceMode(), schedule.startsAt(), schedule.endsAt(), schedule.feeMinor());
+            schedule.session(), schedule.serviceMode(), schedule.startsAt(), schedule.endsAt(), schedule.feeMinor(), now, expiry);
     }
     public List<CatalogMapper.Department> departments(boolean management) {
         return catalog.departments().stream().filter(department -> management || department.active()).toList();
@@ -86,7 +95,7 @@ public class CatalogService {
         var doctors = doctors(true, null).stream().collect(Collectors.toMap(DoctorView::id, Function.identity()));
         var departments = catalog.departments().stream().collect(Collectors.toMap(CatalogMapper.Department::id, Function.identity()));
         long now = clock.millis();
-        return catalog.schedules().stream()
+        return catalog.schedules(now).stream()
             .filter(schedule -> doctorId == null || doctorId.equals(schedule.doctorId()))
             .filter(schedule -> departmentId == null || departmentId.equals(schedule.departmentId()))
             .filter(schedule -> date == null || date.equals(schedule.clinicDate()))

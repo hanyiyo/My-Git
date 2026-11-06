@@ -28,14 +28,16 @@ public interface CatalogMapper {
     List<Assignment> assignments();
     @Insert("INSERT INTO doctor_assignment (doctor_id, department_id) VALUES (#{doctor}, #{department}) ON DUPLICATE KEY UPDATE department_id=VALUES(department_id)")
     void assignDoctor(@Param("doctor") String doctor, @Param("department") String department);
-    @Select("SELECT s.id, s.doctor_id, s.department_id, s.clinic_date, s.clinic_session AS session, s.service_mode, s.starts_at, s.ends_at, s.zone_id, s.capacity, s.fee_minor, s.state, (SELECT COUNT(*) FROM catalog_slot t WHERE t.schedule_id=s.id AND t.active=TRUE AND t.reserved_by IS NULL) AS available_slots FROM schedule s ORDER BY s.starts_at, s.id")
-    List<Schedule> schedules();
+    @Select("SELECT s.id, s.doctor_id, s.department_id, s.clinic_date, s.clinic_session AS session, s.service_mode, s.starts_at, s.ends_at, s.zone_id, s.capacity, s.fee_minor, s.state, (SELECT COUNT(*) FROM catalog_slot t WHERE t.schedule_id=s.id AND t.active=TRUE AND (t.reserved_by IS NULL OR t.reserved_until <= #{now})) AS available_slots FROM schedule s ORDER BY s.starts_at, s.id")
+    List<Schedule> schedules(long now);
+    @Select("SELECT id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, starts_at, ends_at, zone_id, capacity, fee_minor, state, 0 AS available_slots FROM schedule WHERE id=#{id}")
+    Schedule schedule(String id);
     @Select("SELECT id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, starts_at, ends_at, zone_id, capacity, fee_minor, state, 0 AS available_slots FROM schedule WHERE id=#{id} FOR UPDATE")
     Schedule lockSchedule(String id);
-    @Select("SELECT id, schedule_id, position FROM catalog_slot WHERE schedule_id=#{schedule} AND active=TRUE AND reserved_by IS NULL ORDER BY position LIMIT 1 FOR UPDATE")
-    Slot lockAvailableSlot(String schedule);
-    @Update("UPDATE catalog_slot SET reserved_by=#{appointment} WHERE id=#{slot} AND active=TRUE AND reserved_by IS NULL")
-    int reserveSlot(@Param("slot") String slot, @Param("appointment") String appointment);
+    @Select("SELECT id, schedule_id, position FROM catalog_slot WHERE schedule_id=#{schedule} AND active=TRUE AND (reserved_by IS NULL OR reserved_until <= #{now}) ORDER BY position LIMIT 1 FOR UPDATE")
+    Slot lockAvailableSlot(@Param("schedule") String schedule, @Param("now") long now);
+    @Update("UPDATE catalog_slot SET reserved_by=#{appointment}, reserved_until=#{expiry} WHERE id=#{slot} AND active=TRUE AND (reserved_by IS NULL OR reserved_until <= #{now})")
+    int reserveSlot(@Param("slot") String slot, @Param("appointment") String appointment, @Param("now") long now, @Param("expiry") long expiry);
     @Select("SELECT COUNT(*) FROM schedule WHERE doctor_id=#{doctor} AND ends_at > #{now} AND state='PUBLISHED'")
     int openSchedules(@Param("doctor") String doctor, @Param("now") long now);
     @Insert("INSERT INTO schedule (id, doctor_id, department_id, clinic_date, clinic_session, service_mode, starts_at, ends_at, zone_id, capacity, fee_minor, state) VALUES (#{id}, #{doctorId}, #{departmentId}, #{clinicDate}, #{session}, #{serviceMode}, #{startsAt}, #{endsAt}, #{zoneId}, #{capacity}, #{feeMinor}, #{state})")
