@@ -75,6 +75,14 @@ export function createApp(options = {}) {
   const clock = options.clock ?? (() => Date.now());
   const store = options.store ?? new MemoryRedis({ clock });
   const accounts = new Map(); const accessSessions = new Map(); const refreshSessions = new Map();
+  const catalog = {
+    hospital: { id: "hospital-1", name: "示范医院", address: "", process: "" },
+    departments: new Map(), doctors: new Map(), schedules: new Map()
+  };
+  const catalogId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
+  const scheduleWindow = (halfDay) => halfDay === "AM" ? { start: "08:00", end: "12:00" } : { start: "14:00", end: "18:00" };
+  const isAdmin = (role) => role === "admin";
+  const isDoctor = (role) => role === "doctor";
   const app = http.createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/api/v1/health") return json(res, 200, { status: "ok", redis: store.available ? "up" : "down" });
@@ -116,9 +124,61 @@ export function createApp(options = {}) {
       if (req.method === "POST" && route === "/api/v1/auth/logout") {
         const access = parseBearer(req); if (access) accessSessions.delete(access); if (data.refreshToken) refreshSessions.delete(String(data.refreshToken)); return json(res, 204, null);
       }
+      if (req.method === "GET" && route === "/api/v1/catalog") {
+        const date = url.searchParams.get("date"); const departmentId = url.searchParams.get("departmentId"); const mode = url.searchParams.get("mode");
+        const schedules = [...catalog.schedules.values()].filter((item) => item.active && (!date || item.date === date) && (!departmentId || item.departmentId === departmentId) && (!mode || item.mode === mode) && item.remaining > 0).map((item) => ({ ...item, doctor: catalog.doctors.get(item.doctorId), department: catalog.departments.get(item.departmentId) })).filter((item) => item.doctor?.certified && item.department?.active).map(({ doctor, ...item }) => ({ ...item, doctor: { id: doctor.id, displayName: doctor.displayName } }));
+        return json(res, 200, { hospital: catalog.hospital, departments: [...catalog.departments.values()].filter((item) => item.active), schedules });
+      }
       const access = parseBearer(req); const session = access ? accessSessions.get(access) : null;
       if (!session || session.expiresAt <= clock()) return json(res, 401, errorBody("UNAUTHENTICATED", "请先登录"));
       const account = [...accounts.values()].find((item) => item.id === session.accountId); if (!account) return json(res, 401, errorBody("UNAUTHENTICATED", "请先登录"));
+      if (req.method === "POST" && route === "/api/v1/admin/hospital") {
+        if (!isAdmin(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅管理员可维护医院信息"));
+        catalog.hospital = { ...catalog.hospital, name: String(data.name ?? catalog.hospital.name).trim(), address: String(data.address ?? "").trim(), process: String(data.process ?? "").trim() };
+        return json(res, 200, { hospital: catalog.hospital });
+      }
+      if (req.method === "POST" && route === "/api/v1/admin/departments") {
+        if (!isAdmin(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅管理员可维护科室"));
+        const name = String(data.name ?? "").trim(); if (!name) return json(res, 400, errorBody("INVALID_INPUT", "科室名称不能为空"));
+        if ([...catalog.departments.values()].some((item) => item.name === name)) return json(res, 409, errorBody("DUPLICATE_DEPARTMENT", "科室已存在"));
+        const department = { id: catalogId("dept"), name, description: String(data.description ?? "").trim(), active: true }; catalog.departments.set(department.id, department);
+        return json(res, 201, { department });
+      }
+      if (req.method === "POST" && route === "/api/v1/admin/doctors") {
+        if (!isAdmin(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅管理员可维护医生"));
+        const identifier = String(data.identifier ?? "").trim().toLowerCase(); const doctorAccount = accounts.get(identifier); const department = catalog.departments.get(String(data.departmentId ?? ""));
+        if (!doctorAccount || doctorAccount.role !== "doctor") return json(res, 400, errorBody("DOCTOR_ACCOUNT_REQUIRED", "需要已注册的医生账号"));
+        if (!department) return json(res, 400, errorBody("DEPARTMENT_REQUIRED", "科室不存在"));
+        if ([...catalog.doctors.values()].some((item) => item.accountId === doctorAccount.id)) return json(res, 409, errorBody("DOCTOR_EXISTS", "医生资料已存在"));
+        const doctor = { id: catalogId("doctor"), accountId: doctorAccount.id, identifier, displayName: String(data.displayName ?? identifier), departmentId: department.id, certified: false, status: "PENDING" };
+        catalog.doctors.set(doctor.id, doctor); return json(res, 201, { doctor });
+      }
+      const certify = route.match(/^\/api\/v1\/admin\/doctors\/([^/]+)\/certify$/);
+      if (req.method === "POST" && certify) {
+        if (!isAdmin(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅管理员可审核资质"));
+        const doctor = catalog.doctors.get(certify[1]); if (!doctor) return json(res, 404, errorBody("NOT_FOUND", "医生不存在"));
+        doctor.certified = Boolean(data.certified ?? true); doctor.status = doctor.certified ? "CERTIFIED" : "REJECTED"; return json(res, 200, { doctor });
+      }
+      if (req.method === "POST" && route === "/api/v1/admin/schedules") {
+        if (!isAdmin(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅管理员可发布排班"));
+        const doctor = catalog.doctors.get(String(data.doctorId ?? "")); const department = catalog.departments.get(String(data.departmentId ?? doctor?.departmentId ?? ""));
+        const halfDay = String(data.halfDay ?? "").toUpperCase(); const mode = String(data.mode ?? "").toUpperCase(); const date = String(data.date ?? ""); const capacity = Number(data.capacity);
+        if (!doctor || !department || doctor.departmentId !== department.id || !doctor.certified) return json(res, 400, errorBody("DOCTOR_NOT_CERTIFIED", "医生必须属于该科室且已认证"));
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !["AM", "PM"].includes(halfDay) || !["ONLINE", "OFFLINE"].includes(mode) || !Number.isInteger(capacity) || capacity < 1) return json(res, 400, errorBody("INVALID_SCHEDULE", "排班日期、时段、方式或号源无效"));
+        const duplicate = [...catalog.schedules.values()].some((item) => item.doctorId === doctor.id && item.date === date && item.halfDay === halfDay && item.mode === mode && item.active);
+        if (duplicate) return json(res, 409, errorBody("DUPLICATE_SCHEDULE", "重复发布排班"));
+        const schedule = { id: catalogId("schedule"), doctorId: doctor.id, departmentId: department.id, date, halfDay, mode, capacity, remaining: capacity, fee: Number(data.fee ?? 0), ...scheduleWindow(halfDay), active: true };
+        catalog.schedules.set(schedule.id, schedule); return json(res, 201, { schedule });
+      }
+      if (req.method === "GET" && route === "/api/v1/catalog") {
+        const date = url.searchParams.get("date"); const departmentId = url.searchParams.get("departmentId"); const mode = url.searchParams.get("mode");
+        const schedules = [...catalog.schedules.values()].filter((item) => item.active && (!date || item.date === date) && (!departmentId || item.departmentId === departmentId) && (!mode || item.mode === mode) && item.remaining > 0).map((item) => ({ ...item, doctor: catalog.doctors.get(item.doctorId), department: catalog.departments.get(item.departmentId) })).filter((item) => item.doctor?.certified && item.department?.active).map(({ doctor, ...item }) => ({ ...item, doctor: { id: doctor.id, displayName: doctor.displayName } }));
+        return json(res, 200, { hospital: catalog.hospital, departments: [...catalog.departments.values()].filter((item) => item.active), schedules });
+      }
+      if (req.method === "GET" && route === "/api/v1/doctor/schedules") {
+        if (!isDoctor(account.role)) return json(res, 403, errorBody("FORBIDDEN", "仅医生可查看个人排班"));
+        const doctor = [...catalog.doctors.values()].find((item) => item.accountId === account.id); return json(res, 200, { schedules: doctor ? [...catalog.schedules.values()].filter((item) => item.doctorId === doctor.id) : [] });
+      }
       if (req.method === "GET" && route === "/api/v1/profile") return json(res, 200, { ...accountView(account), permissions: [account.role] });
       if (req.method === "GET" && route === "/api/v1/admin") return account.role === "admin" ? json(res, 200, { ok: true, role: account.role }) : json(res, 403, errorBody("FORBIDDEN", "无权访问该资源"));
       if (req.method === "GET" && route === "/api/v1/doctor") return account.role === "doctor" ? json(res, 200, { ok: true, role: account.role }) : json(res, 403, errorBody("FORBIDDEN", "无权访问该资源"));
@@ -129,7 +189,7 @@ export function createApp(options = {}) {
       console.error(error); return json(res, 500, errorBody("INTERNAL_ERROR", "服务暂时不可用"));
     }
   });
-  app.store = store; app.accounts = accounts; return app;
+  app.store = store; app.accounts = accounts; app.catalog = catalog; return app;
 }
 
 function serveFrontend(res, relative) {
