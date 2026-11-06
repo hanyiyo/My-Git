@@ -19,4 +19,7 @@ public class BookingController {
     @GetMapping("/{id}") BookingMapper.Appointment own(JwtAuthenticationToken auth, @PathVariable String id) {
         return booking.own(auth.getName(), id);
     }
+    @PostMapping("/{id}/simulate-payment") BookingService.PaymentReceipt simulatePayment(JwtAuthenticationToken auth, @PathVariable String id) {
+        return booking.simulatePayment(auth.getName(), id);
+    }
 }

@@ -36,8 +36,12 @@ public interface CatalogMapper {
     Schedule lockSchedule(String id);
     @Select("SELECT id, schedule_id, position FROM catalog_slot WHERE schedule_id=#{schedule} AND active=TRUE AND (reserved_by IS NULL OR reserved_until <= #{now}) ORDER BY position LIMIT 1 FOR UPDATE")
     Slot lockAvailableSlot(@Param("schedule") String schedule, @Param("now") long now);
+    @Select("SELECT id, schedule_id, position FROM catalog_slot WHERE id=#{id} FOR UPDATE")
+    Slot lockSlot(String id);
     @Update("UPDATE catalog_slot SET reserved_by=#{appointment}, reserved_until=#{expiry} WHERE id=#{slot} AND active=TRUE AND (reserved_by IS NULL OR reserved_until <= #{now})")
     int reserveSlot(@Param("slot") String slot, @Param("appointment") String appointment, @Param("now") long now, @Param("expiry") long expiry);
+    @Update("UPDATE catalog_slot SET reserved_until=NULL WHERE id=#{slot} AND reserved_by=#{appointment} AND reserved_until > #{now} AND active=TRUE")
+    int confirmSlot(@Param("slot") String slot, @Param("appointment") String appointment, @Param("now") long now);
     @Select("SELECT COUNT(*) FROM schedule WHERE doctor_id=#{doctor} AND ends_at > #{now} AND state='PUBLISHED'")
     int openSchedules(@Param("doctor") String doctor, @Param("now") long now);
     @Insert("INSERT INTO schedule (id, doctor_id, department_id, clinic_date, clinic_session, service_mode, starts_at, ends_at, zone_id, capacity, fee_minor, state) VALUES (#{id}, #{doctorId}, #{departmentId}, #{clinicDate}, #{session}, #{serviceMode}, #{startsAt}, #{endsAt}, #{zoneId}, #{capacity}, #{feeMinor}, #{state})")

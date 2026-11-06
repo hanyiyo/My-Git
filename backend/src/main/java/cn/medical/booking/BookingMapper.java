@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.*;
 public interface BookingMapper {
     record Appointment(String id, String patientId, String scheduleId, String slotId, String doctorId, String departmentId,
         LocalDate clinicDate, String session, String serviceMode, String source, long startsAt, long endsAt,
-        long feeMinor, long createdAt, long holdExpiresAt, String state, String idempotencyKey) {}
+        long feeMinor, long createdAt, long holdExpiresAt, String state, String idempotencyKey, String credential) {}
 
     @Insert("INSERT INTO appointment (id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key) VALUES (#{id}, #{patientId}, #{scheduleId}, #{slotId}, #{doctorId}, #{departmentId}, #{clinicDate}, #{session}, #{serviceMode}, #{source}, #{startsAt}, #{endsAt}, #{feeMinor}, #{createdAt}, #{holdExpiresAt}, #{state}, #{idempotencyKey})")
     void insert(Appointment appointment);
@@ -21,8 +21,10 @@ public interface BookingMapper {
     void releaseGuard(Appointment appointment);
     @Update("UPDATE appointment SET state='EXPIRED' WHERE id=#{id} AND state='PENDING_PAYMENT' AND hold_expires_at <= #{now}")
     int expire(@Param("id") String id, @Param("now") long now);
-    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key FROM appointment WHERE patient_id=#{patient} AND idempotency_key=#{key}")
+    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential FROM appointment WHERE patient_id=#{patient} AND idempotency_key=#{key}")
     Appointment byKey(@Param("patient") String patient, @Param("key") String key);
-    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key FROM appointment WHERE id=#{id} AND patient_id=#{patient}")
+    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential FROM appointment WHERE id=#{id} AND patient_id=#{patient}")
     Appointment own(@Param("id") String id, @Param("patient") String patient);
+    @Update("UPDATE appointment SET state='CONFIRMED', credential=#{credential} WHERE id=#{id} AND state='PENDING_PAYMENT' AND hold_expires_at > #{now}")
+    int confirm(@Param("id") String id, @Param("credential") String credential, @Param("now") long now);
 }

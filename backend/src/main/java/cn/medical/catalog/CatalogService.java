@@ -61,6 +61,23 @@ public class CatalogService {
         return source.equals("ADVANCE") ? now < schedule.startsAt()
             : schedule.serviceMode().equals("OFFLINE") && now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
     }
+    @Transactional
+    public long confirmSlot(String scheduleId, String slotId, String appointmentId) {
+        var initial = catalog.schedule(scheduleId);
+        if (initial == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
+        var doctor = identity.lockDoctor(initial.doctorId());
+        var department = catalog.lockDepartment(initial.departmentId());
+        var schedule = catalog.lockSchedule(scheduleId);
+        if (!doctor.enabled() || !doctor.credentialStatus().equals("CERTIFIED") || department == null || !department.active()
+            || !schedule.state().equals("PUBLISHED")
+            || catalog.assignments().stream().noneMatch(value -> value.doctorId().equals(doctor.id()) && value.departmentId().equals(schedule.departmentId())))
+            throw new ApiFailure(409, "SCHEDULE_UNAVAILABLE", "排班当前不可支付");
+        var slot = catalog.lockSlot(slotId);
+        long now = clock.millis();
+        if (slot == null || !slot.scheduleId().equals(scheduleId) || catalog.confirmSlot(slotId, appointmentId, now) != 1)
+            throw new ApiFailure(409, "PAYMENT_CLOSED", "临时占号已失效，不能支付");
+        return now;
+    }
     public List<CatalogMapper.Department> departments(boolean management) {
         return catalog.departments().stream().filter(department -> management || department.active()).toList();
     }

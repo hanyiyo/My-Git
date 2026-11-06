@@ -211,6 +211,35 @@ class BookingHttpTest extends HttpFixture {
         assertThat(rejected.call("POST", "/api/v1/patient/appointments",
             Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier())).status()).isEqualTo(409);
     }
+    @Test void simulatedPaymentConfirmsSnapshotAndCredentialOnceAndRetainsSlotAfterHoldDeadline() throws Exception {
+        var schedule = published("ONLINE", "AM", 1);
+        var owner = patient(); var stranger = patient();
+        var created = owner.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
+        assertThat(created.status()).isEqualTo(201);
+        String id = created.body().path("id").asText();
+        String payPath = "/api/v1/patient/appointments/" + id + "/simulate-payment";
+        assertThat(stranger.call("POST", payPath, null).status()).isEqualTo(404);
+        var paid = owner.call("POST", payPath, null);
+        assertThat(paid.status()).isEqualTo(200);
+        assertThat(paid.body().path("appointment").path("id").asText()).isEqualTo(id);
+        assertThat(paid.body().path("appointment").path("state").asText()).isEqualTo("CONFIRMED");
+        assertThat(paid.body().path("appointment").path("feeMinor").asLong()).isEqualTo(2000);
+        assertThat(paid.body().path("appointment").path("credential").asText()).isNotBlank();
+        assertThat(paid.body().path("payment").path("id").asText()).isNotBlank();
+        assertThat(paid.body().path("payment").path("appointmentId").asText()).isEqualTo(id);
+        assertThat(paid.body().path("payment").path("amountMinor").asLong()).isEqualTo(2000);
+        assertThat(paid.body().path("payment").path("state").asText()).isEqualTo("SUCCEEDED");
+        assertThat(paid.body().path("payment").path("mode").asText()).isEqualTo("SIMULATED");
+        var repeated = owner.call("POST", payPath, null);
+        assertThat(repeated.status()).isEqualTo(200);
+        assertThat(repeated.body()).isEqualTo(paid.body());
+        clock.now = Instant.ofEpochMilli(created.body().path("holdExpiresAt").asLong() + 1);
+        var queried = owner.call("GET", "/api/v1/patient/appointments/" + id, null);
+        assertThat(queried.body()).isEqualTo(paid.body().path("appointment"));
+        assertThat(owner.call("GET", "/api/v1/catalog/schedules?doctorId=" + schedule.doctorId(), null).body().size()).isZero();
+        assertThat(stranger.call("POST", "/api/v1/patient/appointments", command(schedule, identifier())).status()).isEqualTo(409);
+        assertThat(owner.call("POST", payPath, null).body()).isEqualTo(paid.body());
+    }
 
     @Test void patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot() throws Exception {
         var admin = new Browser(port);
