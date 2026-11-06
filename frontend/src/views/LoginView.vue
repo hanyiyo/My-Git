@@ -6,11 +6,16 @@ import { useSession } from '../session'
 const router = useRouter(), session = useSession()
 const identifier = ref(''), password = ref(''), captcha = ref(''), challengeId = ref(''), image = ref('')
 const role = ref('PATIENT'), register = ref(false), message = ref(''), busy = ref(false)
+const refreshing = ref(false)
 async function refresh() {
+  if (refreshing.value) return
+  refreshing.value = true; challengeId.value = ''; image.value = ''; captcha.value = ''
   try { const challenge = await api<{ challengeId: string; image: string }>('/auth/captcha'); challengeId.value = challenge.challengeId; image.value = challenge.image; captcha.value = '' }
   catch (error) { image.value = ''; message.value = error instanceof Error ? error.message : '验证码暂不可用' }
+  finally { refreshing.value = false }
 }
 async function submit() {
+  if (busy.value || (!register.value && (refreshing.value || !challengeId.value))) return
   busy.value = true; message.value = ''
   try {
     if (register.value) {
@@ -32,8 +37,8 @@ onMounted(refresh)
       <label for="identifier">账号</label><input id="identifier" v-model="identifier" autocomplete="username" required maxlength="190">
       <label for="password">密码</label><input id="password" v-model="password" type="password" :autocomplete="register ? 'new-password' : 'current-password'" required minlength="12" maxlength="72"><small>12–72 位，仅使用虚构演示账户。</small>
       <template v-if="register"><label for="role">注册身份</label><select id="role" v-model="role"><option value="PATIENT">患者</option><option value="DOCTOR">医生（资质待审核）</option></select></template>
-      <template v-else><label for="captcha">图形验证码</label><div class="captcha"><input id="captcha" v-model="captcha" autocomplete="off" required maxlength="8"><img v-if="image" :src="image" alt="图形验证码"><button class="secondary" type="button" @click="refresh">换一张</button></div></template>
-      <button :disabled="busy" type="submit">{{ busy ? '处理中…' : register ? '注册' : '登录' }}</button>
-    </form><button class="text" type="button" @click="register = !register; message = ''">{{ register ? '已有账户，返回登录' : '患者或医生注册' }}</button>
+      <template v-else><label for="captcha">图形验证码</label><div class="captcha"><input id="captcha" v-model="captcha" :disabled="busy || refreshing || !challengeId" autocomplete="off" required maxlength="8"><img v-if="image" :src="image" alt="图形验证码"><button class="secondary" type="button" :disabled="busy || refreshing" @click="refresh">{{ refreshing ? '刷新中…' : '换一张' }}</button></div></template>
+      <button :disabled="busy || (!register && (refreshing || !challengeId))" type="submit">{{ busy ? '处理中…' : register ? '注册' : '登录' }}</button>
+    </form><button class="text" type="button" :disabled="busy" @click="register = !register; message = ''">{{ register ? '已有账户，返回登录' : '患者或医生注册' }}</button>
   </section>
 </template>
