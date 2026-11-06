@@ -60,12 +60,21 @@ public class BookingService {
         appointment = booking.own(id, patient);
         var existingPayment = billing.payment(id);
         if (existingPayment != null) return new PaymentReceipt(appointment, existingPayment);
-        if (!appointment.state().equals("PENDING_PAYMENT") || appointment.holdExpiresAt() <= clock.millis())
-            throw new ApiFailure(409, "PAYMENT_CLOSED", "临时占号已失效，不能支付");
-        long paidAt = catalog.confirmSlot(appointment.scheduleId(), appointment.slotId(), id);
-        if (booking.confirm(id, "APT-" + UUID.randomUUID(), paidAt) != 1)
-            throw new ApiFailure(409, "PAYMENT_CLOSED", "临时占号已失效，不能支付");
+        appointment = expireIfDue(appointment);
+        var outcome = appointment.state().equals("PENDING_PAYMENT")
+            ? catalog.tryConfirmSlot(appointment.scheduleId(), appointment.slotId(), id)
+            : new CatalogService.Confirmation(false, clock.millis());
+        long paidAt = outcome.observedAt();
+        if (outcome.confirmed()) {
+            if (booking.confirm(id, "APT-" + UUID.randomUUID(), paidAt) != 1)
+                throw new IllegalStateException("Locked appointment could not be confirmed");
+        } else if (appointment.state().equals("PENDING_PAYMENT")) {
+            if (appointment.holdExpiresAt() <= paidAt) booking.expire(id, paidAt);
+            else booking.cancel(id, "PAYMENT_UNAVAILABLE", paidAt);
+            booking.releaseGuard(appointment);
+        }
         var payment = billing.recordSimulatedSuccess(id, appointment.feeMinor(), paidAt);
+        if (!outcome.confirmed()) billing.requestFullRefund(id, "LATE_PAYMENT", paidAt);
         return new PaymentReceipt(booking.own(id, patient), payment);
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)

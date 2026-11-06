@@ -258,7 +258,11 @@ class BookingHttpTest extends HttpFixture {
         assertThat(noPayment.status()).isEqualTo(200);
         assertThat(noPayment.body().path("payment").isNull()).isTrue();
         assertThat(noPayment.body().path("refund").isNull()).isTrue();
-        assertThat(unpaidOwner.call("POST", unpaidPath + "/simulate-payment", null).status()).isEqualTo(409);
+        // Simulate a successful result arriving after cancellation, rather than reopening payment.
+        assertThat(unpaidOwner.call("POST", unpaidPath + "/simulate-payment", null).status()).isEqualTo(200);
+        var cancelledLatePayment = unpaidOwner.call("GET", unpaidPath + "/billing", null);
+        assertThat(cancelledLatePayment.body().path("refund").path("reason").asText()).isEqualTo("LATE_PAYMENT");
+        assertThat(unpaidOwner.call("GET", unpaidPath, null).body().path("state").asText()).isEqualTo("CANCELLED");
         assertThat(unpaidOwner.call("POST", "/api/v1/patient/appointments", command(replacementSchedule, identifier())).status()).isEqualTo(201);
         assertThat(stranger.call("POST", "/api/v1/patient/appointments", command(unpaidSchedule, identifier())).status()).isEqualTo(201);
 
@@ -301,6 +305,43 @@ class BookingHttpTest extends HttpFixture {
         assertThat(denied.body().path("error").path("code").asText()).isEqualTo("CANCEL_NOT_ALLOWED");
         assertThat(startedOwner.call("GET", startedPath, null).body().path("state").asText()).isEqualTo("CONFIRMED");
         assertThat(startedOwner.call("GET", startedPath + "/billing", null).body().path("refund").isNull()).isTrue();
+    }
+    @Test void lateSuccessfulPaymentRefundsExpiredOrderWithoutReleasingReassignedSlotOrNewPatientGuard() throws Exception {
+        var originalSchedule = published("ONLINE", "AM", 1);
+        var newSchedule = published("OFFLINE", "AM", 1);
+        var thirdSchedule = published("ONLINE", "AM", 1);
+        var patientA = patient(); var patientB = patient();
+        var original = patientA.call("POST", "/api/v1/patient/appointments", command(originalSchedule, identifier()));
+        assertThat(original.status()).isEqualTo(201);
+        String originalPath = "/api/v1/patient/appointments/" + original.body().path("id").asText();
+        clock.now = Instant.ofEpochMilli(original.body().path("holdExpiresAt").asLong());
+        var reassigned = patientB.call("POST", "/api/v1/patient/appointments", command(originalSchedule, identifier()));
+        assertThat(reassigned.status()).isEqualTo(201);
+        assertThat(reassigned.body().path("slotId")).isEqualTo(original.body().path("slotId"));
+        var newOrder = patientA.call("POST", "/api/v1/patient/appointments", command(newSchedule, identifier()));
+        assertThat(newOrder.status()).isEqualTo(201);
+        var late = patientA.call("POST", originalPath + "/simulate-payment", null);
+        assertThat(late.status()).isEqualTo(200);
+        assertThat(late.body().path("appointment").path("state").asText()).isEqualTo("EXPIRED");
+        assertThat(late.body().path("appointment").path("credential").isNull()).isTrue();
+        assertThat(late.body().path("payment").path("state").asText()).isEqualTo("SUCCEEDED");
+        assertThat(late.body().path("payment").path("amountMinor").asLong()).isEqualTo(2000);
+        var financial = patientA.call("GET", originalPath + "/billing", null);
+        assertThat(financial.status()).isEqualTo(200);
+        var refund = financial.body().path("refund");
+        assertThat(refund.path("id").asText()).isNotBlank();
+        assertThat(refund.path("paymentId")).isEqualTo(late.body().path("payment").path("id"));
+        assertThat(refund.path("amountMinor").asLong()).isEqualTo(2000);
+        assertThat(refund.path("state").asText()).isEqualTo("REFUND_PENDING");
+        assertThat(refund.path("reason").asText()).isEqualTo("LATE_PAYMENT");
+        assertThat(patientA.call("POST", originalPath + "/simulate-payment", null).body()).isEqualTo(late.body());
+        assertThat(patientA.call("GET", originalPath + "/billing", null).body()).isEqualTo(financial.body());
+        assertThat(patientB.call("GET", "/api/v1/patient/appointments/" + reassigned.body().path("id").asText(), null).body()).isEqualTo(reassigned.body());
+        assertThat(patientA.call("GET", "/api/v1/patient/appointments/" + newOrder.body().path("id").asText(), null).body()).isEqualTo(newOrder.body());
+        assertThat(patientA.call("GET", "/api/v1/catalog/schedules?doctorId=" + originalSchedule.doctorId(), null).body().size()).isZero();
+        var conflict = patientA.call("POST", "/api/v1/patient/appointments", command(thirdSchedule, identifier()));
+        assertThat(conflict.status()).isEqualTo(409);
+        assertThat(conflict.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_CONFLICT");
     }
 
     @Test void patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot() throws Exception {
