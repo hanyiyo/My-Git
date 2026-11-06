@@ -10,7 +10,7 @@
 | 同一患者同日期半天跨医生/模式仅一条有效登记；号源不超卖 | `sixPatientsCompetingForOneSlotCreateExactlyOneHold`、`onePatientCompetingAcrossDoctorsAndModesHoldsOnlyOneHalfDayRegistration`；真实 HTTP 并发、患者半天 guard | 已通过六人竞争一个号源、同一患者跨六位医生/两种模式仅一条登记成功；其余409 |
 | 截止=min(提交+10分钟,结束−15分钟)，提前预约开诊截止，现场挂号签到截止 | `offlineWalkInUsesCurrentSessionAndEarlierOfTenMinutesOrCheckInCutoff`、精确到期复用用例；可控 Clock + HTTP | 已验证10分钟、17:35/17:40均在17:45截止、开诊起现场可登记、线上/未来/已过时段拒绝、开诊停止提前预约、签到截止右端排除；锁等待专项仍需最终审查确认 |
 | 模拟支付幂等、金额快照、预约凭证 | `simulatedPaymentConfirmsSnapshotAndCredentialOnceAndRetainsSlotAfterHoldDeadline`；HTTP 重复付款及归属限制 | 本地模拟付款、2000分订单快照、唯一凭证和持续占号已通过；迟到付款退款及支付并发仍待完成 |
-| 取消/停诊/迟到付款退款可追踪、幂等，失败可恢复 | HTTP 取消、停诊应用接口、支付适配器失败/重启；旧订单付款不释放新订单占用 | 待实现/验证 |
+| 取消/停诊/迟到付款退款可追踪、幂等，失败可恢复 | HTTP 取消、停诊应用接口、支付适配器失败/重启；旧订单付款不释放新订单占用 | 患者取消、唯一全额退款意向和重复取消/付款已验证；停诊、迟到付款与退款执行/恢复待完成 |
 | 患者订单 API/UI、权限及手机兼容 | 订单归属/RBAC HTTP；真实浏览器完整路径和手机视口 | 待实现/验证 |
 
 完成后运行完整 `scripts/verify.ps1`，记录结果；双轴代码审查与远端 CI 通过前不声称完成验收。
@@ -38,3 +38,9 @@
 新增付款用例先因缺少接口失败（外人请求期望404、实际500）。实现后，账务模块独立持久化标为 `SIMULATED` 的唯一付款事实；预约和号源模块通过应用接口在同一 MySQL 事务中保存凭证、确认状态与持续占用。重复付款返回相同结果，外人不能付款，旧占号期限到达后已确认预约不失效。此处不发生真实资金转移或外部调用。
 
 完整 `npm test` 退出0：28条 Java 测试（0失败/错误/跳过）、8条浏览器流程、文档检查及 Vue 类型检查/构建全部通过。此阶段迟到付款暂时拒绝；取消、迟到退款、停诊及失败重试、订单 UI 和远程验收尚未完成，#4 仍未验收。
+
+## 取消与退款意向切片
+
+`cancellingBeforeOpeningReleasesHoldAndCreatesOneRefundOnlyForSuccessfulPayment` 先因缺少取消接口失败，随后通过：未付款取消释放名额及半天约束，不产生付款/退款；已付款在开诊前取消后保持原成功付款和凭证，生成唯一全额 `REFUND_PENDING`（关联原付款及取消原因）；重复取消或付款请求不复活订单、不增加退款。归属检查与开诊后拒绝患者自动取消也通过。号源释放按原订单标识条件更新，并在取得锁后复核时间。
+
+完整 `npm test` 退出0：29条 Java 测试（0失败/错误/跳过）、8条浏览器流程、文档检查及 Vue 类型检查/构建通过。退款执行器尚未实现；迟到付款、停诊、恢复、订单 UI 和远程验收仍待完成。

@@ -8,4 +8,8 @@ public interface BillingMapper {
     BillingService.Payment payment(String appointment);
     @Insert("INSERT INTO payment_order (id, appointment_id, amount_minor, state, mode, paid_at) VALUES (#{id}, #{appointmentId}, #{amountMinor}, #{state}, #{mode}, #{paidAt})")
     void insert(BillingService.Payment payment);
+    @Select("SELECT id, payment_id, amount_minor, reason, state, created_at FROM refund WHERE payment_id=#{payment}")
+    BillingService.Refund refund(String payment);
+    @Insert("INSERT INTO refund (id, payment_id, amount_minor, reason, state, created_at) VALUES (#{id}, #{paymentId}, #{amountMinor}, #{reason}, #{state}, #{createdAt})")
+    void insertRefund(BillingService.Refund refund);
 }

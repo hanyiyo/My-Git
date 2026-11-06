@@ -240,6 +240,68 @@ class BookingHttpTest extends HttpFixture {
         assertThat(stranger.call("POST", "/api/v1/patient/appointments", command(schedule, identifier())).status()).isEqualTo(409);
         assertThat(owner.call("POST", payPath, null).body()).isEqualTo(paid.body());
     }
+    @Test void cancellingBeforeOpeningReleasesHoldAndCreatesOneRefundOnlyForSuccessfulPayment() throws Exception {
+        var unpaidSchedule = published("ONLINE", "AM", 1);
+        var replacementSchedule = published("OFFLINE", "AM", 1);
+        var paidSchedule = published("ONLINE", "AM", 1);
+        var startedSchedule = published("OFFLINE", "PM", 1);
+        var unpaidOwner = patient(); var paidOwner = patient(); var stranger = patient(); var startedOwner = patient();
+        var unpaid = unpaidOwner.call("POST", "/api/v1/patient/appointments", command(unpaidSchedule, identifier()));
+        assertThat(unpaid.status()).isEqualTo(201);
+        String unpaidPath = "/api/v1/patient/appointments/" + unpaid.body().path("id").asText();
+        assertThat(stranger.call("POST", unpaidPath + "/cancel", null).status()).isEqualTo(404);
+        var cancelledUnpaid = unpaidOwner.call("POST", unpaidPath + "/cancel", null);
+        assertThat(cancelledUnpaid.status()).isEqualTo(200);
+        assertThat(cancelledUnpaid.body().path("state").asText()).isEqualTo("CANCELLED");
+        assertThat(unpaidOwner.call("POST", unpaidPath + "/cancel", null).body()).isEqualTo(cancelledUnpaid.body());
+        var noPayment = unpaidOwner.call("GET", unpaidPath + "/billing", null);
+        assertThat(noPayment.status()).isEqualTo(200);
+        assertThat(noPayment.body().path("payment").isNull()).isTrue();
+        assertThat(noPayment.body().path("refund").isNull()).isTrue();
+        assertThat(unpaidOwner.call("POST", unpaidPath + "/simulate-payment", null).status()).isEqualTo(409);
+        assertThat(unpaidOwner.call("POST", "/api/v1/patient/appointments", command(replacementSchedule, identifier())).status()).isEqualTo(201);
+        assertThat(stranger.call("POST", "/api/v1/patient/appointments", command(unpaidSchedule, identifier())).status()).isEqualTo(201);
+
+        var paidOrder = paidOwner.call("POST", "/api/v1/patient/appointments", command(paidSchedule, identifier()));
+        assertThat(paidOrder.status()).isEqualTo(201);
+        String paidPath = "/api/v1/patient/appointments/" + paidOrder.body().path("id").asText();
+        var paid = paidOwner.call("POST", paidPath + "/simulate-payment", null);
+        assertThat(paid.status()).isEqualTo(200);
+        var cancelledPaid = paidOwner.call("POST", paidPath + "/cancel", null);
+        assertThat(cancelledPaid.status()).isEqualTo(200);
+        assertThat(cancelledPaid.body().path("state").asText()).isEqualTo("CANCELLED");
+        assertThat(cancelledPaid.body().path("credential")).isEqualTo(paid.body().path("appointment").path("credential"));
+        var finances = paidOwner.call("GET", paidPath + "/billing", null);
+        assertThat(finances.status()).isEqualTo(200);
+        assertThat(finances.body().path("payment")).isEqualTo(paid.body().path("payment"));
+        assertThat(finances.body().path("payment").path("state").asText()).isEqualTo("SUCCEEDED");
+        var refund = finances.body().path("refund");
+        assertThat(refund.path("id").asText()).isNotBlank();
+        assertThat(refund.path("paymentId")).isEqualTo(paid.body().path("payment").path("id"));
+        assertThat(refund.path("amountMinor").asLong()).isEqualTo(2000);
+        assertThat(refund.path("state").asText()).isEqualTo("REFUND_PENDING");
+        assertThat(refund.path("reason").asText()).isEqualTo("PATIENT_CANCELLATION");
+        assertThat(paidOwner.call("POST", paidPath + "/cancel", null).body()).isEqualTo(cancelledPaid.body());
+        var repeatedPayment = paidOwner.call("POST", paidPath + "/simulate-payment", null);
+        assertThat(repeatedPayment.status()).isEqualTo(200);
+        assertThat(repeatedPayment.body().path("appointment")).isEqualTo(cancelledPaid.body());
+        assertThat(repeatedPayment.body().path("payment")).isEqualTo(paid.body().path("payment"));
+        assertThat(paidOwner.call("GET", paidPath + "/billing", null).body()).isEqualTo(finances.body());
+        assertThat(stranger.call("GET", paidPath + "/billing", null).status()).isEqualTo(404);
+        var released = paidOwner.call("GET", "/api/v1/catalog/schedules?doctorId=" + paidSchedule.doctorId(), null);
+        assertThat(released.body().get(0).path("availableSlots").asInt()).isEqualTo(1);
+
+        var started = startedOwner.call("POST", "/api/v1/patient/appointments", command(startedSchedule, identifier()));
+        assertThat(started.status()).isEqualTo(201);
+        String startedPath = "/api/v1/patient/appointments/" + started.body().path("id").asText();
+        assertThat(startedOwner.call("POST", startedPath + "/simulate-payment", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(startedSchedule.startsAt());
+        var denied = startedOwner.call("POST", startedPath + "/cancel", null);
+        assertThat(denied.status()).isEqualTo(409);
+        assertThat(denied.body().path("error").path("code").asText()).isEqualTo("CANCEL_NOT_ALLOWED");
+        assertThat(startedOwner.call("GET", startedPath, null).body().path("state").asText()).isEqualTo("CONFIRMED");
+        assertThat(startedOwner.call("GET", startedPath + "/billing", null).body().path("refund").isNull()).isTrue();
+    }
 
     @Test void patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot() throws Exception {
         var admin = new Browser(port);

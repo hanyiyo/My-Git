@@ -78,6 +78,22 @@ public class CatalogService {
             throw new ApiFailure(409, "PAYMENT_CLOSED", "临时占号已失效，不能支付");
         return now;
     }
+    @Transactional
+    public long releaseSlot(String scheduleId, String slotId, String appointmentId, boolean requireBeforeOpening) {
+        var initial = catalog.schedule(scheduleId);
+        if (initial == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
+        identity.lockDoctor(initial.doctorId());
+        catalog.lockDepartment(initial.departmentId());
+        var schedule = catalog.lockSchedule(scheduleId);
+        var slot = catalog.lockSlot(slotId);
+        long now = clock.millis();
+        if (requireBeforeOpening && now >= schedule.startsAt())
+            throw new ApiFailure(409, "CANCEL_NOT_ALLOWED", "门诊已开始，请联系管理员人工处理取消及退款");
+        if (slot == null || !slot.scheduleId().equals(scheduleId)) throw new ApiFailure(409, "RESERVATION_CHANGED", "号源归属已变化");
+        if (catalog.releaseSlot(slotId, appointmentId) != 1 && requireBeforeOpening)
+            throw new ApiFailure(409, "RESERVATION_CHANGED", "号源归属已变化");
+        return now;
+    }
     public List<CatalogMapper.Department> departments(boolean management) {
         return catalog.departments().stream().filter(department -> management || department.active()).toList();
     }

@@ -42,6 +42,8 @@ public interface CatalogMapper {
     int reserveSlot(@Param("slot") String slot, @Param("appointment") String appointment, @Param("now") long now, @Param("expiry") long expiry);
     @Update("UPDATE catalog_slot SET reserved_until=NULL WHERE id=#{slot} AND reserved_by=#{appointment} AND reserved_until > #{now} AND active=TRUE")
     int confirmSlot(@Param("slot") String slot, @Param("appointment") String appointment, @Param("now") long now);
+    @Update("UPDATE catalog_slot SET reserved_by=NULL, reserved_until=NULL WHERE id=#{slot} AND reserved_by=#{appointment}")
+    int releaseSlot(@Param("slot") String slot, @Param("appointment") String appointment);
     @Select("SELECT COUNT(*) FROM schedule WHERE doctor_id=#{doctor} AND ends_at > #{now} AND state='PUBLISHED'")
     int openSchedules(@Param("doctor") String doctor, @Param("now") long now);
     @Insert("INSERT INTO schedule (id, doctor_id, department_id, clinic_date, clinic_session, service_mode, starts_at, ends_at, zone_id, capacity, fee_minor, state) VALUES (#{id}, #{doctorId}, #{departmentId}, #{clinicDate}, #{session}, #{serviceMode}, #{startsAt}, #{endsAt}, #{zoneId}, #{capacity}, #{feeMinor}, #{state})")

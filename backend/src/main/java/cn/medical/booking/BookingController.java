@@ -22,4 +22,10 @@ public class BookingController {
     @PostMapping("/{id}/simulate-payment") BookingService.PaymentReceipt simulatePayment(JwtAuthenticationToken auth, @PathVariable String id) {
         return booking.simulatePayment(auth.getName(), id);
     }
+    @PostMapping("/{id}/cancel") BookingMapper.Appointment cancel(JwtAuthenticationToken auth, @PathVariable String id) {
+        return booking.cancel(auth.getName(), id);
+    }
+    @GetMapping("/{id}/billing") cn.medical.billing.BillingService.FinancialStatus billing(JwtAuthenticationToken auth, @PathVariable String id) {
+        return booking.financialStatus(auth.getName(), id);
+    }
 }
