@@ -81,6 +81,7 @@ export function createApp(options = {}) {
   };
   const booking = { appointments: new Map(), payments: new Map(), refunds: new Map(), guards: new Map(), idempotency: new Map() };
   const reception = { entries: new Map(), sequence: 0 };
+  const clinical = { materials: new Map(), messages: new Map(), results: new Map(), corrections: new Map(), attachments: new Map(), grants: new Map() };
   const catalogId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   const scheduleWindow = (halfDay) => halfDay === "AM" ? { start: "08:00", end: "12:00" } : { start: "14:00", end: "18:00" };
   const isAdmin = (role) => role === "admin";
@@ -185,6 +186,22 @@ export function createApp(options = {}) {
         const guardKey = `${account.id}:${schedule.date}:${schedule.halfDay}`; if (booking.guards.has(guardKey)) return json(res, 409, errorBody("HALF_DAY_CONFLICT", "同一日期半天已有有效登记")); if (schedule.remaining < 1) return json(res, 409, errorBody("SLOT_UNAVAILABLE", "号源不可用"));
         const appointment = { id: catalogId("appointment"), patientId: account.id, scheduleId: schedule.id, date: schedule.date, halfDay: schedule.halfDay, mode: schedule.mode, amount: schedule.fee, status: "CONFIRMED", source: "WALK_IN", createdAt: now, released: false, guardKey }; schedule.remaining -= 1; booking.appointments.set(appointment.id, appointment); booking.guards.set(guardKey, appointment); const payment = { id: catalogId("payment"), appointmentId: appointment.id, amount: appointment.amount, status: "SUCCEEDED", createdAt: now }; booking.payments.set(appointment.id, payment); return json(res, 201, { appointment, payment });
       }
+      const clinicalRoute = route.match(/^\/api\/v1\/clinical\/appointments\/([^/]+)(?:\/(materials|messages|start|result|corrections))?$/);
+      if (clinicalRoute) {
+        const appointment = booking.appointments.get(clinicalRoute[1]); if (!appointment || (appointment.patientId !== account.id && account.role !== "doctor")) return json(res, 404, errorBody("NOT_FOUND", "问诊不存在")); const schedule = catalog.schedules.get(appointment.scheduleId); const assignedDoctor = doctorForAccount(account.id); const entry = [...reception.entries.values()].find((item) => item.appointmentId === appointment.id);
+        const isAssignedDoctor = account.role === "doctor" && assignedDoctor?.id === schedule?.doctorId;
+        if (clinicalRoute[2] === "materials" && req.method === "POST") {
+          if (account.id !== appointment.patientId || !["CONFIRMED", "PENDING_PAYMENT"].includes(appointment.status)) return json(res, 403, errorBody("FORBIDDEN", "仅患者可在接诊前补充材料")); const text = String(data.text ?? ""); const files = Array.isArray(data.attachments) ? data.attachments : []; if (files.length > 5) return json(res, 400, errorBody("ATTACHMENT_LIMIT", "每次最多上传5份附件"));
+          const allowed = new Set(["image/jpeg", "image/png", "application/pdf"]); for (const file of files) { if (!allowed.has(String(file.contentType)) || Number(file.size) > 10 * 1024 * 1024 || Number(file.size) < 0) return json(res, 400, errorBody("ATTACHMENT_INVALID", "附件格式或大小无效")); }
+          const revision = { id: catalogId("material"), appointmentId: appointment.id, version: (clinical.materials.get(appointment.id)?.version ?? 0) + 1, text, createdAt: clock(), attachments: files.map((file) => { const item = { id: catalogId("attachment"), appointmentId: appointment.id, filename: String(file.filename ?? "attachment"), contentType: file.contentType, size: Number(file.size), storageKey: crypto.randomUUID() }; clinical.attachments.set(item.id, item); return item; }) }; clinical.materials.set(appointment.id, revision); return json(res, 201, { revision });
+        }
+        if (clinicalRoute[2] === "start" && req.method === "POST") { if (!isAssignedDoctor || entry?.status !== "CALLED") return json(res, 403, errorBody("FORBIDDEN", "医生尚未叫号或无权接诊")); entry.status = "IN_SERVICE"; appointment.encounterStatus = "IN_SERVICE"; appointment.encounterStartedAt = clock(); return json(res, 200, { encounter: { appointmentId: appointment.id, status: appointment.encounterStatus } }); }
+        if (clinicalRoute[2] === "messages" && req.method === "POST") { if (entry?.status !== "IN_SERVICE" || !(account.id === appointment.patientId || isAssignedDoctor)) return json(res, 409, errorBody("ROOM_CLOSED", "诊室当前不可发送消息")); const message = { id: catalogId("message"), appointmentId: appointment.id, authorId: account.id, text: String(data.text ?? ""), createdAt: clock() }; const messages = clinical.messages.get(appointment.id) ?? []; messages.push(message); clinical.messages.set(appointment.id, messages); return json(res, 201, { message }); }
+        if (clinicalRoute[2] === "result" && req.method === "POST") { if (clinical.results.has(appointment.id)) return json(res, 409, errorBody("RESULT_LOCKED", "问诊结果已结束，只能追加更正")); if (!isAssignedDoctor || entry?.status !== "IN_SERVICE") return json(res, 403, errorBody("FORBIDDEN", "仅当前接诊医生可提交结果")); const result = { id: catalogId("result"), appointmentId: appointment.id, authorId: account.id, version: 1, text: String(data.text ?? ""), createdAt: clock(), readonly: true }; clinical.results.set(appointment.id, result); entry.status = "FINISHED"; appointment.encounterStatus = "FINISHED"; appointment.status = "COMPLETED"; return json(res, 201, { result }); }
+        if (clinicalRoute[2] === "corrections" && req.method === "POST") { if (!isAssignedDoctor || !clinical.results.has(appointment.id)) return json(res, 403, errorBody("FORBIDDEN", "仅结果作者可追加更正")); const correction = { id: catalogId("correction"), appointmentId: appointment.id, authorId: account.id, text: String(data.text ?? ""), createdAt: clock() }; const corrections = clinical.corrections.get(appointment.id) ?? []; corrections.push(correction); clinical.corrections.set(appointment.id, corrections); return json(res, 201, { correction }); }
+        if (req.method === "GET" && !clinicalRoute[2]) { if (!(account.id === appointment.patientId || isAssignedDoctor)) return json(res, 403, errorBody("FORBIDDEN", "无权访问问诊")); return json(res, 200, { appointment, materials: clinical.materials.get(appointment.id) ?? null, messages: clinical.messages.get(appointment.id) ?? [], result: clinical.results.get(appointment.id) ?? null, corrections: clinical.corrections.get(appointment.id) ?? [] }); }
+      }
+      if (req.method === "GET" && route.startsWith("/api/v1/clinical/attachments/")) { const attachment = clinical.attachments.get(route.split("/").pop()); if (!attachment) return json(res, 404, errorBody("NOT_FOUND", "附件不存在")); const appointment = booking.appointments.get(attachment.appointmentId); if (account.id !== appointment.patientId && !(account.role === "doctor" && doctorForAccount(account.id)?.id === catalog.schedules.get(appointment.scheduleId)?.doctorId)) return json(res, 403, errorBody("FORBIDDEN", "无权下载附件")); return json(res, 200, { attachment: { ...attachment, downloadUrl: `/api/v1/clinical/attachments/${attachment.id}/content` } }); }
       if (req.method === "GET" && route === "/api/v1/reception/queue") {
         const scheduleId = url.searchParams.get("scheduleId"); const entries = [...reception.entries.values()].filter((item) => (!scheduleId || item.scheduleId === scheduleId) && ["WAITING", "CALLED", "IN_SERVICE"].includes(item.status)).sort((a, b) => a.group - b.group || a.enqueueSeq - b.enqueueSeq); return json(res, 200, { entries });
       }
@@ -256,7 +273,7 @@ export function createApp(options = {}) {
       console.error(error); return json(res, 500, errorBody("INTERNAL_ERROR", "服务暂时不可用"));
     }
   });
-  app.store = store; app.accounts = accounts; app.catalog = catalog; app.booking = booking; app.reception = reception; return app;
+  app.store = store; app.accounts = accounts; app.catalog = catalog; app.booking = booking; app.reception = reception; app.clinical = clinical; return app;
 }
 
 function serveFrontend(res, relative) {
