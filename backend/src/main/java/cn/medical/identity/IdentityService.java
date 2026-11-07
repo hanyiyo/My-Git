@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class IdentityService {
     public record Profile(String id, String identifier, List<String> roles, boolean enabled, String credentialStatus) {}
+    public record Doctor(String id, String identifier, String displayName, String title, String biography, String credentialStatus, boolean enabled) {}
     public record Tokens(String accessToken, String refreshToken, long expiresIn, Profile account) {}
     private final AccountMapper accounts;
     private final PasswordEncoder passwords;
@@ -72,6 +73,30 @@ public class IdentityService {
         var account = accounts.byId(id);
         if (account == null) throw new ApiFailure(404, "NOT_FOUND", "账户不存在");
         return new Profile(account.id(), account.identifier(), accounts.roles(id), account.enabled(), accounts.credentialStatus(id));
+    }
+
+    public List<Doctor> doctors() { return accounts.doctors(); }
+    public List<String> administrators() { return accounts.administrators(); }
+
+    public Profile administrator(String identifier) {
+        var account = accounts.byIdentifier(normalize(identifier));
+        if (account == null || !account.enabled() || !accounts.roles(account.id()).contains("ADMIN"))
+            throw new ApiFailure(404, "NOT_FOUND", "有效管理员账户不存在");
+        return profile(account.id());
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Doctor lockDoctor(String id) {
+        var doctor = accounts.lockDoctor(id);
+        if (doctor == null) throw new ApiFailure(404, "NOT_FOUND", "医生不存在");
+        return doctor;
+    }
+
+    @Transactional
+    public void updateDoctor(String id, String displayName, String title, String biography, String credentialStatus) {
+        var current = lockDoctor(id);
+        if (!Set.of("PENDING", "CERTIFIED", "REJECTED").contains(credentialStatus)) throw new ApiFailure(400, "INVALID_INPUT", "认证状态无效");
+        accounts.updateDoctor(new Doctor(id, current.identifier(), displayName.trim(), title.trim(), biography.trim(), credentialStatus, current.enabled()));
     }
 
     public boolean active(String accountId, String sessionId) {

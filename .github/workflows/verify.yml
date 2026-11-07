@@ -34,3 +34,13 @@ jobs:
       - run: npm --prefix frontend ci
       - run: node frontend/node_modules/@playwright/test/cli.js install --with-deps chromium
       - run: pwsh -NoProfile -File scripts/verify.ps1
+      - name: Preserve acceptance failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-failure-reports
+          retention-days: 7
+          path: |
+            frontend/playwright-results.json
+            frontend/test-results/
+            backend/target/surefire-reports/

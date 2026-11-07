@@ -17,7 +17,7 @@ function Start-TestServices {
     $redisPort = Get-FreePort
     $mysql = Start-Process -FilePath "$mysqlBin\mysqld.exe" -WorkingDirectory $runRoot -ArgumentList @('--no-defaults', "--basedir=`"$([IO.Path]::GetDirectoryName($mysqlBin))`"", "--datadir=`"$mysqlData`"", '--innodb-redo-log-capacity=64M', "--port=$mysqlPort", '--bind-address=127.0.0.1', '--mysqlx=0', "--log-error=`"$runRoot/mysql.log`"") -PassThru -WindowStyle Hidden -RedirectStandardError "$runRoot/mysql-stderr.log"
     $redis = Start-Process -FilePath "$redisBin\redis-server.exe" -WorkingDirectory $runRoot -ArgumentList @('--port', $redisPort, '--bind', '127.0.0.1', '--save', '""', '--appendonly', 'no', '--dir', "`"$runRoot`"") -PassThru -WindowStyle Hidden -RedirectStandardOutput "$runRoot/redis.log" -RedirectStandardError "$runRoot/redis-error.log"
-    $services = @{ MySql = $mysql; Redis = $redis; Root = $runRoot }
+    $services = @{ MySql = $mysql; Redis = $redis; Root = $runRoot; MysqlData = $mysqlData }
     try {
         Wait-TestPort $mysqlPort $mysql
         Wait-TestPort $redisPort $redis
@@ -50,8 +50,20 @@ function Wait-TestPort([int]$Port, $Process) {
 
 function Stop-TestServices($Services) {
     if (-not $Services) { return }
+    # Start-Process can leave a mysqld child after its PowerShell handle exits. Restrict
+    # cleanup to this run's generated data directory so installed MySQL instances survive.
+    if ($IsWindows -and $Services.Root) {
+        $paths = @($Services.Root, $Services.MysqlData) | Where-Object { $_ } | ForEach-Object { [regex]::Escape([IO.Path]::GetFullPath($_)) }
+        $pattern = ($paths -join '|')
+        foreach ($candidate in @(Get-CimInstance Win32_Process -Filter "Name='mysqld.exe' OR Name='redis-server.exe'" -ErrorAction SilentlyContinue)) {
+            if ($candidate.CommandLine -and $candidate.CommandLine -match $pattern) {
+                Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
     foreach ($process in @($Services.MySql, $Services.Redis)) {
         if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
     }
+    if ($Services.Root) { Remove-Item -LiteralPath $Services.Root -Recurse -Force -ErrorAction SilentlyContinue }
     Remove-Item Env:MEDICAL_TEST_DB_URL,Env:MEDICAL_TEST_DB_USER,Env:MEDICAL_TEST_DB_PASSWORD,Env:MEDICAL_TEST_REDIS_PORT -ErrorAction SilentlyContinue
 }
