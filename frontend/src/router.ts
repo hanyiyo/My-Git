@@ -5,6 +5,7 @@ import AdminCatalogView from './views/AdminCatalogView.vue'
 import PatientCatalogView from './views/PatientCatalogView.vue'
 import DoctorCatalogView from './views/DoctorCatalogView.vue'
 import PatientOrdersView from './views/PatientOrdersView.vue'
+import DoctorReceptionView from './views/DoctorReceptionView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
@@ -12,6 +13,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders', component: PatientOrdersView, meta: { role: 'PATIENT' } },
   { path: '/doctor/catalog', component: DoctorCatalogView, meta: { role: 'DOCTOR' } },
+  { path: '/doctor/reception', component: DoctorReceptionView, meta: { role: 'DOCTOR' } },
   ...['patient', 'doctor', 'admin'].map(role => ({ path: '/' + role, component: HomeView, meta: { role: role.toUpperCase() } }))
 ] })
 router.beforeEach(async to => {

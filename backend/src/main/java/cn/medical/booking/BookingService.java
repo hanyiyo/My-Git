@@ -3,6 +3,7 @@ package cn.medical.booking;
 import cn.medical.catalog.CatalogService;
 import cn.medical.billing.BillingService;
 import cn.medical.identity.ApiFailure;
+import cn.medical.reception.ReceptionService;
 import java.time.Clock;
 import java.util.UUID;
 import java.util.List;
@@ -16,9 +17,10 @@ public class BookingService {
     private final BookingMapper booking;
     private final CatalogService catalog;
     private final BillingService billing;
+    private final ReceptionService reception;
     private final Clock clock;
-    public BookingService(BookingMapper booking, CatalogService catalog, BillingService billing, Clock clock) {
-        this.booking = booking; this.catalog = catalog; this.billing = billing; this.clock = clock;
+    public BookingService(BookingMapper booking, CatalogService catalog, BillingService billing, ReceptionService reception, Clock clock) {
+        this.booking = booking; this.catalog = catalog; this.billing = billing; this.reception = reception; this.clock = clock;
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public BookingMapper.Appointment create(String patient, String schedule, String source, String key) {
@@ -55,7 +57,8 @@ public class BookingService {
     public record PaymentReceipt(BookingMapper.Appointment appointment, BillingService.Payment payment) {}
     public record OrderView(String id, String doctorName, String departmentName, java.time.LocalDate clinicDate,
         String session, String serviceMode, long feeMinor, long holdExpiresAt, String state, String credential,
-        String cancellationReason, Long cancelledAt, BillingService.Payment payment, BillingService.Refund refund) {}
+        String cancellationReason, Long cancelledAt, BillingService.Payment payment, BillingService.Refund refund,
+        ReceptionService.Summary reception) {}
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<OrderView> orders(String patient) {
@@ -65,7 +68,7 @@ public class BookingService {
             return new OrderView(appointment.id(), schedule == null ? appointment.doctorId() : schedule.doctorName(),
                 schedule == null ? appointment.departmentId() : schedule.departmentName(), appointment.clinicDate(),
                 appointment.session(), appointment.serviceMode(), appointment.feeMinor(), appointment.holdExpiresAt(),
-                appointment.state(), appointment.credential(), appointment.cancellationReason(), appointment.cancelledAt(), financial.payment(), financial.refund());
+                appointment.state(), appointment.credential(), appointment.cancellationReason(), appointment.cancelledAt(), financial.payment(), financial.refund(), reception.summaryFor(appointment.id()));
         }).toList();
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)

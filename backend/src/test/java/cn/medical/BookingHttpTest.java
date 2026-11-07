@@ -64,7 +64,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(browser.login(name, PASSWORD).status()).isEqualTo(200);
         return browser;
     }
-    record Published(String id, String doctorId, long startsAt, long endsAt) {}
+    record Published(String id, String doctorId, String doctorIdentifier, long startsAt, long endsAt) {}
     Browser administrator() throws Exception {
         if (administrator == null) {
             administrator = new Browser(port);
@@ -77,14 +77,15 @@ class BookingHttpTest extends HttpFixture {
         var department = admin.call("POST", "/api/v1/admin/catalog/departments",
             Map.of("name", identifier(), "description", "虚构门诊", "active", true)).body().path("id").asText();
         var doctor = new Browser(port);
-        var doctorId = doctor.register(identifier(), "DOCTOR").body().path("account").path("id").asText();
+        var doctorIdentifier = identifier();
+        var doctorId = doctor.register(doctorIdentifier, "DOCTOR").body().path("account").path("id").asText();
         assertThat(admin.call("PUT", "/api/v1/admin/catalog/doctors/" + doctorId,
             Map.of("displayName", "虚构李医生", "title", "主治医师", "biography", "演示", "departmentId", department, "credentialStatus", "CERTIFIED")).status()).isEqualTo(200);
         var date = LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(2);
         var result = admin.call("POST", "/api/v1/admin/catalog/schedules", Map.of("doctorId", doctorId,
             "departmentId", department, "clinicDate", date.toString(), "session", session, "serviceMode", mode, "capacity", capacity, "feeMinor", 2000));
         assertThat(result.status()).isEqualTo(201);
-        return new Published(result.body().path("id").asText(), doctorId, result.body().path("startsAt").asLong(), result.body().path("endsAt").asLong());
+        return new Published(result.body().path("id").asText(), doctorId, doctorIdentifier, result.body().path("startsAt").asLong(), result.body().path("endsAt").asLong());
     }
     Map<String, String> command(Published schedule, String key) {
         return Map.of("scheduleId", schedule.id(), "source", "ADVANCE", "idempotencyKey", key);
@@ -482,5 +483,43 @@ class BookingHttpTest extends HttpFixture {
         assertThat(queried.body()).isEqualTo(order);
         var remaining = patient.call("GET", "/api/v1/catalog/schedules?doctorId=" + doctorId, null);
         assertThat(remaining.body().get(0).path("availableSlots").asInt()).isEqualTo(1);
+    }
+
+    @Test void confirmedAppointmentChecksInAndDoctorCompletesEncounter() throws Exception {
+        var schedule = published("ONLINE", "AM", 1); var patient = patient();
+        var created = patient.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
+        String path = "/api/v1/patient/appointments/" + created.body().path("id").asText();
+        assertThat(patient.call("POST", path + "/simulate-payment", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt() - Duration.ofMinutes(29).toMillis());
+        var checkedIn = patient.call("POST", path + "/check-in", null);
+        assertThat(checkedIn.status()).isEqualTo(200);
+        assertThat(checkedIn.body().path("state").asText()).isEqualTo("WAITING");
+        assertThat(checkedIn.body().path("queueGroup").asInt()).isEqualTo(1);
+        var doctor = new Browser(port);
+        assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
+        var queue = doctor.call("GET", "/api/v1/doctor/reception", null);
+        assertThat(queue.body()).hasSize(1);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/call", null).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/start", null).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/complete", null).status()).isEqualTo(200);
+        assertThat(patient.call("GET", "/api/v1/patient/appointments", null).body().get(0).path("reception").path("state").asText()).isEqualTo("COMPLETED");
+    }
+
+    @Test void missedPatientCanRestoreQueueOnlyOnceAsThirdGroup() throws Exception {
+        var schedule = published("ONLINE", "AM", 1); var patient = patient();
+        var created = patient.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
+        String id = created.body().path("id").asText(); String path = "/api/v1/patient/appointments/" + id;
+        assertThat(patient.call("POST", path + "/simulate-payment", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt() - Duration.ofMinutes(29).toMillis());
+        assertThat(patient.call("POST", path + "/check-in", null).status()).isEqualTo(200);
+        var doctor = new Browser(port); assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/call", null).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/miss", null).status()).isEqualTo(200);
+        var restored = patient.call("POST", path + "/restore-queue", null);
+        assertThat(restored.status()).isEqualTo(200);
+        assertThat(restored.body().path("state").asText()).isEqualTo("WAITING");
+        assertThat(restored.body().path("queueGroup").asInt()).isEqualTo(3);
+        assertThat(restored.body().path("restorationCount").asInt()).isEqualTo(1);
+        assertThat(patient.call("POST", path + "/restore-queue", null).status()).isEqualTo(409);
     }
 }
