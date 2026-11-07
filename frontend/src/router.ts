@@ -9,6 +9,7 @@ import DoctorReceptionView from './views/DoctorReceptionView.vue'
 import PatientClinicalView from './views/PatientClinicalView.vue'
 import DoctorClinicalView from './views/DoctorClinicalView.vue'
 import BusinessAssistantView from './views/BusinessAssistantView.vue'
+import PatientSubstitutionView from './views/PatientSubstitutionView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
@@ -17,6 +18,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders', component: PatientOrdersView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders/:id/clinical', component: PatientClinicalView, meta: { role: 'PATIENT' } },
+  { path: '/patient/substitutions', component: PatientSubstitutionView, meta: { role: 'PATIENT' } },
   { path: '/doctor/catalog', component: DoctorCatalogView, meta: { role: 'DOCTOR' } },
   { path: '/doctor/reception', component: DoctorReceptionView, meta: { role: 'DOCTOR' } },
   { path: '/doctor/clinical/:id', component: DoctorClinicalView, meta: { role: 'DOCTOR' } },

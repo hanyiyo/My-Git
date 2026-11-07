@@ -7,6 +7,7 @@ import cn.medical.reception.ReceptionService;
 import java.time.Clock;
 import java.util.UUID;
 import java.util.List;
+import java.util.Set;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -123,6 +124,19 @@ public class BookingService {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     public void completeAfterEncounter(String id) {
         if (booking.completeAfterEncounter(id) != 1) throw new ApiFailure(409, "APPOINTMENT_STATE_CONFLICT", "预约当前不允许结束接诊");
+    }
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void cancelForGovernance(BookingMapper.Appointment appointment, String reason, long now) {
+        if (!Set.of("PENDING_PAYMENT", "CONFIRMED").contains(appointment.state())) return;
+        catalog.releaseSlot(appointment.scheduleId(), appointment.slotId(), appointment.id(), false);
+        booking.cancel(appointment.id(), reason, now);
+        if (billing.payment(appointment.id()) != null) billing.requestFullRefund(appointment.id(), reason, now);
+        booking.releaseGuard(appointment);
+    }
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void transferDoctor(String appointmentId, String doctorId) {
+        if (booking.transferDoctor(appointmentId, doctorId) != 1)
+            throw new ApiFailure(409, "APPOINTMENT_STATE_CONFLICT", "预约当前不能转交替诊医生");
     }
     private BookingMapper.Appointment expireIfDue(BookingMapper.Appointment appointment) {
         long now = clock.millis();

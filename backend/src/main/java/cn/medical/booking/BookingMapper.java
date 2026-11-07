@@ -35,4 +35,8 @@ public interface BookingMapper {
     int cancel(@Param("id") String id, @Param("reason") String reason, @Param("now") long now);
     @Update("UPDATE appointment SET state='COMPLETED' WHERE id=#{id} AND state='CONFIRMED'")
     int completeAfterEncounter(@Param("id") String id);
+    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential, cancellation_reason, cancelled_at FROM appointment WHERE schedule_id=#{scheduleId} AND state IN ('PENDING_PAYMENT', 'CONFIRMED') FOR UPDATE")
+    List<Appointment> activeForSchedule(@Param("scheduleId") String scheduleId);
+    @Update("UPDATE appointment SET doctor_id=#{doctorId} WHERE id=#{id} AND state='CONFIRMED'")
+    int transferDoctor(@Param("id") String id, @Param("doctorId") String doctorId);
 }
