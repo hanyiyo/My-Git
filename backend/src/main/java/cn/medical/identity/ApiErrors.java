@@ -19,6 +19,8 @@ public class ApiErrors {
     }
     @ExceptionHandler(ApiFailure.class)
     ResponseEntity<?> failure(ApiFailure failure) { return ResponseEntity.status(failure.status).body(body(failure.code, failure.getMessage())); }
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    ResponseEntity<?> uploadLimit(Exception error) { return ResponseEntity.status(413).body(body("ATTACHMENT_TOO_LARGE", "每份医疗附件不能超过10MB")); }
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class, org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
     ResponseEntity<?> input(Exception error) { return ResponseEntity.badRequest().body(body("INVALID_INPUT", "请检查输入字段、格式和允许范围")); }
     @ExceptionHandler(RedisConnectionFailureException.class)

@@ -25,6 +25,19 @@ public class BookingService {
     public BookingService(BookingMapper booking, CatalogService catalog, BillingService billing, ReceptionService reception, DeliveryService delivery, Clock clock) {
         this.booking = booking; this.catalog = catalog; this.billing = billing; this.reception = reception; this.delivery = delivery; this.clock = clock;
     }
+    public record CareScope(String id, String patientId, String doctorId, String serviceMode, String state) {}
+    @Transactional(readOnly = true)
+    public CareScope careScope(String id) {
+        var appointment = booking.byId(id);
+        return appointment == null ? null : new CareScope(id, appointment.patientId(), appointment.doctorId(), appointment.serviceMode(), appointment.state());
+    }
+    @Transactional
+    public void lockCareScope(String id) {
+        var appointment = booking.byId(id);
+        if (appointment == null) throw new ApiFailure(404, "NOT_FOUND", "预约不存在");
+        booking.lockGuard(appointment.patientId(), appointment.clinicDate(), appointment.session());
+        booking.lockAppointment(id);
+    }
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public BookingMapper.Appointment create(String patient, String schedule, String source, String key) {
         var session = catalog.registrationSession(schedule);

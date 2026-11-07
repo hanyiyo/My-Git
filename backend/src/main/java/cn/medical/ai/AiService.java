@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.medical.catalog.CatalogMapper;
 import cn.medical.catalog.CatalogService;
 import cn.medical.clinical.ClinicalMapper;
+import cn.medical.clinical.ClinicalService;
 import cn.medical.identity.ApiFailure;
 import java.time.Clock;
 import java.util.*;
@@ -33,14 +34,15 @@ public class AiService {
 
     private final AiMapper ai;
     private final ClinicalMapper clinical;
+    private final ClinicalService clinicalRecords;
     private final CatalogService catalog;
     private final AiTextProvider localProvider;
     private final ObjectMapper json;
     private final Clock clock;
 
-    public AiService(AiMapper ai, ClinicalMapper clinical, CatalogService catalog, AiTextProvider localProvider,
+    public AiService(AiMapper ai, ClinicalMapper clinical, ClinicalService clinicalRecords, CatalogService catalog, AiTextProvider localProvider,
         ObjectMapper json, Clock clock) {
-        this.ai = ai; this.clinical = clinical; this.catalog = catalog; this.localProvider = localProvider;
+        this.ai = ai; this.clinical = clinical; this.clinicalRecords = clinicalRecords; this.catalog = catalog; this.localProvider = localProvider;
         this.json = json; this.clock = clock;
     }
 
@@ -55,7 +57,7 @@ public class AiService {
         return new ConsentView(id, input.provider(), input.purpose(), input.scope(), input.accepted(), now, null);
     }
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public ResultView analyze(String patient, String appointmentId, AnalyzeInput input) {
         var appointment = requirePatient(patient, appointmentId);
         if (input == null || input.idempotencyKey() == null || input.idempotencyKey().isBlank() || input.idempotencyKey().length() > 80)
@@ -74,10 +76,7 @@ public class AiService {
         if (!consent.provider().equals("LOCAL_MOCK") && !consent.provider().equals("EXTERNAL_TEXT"))
             throw new ApiFailure(400, "INVALID_INPUT", "AI provider 无效");
         long now = clock.millis();
-        if (clinical.consultation(appointmentId) == null) clinical.insertConsultation(appointmentId, now);
-        String materialId = UUID.randomUUID().toString();
-        clinical.insertMaterial(new ClinicalMapper.Material(materialId, appointmentId, clinical.nextMaterialVersion(appointmentId) + 1,
-            input.symptomText().trim(), true, now));
+        String materialId = clinicalRecords.addMaterials(patient, appointmentId, input.symptomText(), true, null).materials().get(0).id();
         String taskId = UUID.randomUUID().toString();
         var task = new AiMapper.Task(taskId, appointmentId, patient, materialId, consent.id(), input.idempotencyKey(),
             consent.provider(), consent.purpose(), "RUNNING", 1, null, now, null);

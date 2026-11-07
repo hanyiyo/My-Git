@@ -14,4 +14,8 @@ class ClinicalAttachmentValidatorTest {
         assertThatThrownBy(() -> ClinicalAttachmentValidator.validate(new MockMultipartFile("files", "report.pdf", "application/pdf", "not-a-pdf".getBytes())))
             .isInstanceOf(cn.medical.identity.ApiFailure.class).hasMessage("仅支持内容与扩展名一致的JPEG、PNG或PDF附件");
     }
+    @Test void rejectsFilesOverTenMegabytes() {
+        assertThatThrownBy(() -> ClinicalAttachmentValidator.validate(new MockMultipartFile("files", "report.pdf", "application/pdf", new byte[10 * 1024 * 1024 + 1])))
+            .isInstanceOf(cn.medical.identity.ApiFailure.class).hasMessage("医疗附件不能为空且每份不能超过10MB");
+    }
 }

@@ -9,8 +9,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"medical.captcha-ttl=2m", "spring.data.redis.database=2"})
-@Import(TestAnswers.class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"medical.captcha-ttl=2m", "spring.data.redis.database=2", "medical.reception-scan-delay=3600000", "medical.refund-scanner-enabled=false"})
+@Import({TestAnswers.class, BookingHttpTest.TimeControl.class, BrowserClockControl.class})
 class BrowserAcceptanceTest {
     @LocalServerPort int port;
     @Test void vueIdentityFlowsUseRealHttpMySqlAndRedis() throws Exception {

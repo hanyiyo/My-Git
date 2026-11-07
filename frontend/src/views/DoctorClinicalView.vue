@@ -3,8 +3,10 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, download } from '../api'
 interface AiResult { taskId: string; state: string; provider: string; versionNo: number; stale: boolean; errorCode: string | null; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string } | null }
-interface Clinical { consultation: { state: string } | null; materials: { id: string; versionNo: number; symptomText: string; attachments: { id: string; originalName: string }[] }[]; messages: { authorRole: string; body: string }[]; result: { body: string } | null; corrections: { reason: string; body: string }[] }
+interface Clinical { consultation: { state: string } | null; materials: { id: string; versionNo: number; symptomText: string; attachments: { id: string; originalName: string }[] }[]; messages: { authorRole: string; body: string }[]; result: { body: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
 const route = useRoute(), id = String(route.params.id), clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([]), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), busy = ref(false)
+const message = ref('')
+async function sendMessage() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/messages`, 'POST', { body: message.value }); message.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '消息发送失败' } finally { busy.value = false } }
 async function load() { try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}`); aiResults.value = await api<AiResult[]>(`/doctor/clinical/${id}/ai`) } catch (failure) { error.value = failure instanceof Error ? failure.message : '问诊记录加载失败' } }
 async function submitResult() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/result`, 'POST', { body: result.value }); result.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '结果提交失败' } finally { busy.value = false } }
 async function submitCorrection() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/corrections`, 'POST', { reason: reason.value, body: correction.value }); reason.value = ''; correction.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '更正提交失败' } finally { busy.value = false } }
@@ -17,6 +19,8 @@ onMounted(load)
     <h2>患者问诊记录</h2>
     <p v-if="error" role="alert" class="notice">{{ error }}</p>
     <p v-if="clinical?.consultation">问诊状态：{{ clinical.consultation.state }}</p>
+    <button type="button" class="secondary" @click="load">刷新问诊记录</button>
+    <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="sendMessage"><label for="doctor-message">回复患者</label><textarea id="doctor-message" v-model="message" maxlength="10000" required></textarea><button :disabled="busy">发送回复</button></form>
 
     <section v-for="material in clinical?.materials" :key="material.id">
       <h3>材料版本 {{ material.versionNo }}</h3>
@@ -62,5 +66,7 @@ onMounted(load)
     </section>
 
     <p v-if="clinical?.result">当前结果：{{ clinical.result.body }}</p>
+    <section v-if="clinical?.corrections.length"><h3>更正记录</h3><p v-for="(item, index) in clinical.corrections" :key="index">{{ item.reason }}：{{ item.body }}</p></section>
+    <p v-if="clinical?.result">作者：{{ clinical.result.authorId }} · 版本：{{ clinical.result.versionNo }} · 时间：{{ new Date(clinical.result.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p>
   </section>
 </template>

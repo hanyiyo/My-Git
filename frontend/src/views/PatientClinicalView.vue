@@ -6,7 +6,7 @@ import { api, download, upload } from '../api'
 interface Attachment { id: string; originalName: string; mediaType: string; sizeBytes: number }
 interface Material { id: string; versionNo: number; symptomText: string; shared: boolean; attachments: Attachment[] }
 interface AiResult { taskId: string; state: string; provider: string; purpose: string; attempts: number; errorCode: string | null; versionNo: number; stale: boolean; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string; provider: string } | null; recommendations: { doctorId: string; doctorName: string; departmentName: string; scheduleId: string; clinicDate: string; session: string; serviceMode: string }[] }
-interface Clinical { consultation: { state: string } | null; materials: Material[]; messages: { authorRole: string; body: string }[]; result: { body: string; createdAt: number } | null; corrections: { reason: string; body: string }[] }
+interface Clinical { consultation: { state: string } | null; materials: Material[]; messages: { authorRole: string; body: string }[]; result: { body: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
 
 const route = useRoute(), id = String(route.params.id)
 const clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([])
@@ -78,7 +78,9 @@ onMounted(load)
     </section>
 
     <section v-if="clinical?.materials.length"><h3>材料版本</h3><ul class="resource-list"><li v-for="material in clinical.materials" :key="material.id"><strong>版本 {{ material.versionNo }}</strong><p>{{ material.symptomText }}</p><p v-for="attachment in material.attachments" :key="attachment.id"><button type="button" class="secondary" @click="openAttachment(attachment.id)">{{ attachment.originalName }}</button></p></li></ul></section>
-    <section v-if="clinical?.result"><h3>医生结果（只读）</h3><p>{{ clinical.result.body }}</p></section>
+    <button type="button" class="secondary" @click="load">刷新问诊记录</button>
+    <section v-if="clinical?.messages.length"><h3>图文消息</h3><p v-for="(item, index) in clinical.messages" :key="index">{{ item.authorRole === 'PATIENT' ? '患者' : '医生' }}：{{ item.body }}</p></section>
+    <section v-if="clinical?.result"><h3>医生结果（只读）</h3><p>{{ clinical.result.body }}</p><p>作者：{{ clinical.result.authorId }} · 版本：{{ clinical.result.versionNo }} · 时间：{{ new Date(clinical.result.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p></section>
     <section v-if="clinical?.corrections.length"><h3>追加更正</h3><p v-for="correction in clinical.corrections" :key="correction.reason + correction.body">{{ correction.reason }}：{{ correction.body }}</p></section>
     <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="sendMessage"><label for="message">图文消息</label><textarea id="message" v-model="message" maxlength="10000" required></textarea><button :disabled="busy">发送消息</button></form>
   </section>

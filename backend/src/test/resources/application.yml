@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 51MB
   datasource:
     url: ${MEDICAL_TEST_DB_URL}
     username: ${MEDICAL_TEST_DB_USER:root}

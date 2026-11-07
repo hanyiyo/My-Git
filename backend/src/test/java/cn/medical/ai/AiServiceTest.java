@@ -23,7 +23,7 @@ class AiServiceTest {
             "appointment", "patient", "doctor", "ONLINE", "CONFIRMED"));
         when(ai.consent("consent", "appointment", "patient")).thenReturn(new AiMapper.Consent(
             "consent", "appointment", "patient", "LOCAL_MOCK", "PRECONSULTATION_SUMMARY", "SYMPTOM_TEXT", false, 1L, null));
-        var service = new AiService(ai, clinical, catalog, provider, new ObjectMapper(),
+        var service = new AiService(ai, clinical, mock(cn.medical.clinical.ClinicalService.class), catalog, provider, new ObjectMapper(),
             Clock.fixed(Instant.ofEpochMilli(1_000L), ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.analyze("patient", "appointment",

@@ -2,6 +2,9 @@ package cn.medical.reception;
 
 import java.time.LocalDate;
 import java.util.List;
+import cn.medical.clinical.ClinicalService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
 
@@ -9,7 +12,9 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1")
 public class ReceptionController {
     private final ReceptionService reception;
-    public ReceptionController(ReceptionService reception) { this.reception = reception; }
+    private final ClinicalService clinical;
+    public ReceptionController(ReceptionService reception, ClinicalService clinical) { this.reception = reception; this.clinical = clinical; }
+    public record CompletionInput(@NotBlank @Size(max=20000) String body) {}
 
     @PostMapping("/patient/appointments/{id}/check-in")
     ReceptionService.Summary checkIn(JwtAuthenticationToken auth, @PathVariable String id) { return reception.checkIn(auth.getName(), id); }
@@ -28,5 +33,5 @@ public class ReceptionController {
     @PostMapping("/doctor/reception/{id}/miss")
     ReceptionMapper.QueueEntry miss(JwtAuthenticationToken auth, @PathVariable String id) { return reception.miss(auth.getName(), id); }
     @PostMapping("/doctor/reception/{id}/complete")
-    ReceptionMapper.QueueEntry complete(JwtAuthenticationToken auth, @PathVariable String id) { return reception.complete(auth.getName(), id); }
+    ClinicalService.ClinicalView complete(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody CompletionInput input) { return clinical.submitResult(auth.getName(), id, input.body()); }
 }

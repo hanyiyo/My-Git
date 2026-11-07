@@ -575,7 +575,7 @@ class BookingHttpTest extends HttpFixture {
         clock.now = Instant.ofEpochMilli(schedule.endsAt() + 1);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/call", null).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/start", null).status()).isEqualTo(200);
-        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/complete", null).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/complete", Map.of("body", "虚构接诊结果")).status()).isEqualTo(200);
         assertThat(patient.call("GET", "/api/v1/patient/appointments", null).body().get(0).path("reception").path("state").asText()).isEqualTo("COMPLETED");
     }
 

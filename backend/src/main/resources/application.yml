@@ -3,6 +3,10 @@ server:
   error:
     include-message: never
 spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 51MB
   datasource:
     url: ${MEDICAL_DB_URL:jdbc:mysql://127.0.0.1:3306/medical_mvp?connectionTimeZone=Asia/Shanghai}
     username: ${MEDICAL_DB_USER:medical}
