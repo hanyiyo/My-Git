@@ -7,6 +7,10 @@ import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import cn.medical.billing.RefundProvider;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
@@ -20,12 +24,13 @@ import org.springframework.context.annotation.Import;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"medical.captcha-ttl=2m", "spring.data.redis.database=5"})
-@Import({TestAnswers.class, BookingHttpTest.TimeControl.class})
+    properties = {"medical.captcha-ttl=2m", "spring.data.redis.database=5", "medical.refund-scanner-enabled=false"})
+@Import({TestAnswers.class, BookingHttpTest.TimeControl.class, BookingHttpTest.RefundControl.class})
 class BookingHttpTest extends HttpFixture {
     @LocalServerPort int port;
     Browser administrator;
     @Autowired AdjustableClock clock;
+    @Autowired TestRefundProvider refundProvider;
     @BeforeEach @AfterEach void resetClock() { clock.now = Instant.now(); }
     static class AdjustableClock extends Clock {
         volatile Instant now = Instant.now();
@@ -35,6 +40,21 @@ class BookingHttpTest extends HttpFixture {
     }
     @TestConfiguration static class TimeControl {
         @Bean @Primary AdjustableClock adjustableClock() { return new AdjustableClock(); }
+    }
+    static class TestRefundProvider implements RefundProvider {
+        final Map<String, AtomicInteger> failures = new ConcurrentHashMap<>();
+        final Map<String, List<Long>> amounts = new ConcurrentHashMap<>();
+        final Map<String, String> transferred = new ConcurrentHashMap<>();
+        public String refund(String key, String payment, long amount) {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            amounts.computeIfAbsent(key, ignored -> new ArrayList<>()).add(amount);
+            if (failures.computeIfAbsent(key, ignored -> new AtomicInteger()).getAndDecrement() > 0)
+                throw new IllegalStateException("simulated refund unavailable");
+            return transferred.computeIfAbsent(key, ignored -> "SIMULATED-" + key);
+        }
+    }
+    @TestConfiguration static class RefundControl {
+        @Bean @Primary TestRefundProvider controlledRefundProvider() { return new TestRefundProvider(); }
     }
 
     Browser patient() throws Exception {
@@ -342,6 +362,60 @@ class BookingHttpTest extends HttpFixture {
         var conflict = patientA.call("POST", "/api/v1/patient/appointments", command(thirdSchedule, identifier()));
         assertThat(conflict.status()).isEqualTo(409);
         assertThat(conflict.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_CONFLICT");
+    }
+    @Test void refundFailureIsDurableRetriesOutsideTransactionAndStopsAfterThreeAttempts() throws Exception {
+        var schedule = published("ONLINE", "AM", 1); var exhaustedSchedule = published("OFFLINE", "PM", 1);
+        var owner = patient(); var admin = administrator();
+        var order = owner.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
+        assertThat(order.status()).isEqualTo(201);
+        String orderPath = "/api/v1/patient/appointments/" + order.body().path("id").asText();
+        assertThat(owner.call("POST", orderPath + "/simulate-payment", null).status()).isEqualTo(200);
+        assertThat(owner.call("POST", orderPath + "/cancel", null).status()).isEqualTo(200);
+        String refundId = owner.call("GET", orderPath + "/billing", null).body().path("refund").path("id").asText();
+        refundProvider.failures.put(refundId, new AtomicInteger(1));
+        String processPath = "/api/v1/admin/billing/refunds/" + refundId + "/process";
+        assertThat(owner.call("POST", processPath, null).status()).isEqualTo(403);
+        var failed = admin.call("POST", processPath, null);
+        assertThat(failed.status()).isEqualTo(200);
+        assertThat(failed.body().path("state").asText()).isEqualTo("REFUND_FAILED");
+        assertThat(failed.body().path("attempts").asInt()).isEqualTo(1);
+        assertThat(failed.body().path("lastError").asText()).isEqualTo("simulated refund unavailable");
+        assertThat(failed.body().path("nextAttemptAt").asLong()).isEqualTo(clock.millis() + 60_000);
+        assertThat(owner.call("GET", orderPath + "/billing", null).body().path("refund")).isEqualTo(failed.body());
+        assertThat(owner.call("GET", orderPath, null).body().path("state").asText()).isEqualTo("CANCELLED");
+        assertThat(admin.call("POST", processPath, null).body()).isEqualTo(failed.body());
+        assertThat(refundProvider.amounts.get(refundId)).containsExactly(2000L);
+        clock.now = Instant.ofEpochMilli(failed.body().path("nextAttemptAt").asLong());
+        var succeeded = admin.call("POST", processPath, null);
+        assertThat(succeeded.status()).isEqualTo(200);
+        assertThat(succeeded.body().path("state").asText()).isEqualTo("REFUNDED");
+        assertThat(succeeded.body().path("attempts").asInt()).isEqualTo(2);
+        assertThat(succeeded.body().path("providerReference").asText()).isEqualTo("SIMULATED-" + refundId);
+        assertThat(admin.call("POST", processPath, null).body()).isEqualTo(succeeded.body());
+        assertThat(refundProvider.amounts.get(refundId)).containsExactly(2000L, 2000L);
+        assertThat(refundProvider.transferred).containsKey(refundId);
+
+        var second = owner.call("POST", "/api/v1/patient/appointments", command(exhaustedSchedule, identifier()));
+        assertThat(second.status()).isEqualTo(201);
+        String secondPath = "/api/v1/patient/appointments/" + second.body().path("id").asText();
+        assertThat(owner.call("POST", secondPath + "/simulate-payment", null).status()).isEqualTo(200);
+        assertThat(owner.call("POST", secondPath + "/cancel", null).status()).isEqualTo(200);
+        String exhaustedId = owner.call("GET", secondPath + "/billing", null).body().path("refund").path("id").asText();
+        refundProvider.failures.put(exhaustedId, new AtomicInteger(3));
+        String exhaustedPath = "/api/v1/admin/billing/refunds/" + exhaustedId + "/process";
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            var result = admin.call("POST", exhaustedPath, null);
+            assertThat(result.status()).isEqualTo(200);
+            assertThat(result.body().path("state").asText()).isEqualTo("REFUND_FAILED");
+            assertThat(result.body().path("attempts").asInt()).isEqualTo(attempt);
+            if (attempt < 3) clock.now = Instant.ofEpochMilli(result.body().path("nextAttemptAt").asLong());
+            else assertThat(result.body().path("nextAttemptAt").isNull()).isTrue();
+        }
+        clock.now = clock.now.plus(Duration.ofDays(1));
+        assertThat(admin.call("POST", exhaustedPath, null).body().path("attempts").asInt()).isEqualTo(3);
+        assertThat(refundProvider.amounts.get(exhaustedId)).containsExactly(2000L, 2000L, 2000L);
+        assertThat(refundProvider.transferred).doesNotContainKey(exhaustedId);
+        assertThat(owner.call("GET", secondPath, null).body().path("state").asText()).isEqualTo("CANCELLED");
     }
 
     @Test void patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot() throws Exception {

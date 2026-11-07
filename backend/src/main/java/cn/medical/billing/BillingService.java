@@ -8,7 +8,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class BillingService {
     public record Payment(String id, String appointmentId, long amountMinor, String state, String mode, long paidAt) {}
-    public record Refund(String id, String paymentId, long amountMinor, String reason, String state, long createdAt) {}
+    public record Refund(String id, String paymentId, long amountMinor, String reason, String state, long createdAt,
+        int attempts, Long nextAttemptAt, String lastError, String providerReference) {}
     public record FinancialStatus(Payment payment, Refund refund) {}
     private final BillingMapper billing;
     public BillingService(BillingMapper billing) { this.billing = billing; }
@@ -23,7 +24,7 @@ public class BillingService {
         if (payment == null) return null;
         var existing = billing.refund(payment.id());
         if (existing != null) return existing;
-        var refund = new Refund(UUID.randomUUID().toString(), payment.id(), payment.amountMinor(), reason, "REFUND_PENDING", now);
+        var refund = new Refund(UUID.randomUUID().toString(), payment.id(), payment.amountMinor(), reason, "REFUND_PENDING", now, 0, now, null, null);
         billing.insertRefund(refund);
         return refund;
     }
