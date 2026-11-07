@@ -21,6 +21,7 @@ mybatis:
 medical:
   audit-directory: ${MEDICAL_TEST_AUDIT_DIRECTORY:data/test-audit}
   refund-scanner-enabled: false
+  delivery-scanner-enabled: false
   jwt-secret: test-only-jwt-secret-at-least-32-characters
   captcha-secret: test-only-captcha-secret-at-least-32-characters
   cookie-secure: false

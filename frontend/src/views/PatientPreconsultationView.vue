@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '../api'
+import { useNotificationRefresh } from '../useNotificationRefresh'
 interface Result { taskId: string; state: string; provider: string; versionNo: number; stale: boolean; errorCode: string | null; materialVersion: number; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string } | null; recommendations: { doctorId: string; doctorName: string; departmentName: string; scheduleId: string; clinicDate: string; session: string }[] }
 const text = ref(''), consent = ref(false), results = ref<Result[]>([]), error = ref(''), busy = ref(false)
-async function load() { results.value = await api<Result[]>('/patient/ai/results') }
+async function load() { try { results.value = await api<Result[]>('/patient/ai/results') } catch (failure) { error.value = failure instanceof Error ? failure.message : '加载失败' } }
+useNotificationRefresh(load)
 async function analyze() {
   if (!consent.value) return
   busy.value = true; error.value = ''
@@ -33,6 +35,7 @@ onMounted(async () => { try { await load() } catch (failure) { error.value = fai
       <template v-if="item.analysis"><p>{{ item.analysis.summary }}</p><p>持续时间：{{ item.analysis.duration }} · 建议科室：{{ item.analysis.departmentHint }}</p><p>追问：{{ item.analysis.followUpQuestions }}</p><p>风险提示：{{ item.analysis.riskAlert }}</p><p>{{ item.analysis.safetyNotice }}</p>
         <p v-for="recommendation in item.recommendations" :key="recommendation.scheduleId"><RouterLink :to="{ path: '/patient/catalog', query: { doctorId: recommendation.doctorId } }">查看 {{ recommendation.doctorName }} 的有效排班</RouterLink>（{{ recommendation.departmentName }}，{{ recommendation.clinicDate }} {{ recommendation.session }}）</p>
       </template>
+      <p v-else-if="item.state === 'RUNNING' || item.state === 'PENDING'">AI 任务处理中，完成后自动更新；仍可自行挂号。</p>
       <p v-else>AI 暂不可用（{{ item.errorCode }}），仍可自行挂号或联系医生。</p>
     </article>
   </section>

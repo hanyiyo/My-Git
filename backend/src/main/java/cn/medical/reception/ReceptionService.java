@@ -33,6 +33,7 @@ public class ReceptionService {
         try { reception.insertQueue(id, appointment.scheduleId(), appointment.doctorId(), patient, group, now, now); }
         catch (DuplicateKeyException ignored) {}
         if (delivery != null) delivery.publish(patient, "CHECK_IN", id, "签到成功，已进入候诊队列", "check-in:" + id);
+        if (delivery != null) delivery.publish(appointment.doctorId(),"CHECK_IN",id,"预约患者已签到","doctor-check-in:"+id);
         return summary(reception.queue(id));
     }
 

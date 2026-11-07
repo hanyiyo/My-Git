@@ -5,6 +5,7 @@ import cn.medical.identity.ApiFailure;
 import cn.medical.reception.ReceptionService;
 import cn.medical.governance.ReviewPolicyService;
 import cn.medical.governance.AuditService;
+import cn.medical.delivery.DeliveryService;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -34,12 +35,14 @@ public class ClinicalService {
     private final ClinicalFileStore files;
     private final ReviewPolicyService policy;
     private final AuditService audit;
+    private final DeliveryService delivery;
 
     public ClinicalService(ClinicalMapper clinical, ReceptionService reception, BookingService booking, Clock clock,
-        ClinicalFileStore files, ReviewPolicyService policy, AuditService audit) {
+        ClinicalFileStore files, ReviewPolicyService policy, AuditService audit, DeliveryService delivery) {
         this.clinical = clinical; this.reception = reception; this.booking = booking; this.clock = clock;
         this.files = files;
         this.policy = policy; this.audit = audit;
+        this.delivery = delivery;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -105,7 +108,9 @@ public class ClinicalService {
         if (!appointment.state().equals("CONFIRMED") || queue == null || !queue.state().equals("IN_CONSULTATION")) throw new ApiFailure(409, "CONSULTATION_NOT_OPEN", "叫号并开始接诊后才能发送图文消息");
         if (body == null || body.isBlank() || body.length() > 10000) throw new ApiFailure(400, "INVALID_INPUT", "消息不能为空且不能超过10000字");
         ensureConsultation(id, clock.millis());
-        clinical.insertMessage(new ClinicalMapper.Message(UUID.randomUUID().toString(), id, actor, role, body.trim(), clock.millis()));
+        String messageId=UUID.randomUUID().toString();
+        clinical.insertMessage(new ClinicalMapper.Message(messageId, id, actor, role, body.trim(), clock.millis()));
+        delivery.publish(role.equals("PATIENT")?appointment.doctorId():appointment.patientId(),"CLINICAL_MESSAGE",id,"本次问诊有新图文消息，请进入诊室查看","clinical-message:"+messageId);
         return view(appointment.id(), role.equals("DOCTOR"));
     }
 

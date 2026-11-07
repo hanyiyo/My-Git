@@ -26,7 +26,7 @@ class AiServiceTest {
         when(ai.consent("consent", "appointment", "patient")).thenReturn(new AiMapper.Consent(
             "consent", "appointment", "patient", "LOCAL_MOCK", "PRECONSULTATION_SUMMARY", "SYMPTOM_TEXT", false, 1L, null, null));
         var service = new AiService(ai, clinical, booking, catalog, provider, new ObjectMapper(),
-            Clock.fixed(Instant.ofEpochMilli(1_000L), ZoneOffset.UTC), mock(org.springframework.transaction.PlatformTransactionManager.class), mock(cn.medical.governance.AuditService.class), mock(cn.medical.governance.ReviewPolicyService.class));
+            Clock.fixed(Instant.ofEpochMilli(1_000L), ZoneOffset.UTC), mock(org.springframework.transaction.PlatformTransactionManager.class), mock(cn.medical.governance.AuditService.class), mock(cn.medical.governance.ReviewPolicyService.class),mock(cn.medical.delivery.DeliveryService.class));
 
         assertThatThrownBy(() -> service.analyze("patient", "appointment",
             new AiService.AnalyzeInput("consent", "咳嗽", "request-1")))

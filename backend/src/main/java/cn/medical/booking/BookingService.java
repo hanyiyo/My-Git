@@ -65,6 +65,7 @@ public class BookingService {
             slot.clinicDate(), slot.session(), slot.serviceMode(), source, slot.startsAt(), slot.endsAt(), slot.feeMinor(), slot.createdAt(), slot.holdExpiresAt(), "PENDING_PAYMENT", key, null, null, null);
         try { booking.insert(appointment); booking.occupyGuard(appointment); }
         catch (DuplicateKeyException error) { throw new ApiFailure(409, "IDEMPOTENCY_CONFLICT", "同一提交标识不能用于不同登记"); }
+        delivery.schedule("HOLD_EXPIRY",id,appointment.holdExpiresAt());
         return appointment;
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -115,7 +116,11 @@ public class BookingService {
         }
         var payment = billing.recordSimulatedSuccess(id, appointment.feeMinor(), paidAt);
         if (!outcome.confirmed()) billing.requestFullRefund(id, "LATE_PAYMENT", paidAt);
-        if (outcome.confirmed()) delivery.publish(patient, "APPOINTMENT_CONFIRMED", id, "预约已确认", "appointment-confirmed:" + id);
+        if (outcome.confirmed()) {
+            delivery.publish(patient,"APPOINTMENT_CONFIRMED",id,"预约已确认","appointment-confirmed:"+id);
+            delivery.publish(appointment.doctorId(),"APPOINTMENT_CONFIRMED",id,"新增已确认预约","doctor-appointment-confirmed:"+id);
+            delivery.schedule("CHECK_IN_REMINDER",id,appointment.startsAt()-30*60_000L);
+        }
         return new PaymentReceipt(booking.own(id, patient), payment);
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -137,6 +142,7 @@ public class BookingService {
         }
         booking.releaseGuard(appointment);
         delivery.publish(patient, "APPOINTMENT_CANCELLED", id, "预约已取消", "appointment-cancelled:" + id + ":" + appointment.cancellationReason());
+        delivery.publish(appointment.doctorId(),"APPOINTMENT_CANCELLED",id,"患者预约已取消","doctor-appointment-cancelled:"+id);
         return booking.own(id, patient);
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -156,6 +162,7 @@ public class BookingService {
         if (billing.payment(appointment.id()) != null) billing.requestFullRefund(appointment.id(), reason, now);
         booking.releaseGuard(appointment);
         delivery.publish(appointment.patientId(), "APPOINTMENT_CANCELLED", appointment.id(), "预约因医院流程已取消：" + reason, "appointment-cancelled:" + appointment.id() + ":" + reason);
+        delivery.publish(appointment.doctorId(),"APPOINTMENT_CANCELLED",appointment.id(),"预约因医院流程取消","doctor-appointment-cancelled:"+appointment.id());
     }
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     public void transferDoctor(String appointmentId, String doctorId) {
@@ -190,5 +197,20 @@ public class BookingService {
             return booking.own(appointment.id(), appointment.patientId());
         }
         return appointment;
+    }
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public void expireHold(String id) {
+        var initial=booking.byId(id);if(initial==null)return;
+        catalog.lockMutation(initial.scheduleId());lockCareScope(id);var current=booking.byId(id);
+        if(current.state().equals("PENDING_PAYMENT") && current.holdExpiresAt()<=clock.millis()) {
+            catalog.releaseExpiredHold(current.scheduleId(),current.slotId(),id);
+            if(booking.expire(id,clock.millis())==1)booking.releaseGuard(current);
+        }
+    }
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public void checkInReminder(String id) {
+        lockCareScope(id);var a=booking.byId(id);long now=clock.millis();
+        if(a.state().equals("CONFIRMED") && !booking.substitutionPending(id) && reception.summaryFor(id)==null && now>=a.startsAt()-30*60_000L && now<a.endsAt()-15*60_000L)
+            delivery.publish(a.patientId(),"CHECK_IN_REMINDER",id,"签到窗口已开放，请从预约订单签到","check-in-reminder:"+id);
     }
 }

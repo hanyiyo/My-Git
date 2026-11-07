@@ -50,13 +50,7 @@ public class RefundProcessor {
             error = "REFUND_PROVIDER_UNAVAILABLE";
         }
         String resultReference = reference; String resultError = error;
-        var result = transaction.execute(status -> finish(claim, resultReference, resultError));
-        if (delivery != null) {
-            String recipient = billing.refundRecipient(claim.paymentId());
-            if (recipient != null) delivery.publish(recipient, "REFUND_RESULT", claim.id(),
-                result.state().equals("REFUNDED") ? "退款已完成" : "退款处理失败，将按计划重试", "refund-result:" + claim.id() + ":" + result.attempts());
-        }
-        return result;
+        return transaction.execute(status -> finish(claim, resultReference, resultError));
     }
     private Claim claim(String id, boolean force) {
         var work = billing.lockRefund(id);
@@ -69,6 +63,7 @@ public class RefundProcessor {
             billing.finishAttempt(work.attemptToken(), "ABANDONED", now, error, null);
             if (work.attempts() >= MAX_ATTEMPTS) {
                 billing.finishRefund(id, work.attemptToken(), "REFUND_FAILED", null, error, null);
+                notifyResult(work.paymentId(),id,work.attempts(),"退款最终失败，请联系管理员");
                 return null;
             }
         } else if (work.attempts() >= MAX_ATTEMPTS || (!force && (work.nextAttemptAt() == null || work.nextAttemptAt() > now))) return null;
@@ -87,9 +82,13 @@ public class RefundProcessor {
         Long next = succeeded || work.attempts() >= MAX_ATTEMPTS ? null : now + RETRY_MILLIS;
         billing.finishRefund(claim.id(), claim.token(), succeeded ? "REFUNDED" : "REFUND_FAILED", next, error, succeeded ? reference : null);
         billing.finishAttempt(claim.token(), succeeded ? "SUCCEEDED" : "FAILED", now, error, succeeded ? reference : null);
+        notifyResult(claim.paymentId(),claim.id(),work.attempts(),succeeded?"退款已完成":next==null?"退款最终失败，请联系管理员":"退款处理失败，将按计划重试");
         return billing.refundById(claim.id());
     }
     public void processDue() {
         for (var id : billing.dueRefunds(clock.millis())) process(id);
+    }
+    private void notifyResult(String payment,String id,int attempt,String message) {
+        if(delivery!=null) { String recipient=billing.refundRecipient(payment);if(recipient!=null)delivery.publish(recipient,"REFUND_RESULT",id,message,"refund-result:"+id+":"+attempt); }
     }
 }

@@ -64,6 +64,8 @@ public class CatalogService {
     public record SlotReservation(String slotId, String scheduleId, String doctorId, String departmentId,
         LocalDate clinicDate, String session, String serviceMode, long startsAt, long endsAt, long feeMinor, long createdAt, long holdExpiresAt) {}
     public record RegistrationSession(LocalDate clinicDate, String session) {}
+    @Transactional
+    public void releaseExpiredHold(String schedule,String slot,String appointment) { catalog.lockSchedule(schedule);catalog.lockSlot(slot);catalog.releaseSlot(slot,appointment); }
     public RegistrationSession registrationSession(String id) {
         var schedule = catalog.schedule(id);
         if (schedule == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");

@@ -76,6 +76,7 @@ public class IdentityService {
     }
 
     public List<Doctor> doctors() { return accounts.doctors(); }
+    public List<String> administrators() { return accounts.administrators(); }
 
     public Profile administrator(String identifier) {
         var account = accounts.byIdentifier(normalize(identifier));

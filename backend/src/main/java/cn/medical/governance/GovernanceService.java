@@ -51,6 +51,7 @@ public class GovernanceService {
         long now = clock.millis(); String id = UUID.randomUUID().toString();
         governance.insertRequest(new GovernanceMapper.Request(id, scheduleId, schedule.doctorId(), schedule.departmentId(), actor, null, state, reason.trim(), now, now));
         audit(actor, "SUSPENSION_SUBMITTED", "SUSPENSION", id, reason);
+        delivery.administrators("SUSPENSION_REVIEW",id,"有停诊申请待处理","admin-suspension:"+id);
         String head = governance.departmentHead(schedule.departmentId());
         if (state.equals("HEAD_REVIEW") && head != null) notify(head, "SUSPENSION_REVIEW", id, "本科室有待审核停诊申请", "head-review:" + id);
         return view(governance.lockRequest(id));
@@ -114,7 +115,9 @@ public class GovernanceService {
             for (var appointment : bookings.lockSchedulePatients(request.scheduleId())) {
                 if (!appointment.state().equals("CONFIRMED")) continue;
                 bookings.awaitSubstitution(appointment.id());
-                governance.insertChoice(new GovernanceMapper.Choice(UUID.randomUUID().toString(), id, appointment.id(), appointment.patientId(), appointment.doctorId(), request.substituteDoctorId(), "PENDING", deadline, null, null));
+                String choiceId=UUID.randomUUID().toString();
+                governance.insertChoice(new GovernanceMapper.Choice(choiceId, id, appointment.id(), appointment.patientId(), appointment.doctorId(), request.substituteDoctorId(), "PENDING", deadline, null, null));
+                delivery.schedule("SUBSTITUTION_EXPIRY",choiceId,deadline);
                 notify(appointment.patientId(), "SUBSTITUTION_PENDING", appointment.id(), "请在截止时间前确认替诊；不响应将取消并退款", "substitution-pending:" + id + ":" + appointment.id());
             }
             governance.updateRequest(id, "APPROVED_SUBSTITUTE", request.substituteDoctorId(), clock.millis());
@@ -138,7 +141,10 @@ public class GovernanceService {
         return view(governance.lockRequest(id));
     }
     private void applyStop(String actor, GovernanceMapper.Request request, String reason) {
-        for (var appointment : bookings.lockSchedulePatients(request.scheduleId())) bookings.cancelForGovernance(appointment.id(), "CLINIC_SUSPENSION");
+        for (var appointment : bookings.lockSchedulePatients(request.scheduleId())) {
+            bookings.cancelForGovernance(appointment.id(), "CLINIC_SUSPENSION");
+            notify(appointment.patientId(),"CLINIC_SUSPENDED",appointment.id(),"本次出诊已停诊，请重新选择有效排班；已付款进入退款","clinic-suspended:"+request.id()+":"+appointment.id());
+        }
         for (var choice : governance.requestChoices(request.id())) if (choice.state().equals("PENDING")) governance.updateChoice(choice.id(), "REJECTED", clock.millis(), "医院紧急停诊");
         catalog.changeScheduleState(request.scheduleId(), "CANCELLED");
         audit(actor, "SUSPENSION_EFFECTIVE", "SCHEDULE", request.scheduleId(), reason);
@@ -179,6 +185,11 @@ public class GovernanceService {
         bookings.cancelForGovernance(choice.appointmentId(), "SUBSTITUTE_TIMEOUT");
         governance.updateChoice(choice.id(), "EXPIRED", clock.millis(), "患者未在期限内确认替诊");
         audit(governance.request(choice.requestId()).requestedBy(), "SUBSTITUTE_CHOICE_EXPIRED", "CHOICE", choice.id(), "系统按截止时间自动执行；非患者主动操作");
+    }
+    public void expireChoiceTask(String id) {
+        var initial=governance.choice(id);if(initial==null)return;
+        lockRequest(initial.requestId());var choice=governance.patientChoice(id,initial.patientId());
+        if(choice.state().equals("PENDING") && choice.deadlineAt()<=clock.millis())expireChoice(choice);
     }
     public void assignHead(String admin, String departmentId, String doctorId) {
         var doctor = catalog.ownDoctor(doctorId);

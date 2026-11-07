@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, download } from '../api'
+import { useNotificationRefresh } from '../useNotificationRefresh'
 interface AiResult { taskId: string; state: string; provider: string; versionNo: number; stale: boolean; errorCode: string | null; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string } | null }
 interface Clinical { consultation: { state: string } | null; materials: { id: string; versionNo: number; symptomText: string; attachments: { id: string; originalName: string }[] }[]; messages: { authorRole: string; body: string }[]; result: { body: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
 const route = useRoute(), id = String(route.params.id), clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([]), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), busy = ref(false)
@@ -12,6 +13,7 @@ async function submitResult() { busy.value = true; error.value = ''; try { clini
 async function submitCorrection() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/corrections`, 'POST', { reason: reason.value, body: correction.value }); reason.value = ''; correction.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '更正提交失败' } finally { busy.value = false } }
 async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/doctor/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60_000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
 onMounted(load)
+useNotificationRefresh(load, id)
 </script>
 <template>
   <RouterLink to="/doctor/reception">返回候诊队列</RouterLink>

@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
     "medical.captcha-ttl=2m", "spring.data.redis.database=7", "medical.refund-scanner-enabled=false", "medical.reception-scan-delay=3600000"})
-@Import({TestAnswers.class, BookingHttpTest.TimeControl.class})
+@Import({TestAnswers.class, BookingHttpTest.TimeControl.class,RuntimeRecoveryControl.class})
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class WorkflowHttpTest extends HttpFixture {
     @LocalServerPort int port;
@@ -26,6 +26,11 @@ class WorkflowHttpTest extends HttpFixture {
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean cn.medical.clinical.ClinicalFileStore fileStore;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean cn.medical.ai.LocalAiTextProvider aiProvider;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean cn.medical.booking.BookingService bookingService;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean cn.medical.delivery.SseTransport sseTransport;
+    @Autowired cn.medical.delivery.DeliveryService deliveryService;
+    @Autowired cn.medical.delivery.RuntimeTaskMapper runtimeTasks;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired cn.medical.delivery.DeliveryMapper deliveryMapper;
     Browser administrator;
     record Actor(Browser browser, String id, String identifier) {}
     record Scenario(Actor patient, Actor doctor, String departmentId, JsonNode schedule, String appointmentId) {}
@@ -351,11 +356,16 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(financial.status()).isEqualTo(200); assertThat(financial.body().path("refund").path("reason").asText()).isEqualTo("CLINIC_SUSPENSION");
         assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + id + "/review", Map.of("approve", true, "reason", "重复")).status()).isEqualTo(409);
         assertThat(admin().call("GET", "/api/v1/admin/medical/audits/" + scheduleId, null).body()).isNotEmpty();
+        var stopped=deliveryMapper.byDedupe("clinic-suspended:"+id+":"+s.appointmentId());assertThat(stopped).isNotNull();assertThat(stopped.eventType()).isEqualTo("CLINIC_SUSPENDED");
+        assertThat(deliveryMapper.byDedupe("appointment-cancelled:"+s.appointmentId()+":CLINIC_SUSPENSION")).isNotNull();
     }
     @Test void substitutionRequiresPatientChoiceRetainsSlotAndRevokesOriginalDoctor() throws Exception {
         var s = scenario("ONLINE"); var head = doctor(s.departmentId()); var substitute = doctor(s.departmentId());
         assertThat(materials(s.patient().browser(), s.appointmentId(), true, "替诊共享材料").status()).isEqualTo(200);
         approveSubstitution(s, head, substitute);
+        assertThat(s.patient().browser().call("GET","/api/v1/notifications/unread",null).body().asInt()).isGreaterThanOrEqualTo(2);
+        deliveryService.retry();assertThat(s.patient().browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTION_PENDING");
+        assertThat(substitute.browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTE_INVITED");
         assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "禁止叠加变更")).status()).isEqualTo(409);
         var ordersBefore = s.patient().browser().call("GET", "/api/v1/patient/appointments", null).body().get(0);
         assertThat(ordersBefore.path("substitutionPending").asBoolean()).isTrue();
@@ -383,6 +393,7 @@ class WorkflowHttpTest extends HttpFixture {
         String reviewPath = "/api/v1/doctor/catalog/head/suspensions/" + id + "/review";
         assertThat(head.browser().call("POST", reviewPath, Map.of("plan", "SUBSTITUTE", "substituteDoctorId", s.doctor().id(), "reason", "不能自替")).status()).isEqualTo(409);
         assertThat(head.browser().call("POST", reviewPath, Map.of("plan", "SUBSTITUTE", "substituteDoctorId", substitute.id(), "reason", "邀请替诊")).status()).isEqualTo(200);
+        deliveryService.retry();
         assertThat(substitute.browser().call("GET", "/api/v1/notifications", null).body().toString()).contains("SUBSTITUTE_INVITED");
         assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/substitutions/" + id + "/respond", Map.of("accepted", false, "reason", "无法出诊")).body().path("state").asText()).isEqualTo("HEAD_REVIEW");
         assertThat(head.browser().call("POST", reviewPath, Map.of("plan", "SUBSTITUTE", "substituteDoctorId", substitute.id(), "reason", "重新邀请")).status()).isEqualTo(200);
@@ -575,6 +586,163 @@ class WorkflowHttpTest extends HttpFixture {
             start.countDown(); for (var future : futures) assertThat(future.get().status()).isEqualTo(200);
         } finally { org.mockito.Mockito.reset(bookingService); }
         assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isTrue();
+    }
+    @Test void notificationsPersistBeforeDeliveryAndRollbackDoesNotEmit() throws Exception {
+        var s=scenario("ONLINE");deliveryService.retry();String key="transaction:"+identifier();
+        var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        try(var executor=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var writer=executor.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                deliveryService.publish(s.patient().id(),"TRANSACTION_TEST",s.appointmentId(),"未提交不得投递",key);entered.countDown();
+                try { if(!release.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("timeout"); } catch(InterruptedException error) { throw new RuntimeException(error); }
+                status.setRollbackOnly();
+            }));
+            try { assertThat(entered.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();deliveryService.retry();assertThat(deliveryMapper.byDedupe(key)).isNull(); }
+            finally { release.countDown(); }
+            writer.get();
+        }
+        assertThat(deliveryMapper.byDedupe(key)).isNull();
+        var notification=deliveryMapper.byDedupe("appointment-confirmed:"+s.appointmentId());
+        assertThat(notification.state()).isEqualTo("SENT");assertThat(notification.cursorNo()).isNotNull();
+        assertThat(s.doctor().browser().call("GET","/api/v1/notifications",null).body().toString()).contains("APPOINTMENT_CONFIRMED");
+    }
+    @Test void confirmedCheckInAndCallNotificationsFollowBusinessFactsWithoutDuplicateCheckIn() throws Exception {
+        var s=scenario("ONLINE");clock.now=Instant.ofEpochMilli(s.schedule().path("startsAt").asLong());
+        for(int repeat=0;repeat<2;repeat++)assertThat(s.patient().browser().call("POST",patientPath(s)+"/check-in",null).status()).isEqualTo(200);
+        assertThat(s.doctor().browser().call("POST","/api/v1/doctor/reception/"+s.appointmentId()+"/call",null).status()).isEqualTo(200);
+        deliveryService.retry();deliveryService.retry();
+        var patient=s.patient().browser().call("GET","/api/v1/notifications",null).body();
+        assertThat(patient).hasSize(3);assertThat(patient.toString()).contains("APPOINTMENT_CONFIRMED","CHECK_IN","CALLED");
+        var doctor=s.doctor().browser().call("GET","/api/v1/notifications",null).body();assertThat(doctor).hasSize(2);assertThat(doctor.toString()).contains("APPOINTMENT_CONFIRMED","CHECK_IN");
+        for(var event:patient) { assertThat(event.path("state").asText()).isEqualTo("SENT");assertThat(event.path("attempts").asInt()).isEqualTo(1); }
+    }
+    @Test void deliveryFailureRetriesAreBoundedAndDoNotRollbackConfirmedAppointment() throws Exception {
+        org.mockito.Mockito.doThrow(new IllegalStateException("simulated stream failure")).when(sseTransport).deliver(org.mockito.ArgumentMatchers.any());
+        try {
+            var s=scenario("ONLINE");String key="appointment-confirmed:"+s.appointmentId();
+            assertThat(s.patient().browser().call("GET",patientPath(s),null).body().path("state").asText()).isEqualTo("CONFIRMED");
+            for(int attempt=1;attempt<=3;attempt++) {
+                deliveryService.retry();var event=deliveryMapper.byDedupe(key);
+                assertThat(event.state()).isEqualTo("FAILED");assertThat(event.attempts()).isEqualTo(attempt);assertThat(event.lastError()).isEqualTo("SSE_DELIVERY_FAILED");
+                clock.now=clock.instant().plusSeconds(60);
+            }
+            org.mockito.Mockito.reset(sseTransport);deliveryService.retry();assertThat(deliveryMapper.byDedupe(key).attempts()).isEqualTo(3);
+            var visible=s.patient().browser().call("GET","/api/v1/notifications",null);assertThat(visible.body().toString()).contains(s.appointmentId());
+            long id=deliveryMapper.byDedupe(key).id();
+            assertThat(s.patient().browser().call("POST","/api/v1/notifications/"+id+"/read",null).status()).isEqualTo(204);
+            assertThat(s.patient().browser().call("POST","/api/v1/notifications/"+id+"/read",null).status()).isEqualTo(204);
+            assertThat(actor("PATIENT").browser().call("POST","/api/v1/notifications/"+id+"/read",null).status()).isEqualTo(404);
+        } finally { org.mockito.Mockito.reset(sseTransport); }
+    }
+    @Test void notificationCursorPagesAndAuthenticatedSseReplayCatchUpMoreThanOneHundred() throws Exception {
+        while(deliveryService.retry()>0) { }
+        var patient=actor("PATIENT");
+        for(int index=0;index<105;index++)deliveryService.publish(patient.id(),"CATCHUP",patient.id(),"虚构补齐"+index,"catchup:"+patient.id()+":"+index);
+        deliveryService.retry();deliveryService.retry();
+        var first=patient.browser().call("GET","/api/v1/notifications?limit=100",null).body();assertThat(first).hasSize(100);
+        long cursor=first.get(99).path("cursorNo").asLong();
+        var last=patient.browser().call("GET","/api/v1/notifications?after="+cursor+"&limit=100",null).body();assertThat(last).hasSize(5);
+        var request=HttpRequest.newBuilder(URI.create(patient.browser().base+"/api/v1/notifications/stream")).header("Authorization","Bearer "+patient.browser().access).header("Last-Event-ID",Long.toString(cursor)).GET().build();
+        var response=patient.browser().http.send(request,HttpResponse.BodyHandlers.ofInputStream());assertThat(response.statusCode()).isEqualTo(200);
+        try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(response.body(),StandardCharsets.UTF_8))) {
+            var ids=new ArrayList<Long>();String line;
+            while(ids.size()<5 && (line=reader.readLine())!=null)if(line.startsWith("id:"))ids.add(Long.parseLong(line.substring(3).trim()));
+            assertThat(ids).containsExactlyElementsOf(java.util.stream.StreamSupport.stream(last.spliterator(),false).map(n -> n.path("cursorNo").asLong()).toList());
+        }
+        assertThat(patient.browser().call("GET","/api/v1/notifications?after=-1",null).status()).isEqualTo(400);
+    }
+    @Test void laterDeliveryWorkerDrainsEarlierCursorBeforeItsOwnEvent() throws Exception {
+        while(deliveryService.retry()>0) { }
+        var patient=actor("PATIENT");
+        var request=HttpRequest.newBuilder(URI.create(patient.browser().base+"/api/v1/notifications/stream")).header("Authorization","Bearer "+patient.browser().access).GET().build();
+        var response=patient.browser().http.send(request,HttpResponse.BodyHandlers.ofInputStream());assertThat(response.statusCode()).isEqualTo(200);
+        var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        String firstKey="ordered-first:"+patient.id(),secondKey="ordered-second:"+patient.id();
+        deliveryService.publish(patient.id(),"ORDERED",patient.id(),"第一条",firstKey);deliveryService.publish(patient.id(),"ORDERED",patient.id(),"第二条",secondKey);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            cn.medical.delivery.DeliveryMapper.Notification event=invocation.getArgument(0);
+            if(event.dedupeKey().equals(firstKey)) { entered.countDown();if(!release.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("delivery barrier timeout"); }
+            return invocation.callRealMethod();
+        }).when(sseTransport).deliver(org.mockito.ArgumentMatchers.any());
+        try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(response.body(),StandardCharsets.UTF_8));var executor=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var first=executor.submit(() -> deliveryService.retry());
+            try {
+                assertThat(entered.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();deliveryService.retry();
+                var ids=new ArrayList<Long>();String line;
+                while(ids.size()<2 && (line=reader.readLine())!=null)if(line.startsWith("id:"))ids.add(Long.parseLong(line.substring(3).trim()));
+                assertThat(ids).containsExactly(deliveryMapper.byDedupe(firstKey).cursorNo(),deliveryMapper.byDedupe(secondKey).cursorNo());
+            } finally { release.countDown(); }
+            first.get();
+        } finally { release.countDown();org.mockito.Mockito.reset(sseTransport); }
+    }
+    @Test void durableHoldAndSubstitutionTasksExpireOnceAndReminderHonorsWindow() throws Exception {
+        var s=scenario("ONLINE");var head=doctor(s.departmentId());var substitute=doctor(s.departmentId());assignHead(s,head);
+        approveSubstitution(s,head,substitute);
+        var choice=s.patient().browser().call("GET","/api/v1/patient/substitution-choices",null).body().get(0);
+        clock.now=Instant.ofEpochMilli(choice.path("deadlineAt").asLong());
+        assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
+        assertThat(s.patient().browser().call("GET",patientPath(s),null).body().path("state").asText()).isEqualTo("CANCELLED");
+        assertThat(s.patient().browser().call("GET",patientPath(s)+"/billing",null).body().path("refund").path("state").asText()).isEqualTo("REFUND_PENDING");
+        assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
+        clock.now=Instant.now();var pending=scenario("ONLINE");var other=actor("PATIENT");
+        var hold=other.browser().call("POST","/api/v1/patient/appointments",Map.of("scheduleId",pending.schedule().path("id").asText(),"source","ADVANCE","idempotencyKey",identifier())).body();
+        clock.now=Instant.ofEpochMilli(hold.path("holdExpiresAt").asLong());admin().call("POST","/api/v1/admin/test/runtime/scan",null);
+        try(var connection=dataSource.getConnection();var query=connection.prepareStatement("SELECT state FROM appointment WHERE id=?")) { query.setString(1,hold.path("id").asText());try(var row=query.executeQuery()){assertThat(row.next()).isTrue();assertThat(row.getString(1)).isEqualTo("EXPIRED");} }
+        clock.now=Instant.ofEpochMilli(pending.schedule().path("startsAt").asLong()).minus(Duration.ofMinutes(30));admin().call("POST","/api/v1/admin/test/runtime/scan",null);
+        var reminder=deliveryMapper.byDedupe("check-in-reminder:"+pending.appointmentId());assertThat(reminder).isNotNull();
+        admin().call("POST","/api/v1/admin/test/runtime/scan",null);assertThat(deliveryMapper.byDedupe("check-in-reminder:"+pending.appointmentId()).id()).isEqualTo(reminder.id());
+    }
+    @Test void expiredAiLeaseIsRecoveredAndDelayedOldWorkerCannotCreateAnotherResult() throws Exception {
+        var s=scenario("ONLINE");String text="租约恢复虚构咳嗽3天";String consentId=consent(s,true,"LOCAL_MOCK",text).path("id").asText();
+        var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);var count=new java.util.concurrent.atomic.AtomicInteger();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            if(count.incrementAndGet()==1) { entered.countDown();if(!release.await(15,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("provider timeout"); }
+            return invocation.callRealMethod();
+        }).when(aiProvider).analyze(org.mockito.ArgumentMatchers.eq(text),org.mockito.ArgumentMatchers.anyList());
+        try(var executor=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var first=executor.submit(() -> analyze(s,consentId,text,identifier()));
+            try {
+                assertThat(entered.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();clock.now=clock.instant().plusSeconds(31);
+                assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
+            } finally { release.countDown(); }
+            var result=first.get();assertThat(result.status()).isEqualTo(200);assertThat(result.body().path("state").asText()).isEqualTo("SUCCEEDED");assertThat(result.body().path("attempts").asInt()).isEqualTo(2);
+            assertThat(s.patient().browser().call("GET",patientPath(s)+"/ai/results",null).body()).hasSize(1);
+            assertThat(count.get()).isEqualTo(2);
+        } finally { release.countDown();org.mockito.Mockito.reset(aiProvider); }
+    }
+    @Test void abandonedAiLeaseExhaustionAndRevocationPublishTerminalNotificationsOnce() throws Exception {
+        for(boolean revoke:List.of(false,true)) {
+            var s=scenario("ONLINE");String text="虚构终态症状"+identifier();String consentId=consent(s,true,"LOCAL_MOCK",text).path("id").asText();
+            org.mockito.Mockito.doThrow(new AssertionError("simulated worker loss")).when(aiProvider).analyze(org.mockito.ArgumentMatchers.eq(text),org.mockito.ArgumentMatchers.anyList());
+            try { assertThat(analyze(s,consentId,text,identifier()).status()).isEqualTo(500); }
+            finally { org.mockito.Mockito.reset(aiProvider); }
+            var task=s.patient().browser().call("GET",patientPath(s)+"/ai/results",null).body().get(0);String id=task.path("taskId").asText();
+            if(revoke)assertThat(s.patient().browser().call("POST",patientPath(s)+"/ai/consents/"+consentId+"/revoke",null).status()).isEqualTo(204);
+            try(var connection=dataSource.getConnection();var query=connection.prepareStatement("UPDATE ai_task SET attempts=3,lease_expires_at=? WHERE id=?")) {
+                query.setLong(1,clock.millis()-1);query.setString(2,id);assertThat(query.executeUpdate()).isEqualTo(1);
+            }
+            assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
+            var terminal=s.patient().browser().call("GET",patientPath(s)+"/ai/results",null).body().get(0);
+            assertThat(terminal.path("state").asText()).isEqualTo(revoke?"CANCELLED":"FAILED");assertThat(terminal.path("attempts").asInt()).isEqualTo(3);
+            var event=deliveryMapper.byDedupe("ai-result:"+id);assertThat(event).isNotNull();
+            admin().call("POST","/api/v1/admin/test/runtime/scan",null);assertThat(deliveryMapper.byDedupe("ai-result:"+id).id()).isEqualTo(event.id());
+        }
+    }
+    @Test void durableTaskErrorsRespectBackoffAndStopAfterThreeAttempts() throws Exception {
+        String object=UUID.randomUUID().toString(),id="retry:"+object;
+        runtimeTasks.insert(id,"HOLD_EXPIRY",object,clock.millis());
+        org.mockito.Mockito.doThrow(new IllegalStateException("simulated business failure")).when(bookingService).expireHold(object);
+        try {
+            for(int attempt=1;attempt<=3;attempt++) {
+                assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
+                var task=runtimeTasks.lock(id);assertThat(task.attempts()).isEqualTo(attempt);assertThat(task.state()).isEqualTo(attempt==3?"FAILED":"PENDING");
+                assertThat(task.lastError()).isEqualTo("TASK_EXECUTION_FAILED");
+                admin().call("POST","/api/v1/admin/test/runtime/scan",null);assertThat(runtimeTasks.lock(id).attempts()).isEqualTo(attempt);
+                clock.now=clock.instant().plusSeconds(60);
+            }
+            admin().call("POST","/api/v1/admin/test/runtime/scan",null);assertThat(runtimeTasks.lock(id).attempts()).isEqualTo(3);
+            org.mockito.Mockito.verify(bookingService,org.mockito.Mockito.times(3)).expireHold(object);
+        } finally { org.mockito.Mockito.reset(bookingService); }
     }
     @Test void materialUploadChecksAuthorizationContentCountAndTenMegabyteBoundary() throws Exception {
         var scenario = scenario("ONLINE"); var patient = scenario.patient().browser(); String id = scenario.appointmentId();

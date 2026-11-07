@@ -35,6 +35,7 @@ class BookingHttpTest extends HttpFixture {
     @Autowired AdjustableClock clock;
     @Autowired TestRefundProvider refundProvider;
     @Autowired cn.medical.reception.ReceptionService reception;
+    @Autowired cn.medical.delivery.DeliveryMapper notifications;
     @BeforeEach @AfterEach void resetClock() { clock.now = Instant.now(); }
     static class AdjustableClock extends Clock {
         volatile Instant now = Instant.now();
@@ -451,6 +452,28 @@ class BookingHttpTest extends HttpFixture {
         // The first failed attempt and the post-lease recovery each call the provider;
         // claiming the abandoned lease itself performs no external refund.
         assertThat(refundProvider.amounts.get(refundId)).containsExactly(2000L, 2000L);
+    }
+
+    @Test void thirdAbandonedRefundLeaseStopsAndPublishesOneFinalReminder() throws Exception {
+        var schedule=published("ONLINE","AM",1);var owner=patient();var admin=administrator();
+        var order=owner.call("POST","/api/v1/patient/appointments",command(schedule,identifier()));
+        String path="/api/v1/patient/appointments/"+order.body().path("id").asText();
+        assertThat(owner.call("POST",path+"/simulate-payment",null).status()).isEqualTo(200);
+        assertThat(owner.call("POST",path+"/cancel",null).status()).isEqualTo(200);
+        String refund=owner.call("GET",path+"/billing",null).body().path("refund").path("id").asText();
+        for(int attempt=1;attempt<=3;attempt++) {
+            var lost=admin.call("POST","/api/v1/admin/test/refunds/"+refund+"/crash",null);
+            assertThat(lost.status()).isEqualTo(202);assertThat(lost.body().path("attempts").asInt()).isEqualTo(attempt);
+            clock.now=clock.instant().plusSeconds(31);
+        }
+        String process="/api/v1/admin/billing/refunds/"+refund+"/process";
+        var exhausted=admin.call("POST",process,null);assertThat(exhausted.body().path("state").asText()).isEqualTo("REFUND_FAILED");
+        assertThat(exhausted.body().path("attempts").asInt()).isEqualTo(3);assertThat(exhausted.body().path("nextAttemptAt").isNull()).isTrue();
+        var event=notifications.byDedupe("refund-result:"+refund+":3");assertThat(event).isNotNull();assertThat(event.payload()).contains("最终失败");
+        assertThat(admin.call("POST",process,null).body()).isEqualTo(exhausted.body());
+        assertThat(notifications.byDedupe("refund-result:"+refund+":3").id()).isEqualTo(event.id());
+        assertThat(refundProvider.amounts).doesNotContainKey(refund);
+        assertThat(owner.call("GET",path,null).body().path("state").asText()).isEqualTo("CANCELLED");
     }
 
     @Test void patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot() throws Exception {

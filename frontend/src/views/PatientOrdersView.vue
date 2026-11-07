@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
+import { useNotificationRefresh } from '../useNotificationRefresh'
 
 interface Payment { id: string; amountMinor: number; state: string; mode: string; paidAt: number }
 interface Refund { id: string; amountMinor: number; reason: string; state: string; attempts: number; nextAttemptAt: number | null; lastError: string | null; providerReference: string | null }
@@ -63,6 +64,7 @@ async function restoreQueue(order: Order) {
   catch (failure) { error.value = failure instanceof Error ? failure.message : '恢复排队失败，请重试'; busy.value = false }
 }
 onMounted(load)
+useNotificationRefresh(load)
 </script>
 <template>
   <RouterLink to="/patient">返回工作台</RouterLink>

@@ -30,13 +30,21 @@ public interface AiMapper {
 
     @Select("SELECT id, appointment_id, patient_id, material_id, consent_id, idempotency_key, provider, purpose, state, attempts, error_code, created_at, finished_at, model_version, prompt_version, symptom_text, material_version, draft FROM ai_task WHERE patient_id=#{patientId} AND idempotency_key=#{key}")
     Task taskByKey(@Param("patientId") String patientId, @Param("key") String key);
-    @Insert("INSERT INTO ai_task (id, appointment_id, patient_id, material_id, consent_id, idempotency_key, provider, purpose, state, attempts, created_at, model_version, prompt_version, symptom_text, material_version, draft) VALUES (#{id}, #{appointmentId}, #{patientId}, #{materialId}, #{consentId}, #{idempotencyKey}, #{provider}, #{purpose}, 'RUNNING', 1, #{createdAt}, #{modelVersion}, #{promptVersion}, #{symptomText}, #{materialVersion}, #{draft})")
+    @Insert("INSERT INTO ai_task (id, appointment_id, patient_id, material_id, consent_id, idempotency_key, provider, purpose, state, attempts, created_at, model_version, prompt_version, symptom_text, material_version, draft) VALUES (#{id}, #{appointmentId}, #{patientId}, #{materialId}, #{consentId}, #{idempotencyKey}, #{provider}, #{purpose}, 'PENDING', 0, #{createdAt}, #{modelVersion}, #{promptVersion}, #{symptomText}, #{materialVersion}, #{draft})")
     void insertTask(Task task);
     @Update("UPDATE ai_task SET state=#{state}, attempts=#{attempts}, error_code=#{errorCode}, finished_at=#{finishedAt} WHERE id=#{id}")
     int finishTask(@Param("id") String id, @Param("state") String state, @Param("attempts") int attempts,
-        @Param("errorCode") String errorCode, @Param("finishedAt") long finishedAt);
+        @Param("errorCode") String errorCode, @Param("finishedAt") Long finishedAt);
     @Select("SELECT id, appointment_id, patient_id, material_id, consent_id, idempotency_key, provider, purpose, state, attempts, error_code, created_at, finished_at, model_version, prompt_version, symptom_text, material_version, draft FROM ai_task WHERE id=#{id}")
     Task task(@Param("id") String id);
+    @Select("SELECT id, appointment_id, patient_id, material_id, consent_id, idempotency_key, provider, purpose, state, attempts, error_code, created_at, finished_at, model_version, prompt_version, symptom_text, material_version, draft FROM ai_task WHERE id=#{id} FOR UPDATE") Task lockTask(String id);
+    record Lease(String token,Long expiresAt) {}
+    @Select("SELECT lease_token AS token,COALESCE(lease_expires_at,0) AS expires_at FROM ai_task WHERE id=#{id}") Lease lease(String id);
+    @Select("SELECT id FROM ai_task WHERE (state='PENDING' AND next_attempt_at<=#{now}) OR (state='RUNNING' AND (lease_expires_at IS NULL OR lease_expires_at<=#{now})) ORDER BY created_at,id LIMIT 100") List<String> due(long now);
+    @Update("UPDATE ai_task SET state='RUNNING',attempts=attempts+1,lease_token=#{token},lease_expires_at=#{expires} WHERE id=#{id}")
+    void claim(@Param("id") String id,@Param("token") String token,@Param("expires") long expires);
+    @Update("UPDATE ai_task SET lease_token=NULL,lease_expires_at=NULL,next_attempt_at=#{next} WHERE id=#{id} AND lease_token=#{token}")
+    void release(@Param("id") String id,@Param("token") String token,@Param("next") long next);
 
     @Select("SELECT id, appointment_id, patient_id, material_id, consent_id, idempotency_key, provider, purpose, state, attempts, error_code, created_at, finished_at, model_version, prompt_version, symptom_text, material_version, draft FROM ai_task WHERE appointment_id=#{id} ORDER BY created_at DESC, id")
     List<Task> tasks(@Param("id") String id);

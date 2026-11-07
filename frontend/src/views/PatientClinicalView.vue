@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, download, upload } from '../api'
+import { useNotificationRefresh } from '../useNotificationRefresh'
 
 interface Attachment { id: string; originalName: string; mediaType: string; sizeBytes: number }
 interface Material { id: string; versionNo: number; symptomText: string; shared: boolean; attachments: Attachment[] }
@@ -47,6 +48,7 @@ async function shareDraft(taskId: string) {
 async function sendMessage() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/patient/appointments/${id}/clinical/messages`, 'POST', { body: message.value }); message.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '消息发送失败' } finally { busy.value = false } }
 async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/patient/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60_000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
 onMounted(load)
+useNotificationRefresh(load, id)
 </script>
 
 <template>

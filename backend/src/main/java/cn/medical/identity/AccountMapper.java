@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface AccountMapper {
+    @Select("SELECT a.id FROM account a JOIN account_role r ON r.account_id=a.id WHERE a.enabled=TRUE AND r.role='ADMIN'") List<String> administrators();
     record Account(String id, String identifier, String passwordHash, boolean enabled) {}
     record RefreshSession(String id, String accountId, String tokenHash, long expiresAt, boolean revoked) {}
 

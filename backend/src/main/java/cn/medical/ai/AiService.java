@@ -9,6 +9,7 @@ import cn.medical.clinical.ClinicalService;
 import cn.medical.identity.ApiFailure;
 import cn.medical.governance.AuditService;
 import cn.medical.governance.ReviewPolicyService;
+import cn.medical.delivery.DeliveryService;
 import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -35,6 +36,7 @@ public class AiService {
     public record ConsentInput(boolean accepted, String provider, String purpose, String scope, String symptomText) {}
     public record AnalyzeInput(String consentId, String symptomText, String idempotencyKey) {}
     private record Prepared(AiMapper.Task task, boolean created) {}
+    private record Claim(AiMapper.Task task,String token) {}
     public static final class ProviderFailure extends RuntimeException {
         private final String code;
         public ProviderFailure(String code) { this.code = code; }
@@ -50,12 +52,14 @@ public class AiService {
     private final TransactionTemplate transactions;
     private final AuditService audit;
     private final ReviewPolicyService policy;
+    private final DeliveryService delivery;
 
     public AiService(AiMapper ai, ClinicalService clinical, BookingService booking, CatalogService catalog, AiTextProvider provider,
-        ObjectMapper json, Clock clock, PlatformTransactionManager manager, AuditService audit, ReviewPolicyService policy) {
+        ObjectMapper json, Clock clock, PlatformTransactionManager manager, AuditService audit, ReviewPolicyService policy, DeliveryService delivery) {
         this.ai = ai; this.clinical = clinical; this.booking = booking; this.catalog = catalog; this.provider = provider;
         this.json = json; this.clock = clock;
         this.audit = audit; this.policy = policy;
+        this.delivery = delivery;
         transactions = new TransactionTemplate(manager);
         transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
@@ -87,23 +91,44 @@ public class AiService {
     public ResultView analyze(String patient, String id, AnalyzeInput input) {
         Prepared prepared = transactions.execute(status -> prepare(patient, id, input));
         var task = prepared.task();
-        if (prepared.created()) {
-            var names = catalog.departments(false).stream().map(CatalogMapper.Department::name).toList();
-            for (int attempt = 1; attempt <= 3; attempt++) {
-                long started = clock.millis(); String body = null; String error = null;
-                // Provider calls never hold the medical transaction or turn database errors into provider failures.
-                try {
-                    if (task.provider().equals("EXTERNAL_TEXT")) throw new ProviderFailure("AI_PROVIDER_UNAVAILABLE");
-                    body = json.writeValueAsString(provider.analyze(input.symptomText(), names));
-                } catch (JsonProcessingException failure) { error = "AI_RESULT_SERIALIZATION_FAILED"; }
-                catch (ProviderFailure failure) { error = failure.code(); }
-                catch (RuntimeException failure) { error = "AI_PROVIDER_UNAVAILABLE"; }
-                final int number = attempt; final String response = body, code = error;
-                boolean done = Boolean.TRUE.equals(transactions.execute(status -> saveAttempt(task, number, started, response, code)));
-                if (done) break;
-            }
-        }
+        if (prepared.created()) for(int attempt=0;attempt<3;attempt++) if(!processTask(task.id()))break;
         return resultView(ai.task(task.id()), id == null ? null : clinical.patientView(patient, id));
+    }
+
+    public void processDue() { for(String id:ai.due(clock.millis()))processTask(id); }
+    private boolean processTask(String id) {
+        var claim=transactions.execute(status -> claim(id));if(claim==null)return false;
+        var task=claim.task();var names=catalog.departments(false).stream().map(CatalogMapper.Department::name).toList();
+        long started=clock.millis();String body=null,error=null;
+        try {
+            if(task.provider().equals("EXTERNAL_TEXT"))throw new ProviderFailure("AI_PROVIDER_UNAVAILABLE");
+            body=json.writeValueAsString(provider.analyze(task.symptomText(),names));
+        } catch(JsonProcessingException failure) { error="AI_RESULT_SERIALIZATION_FAILED"; }
+        catch(ProviderFailure failure) { error=failure.code(); }
+        catch(RuntimeException failure) { error="AI_PROVIDER_UNAVAILABLE"; }
+        final String response=body,code=error;
+        return Boolean.FALSE.equals(transactions.execute(status -> {
+            lockScope(task.patientId(),task.appointmentId());var current=ai.lockTask(id);var lease=ai.lease(id);
+            if(!"RUNNING".equals(current.state()) || !claim.token().equals(lease.token()))return true;
+            boolean done=saveAttempt(current,current.attempts(),started,response,code);
+            if(!done)ai.finishTask(id,"PENDING",current.attempts(),code,null);
+            ai.release(id,claim.token(),clock.millis());return done;
+        }));
+    }
+    private Claim claim(String id) {
+        var initial=ai.task(id);if(initial==null)return null;
+        lockScope(initial.patientId(),initial.appointmentId());var task=ai.lockTask(id);
+        if(!Set.of("PENDING","RUNNING").contains(task.state()))return null;
+        var lease=ai.lease(id);long now=clock.millis();
+        if(lease.token()!=null && lease.expiresAt()>now)return null;
+        if(task.state().equals("RUNNING") && task.attempts()>0)
+            ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(),id,task.provider(),task.purpose(),"ABANDONED",task.attempts(),0,"AI_LEASE_EXPIRED",now));
+        var consent=ai.consent(task.consentId(),task.appointmentId(),task.patientId());
+        if(consent==null || consent.revokedAt()!=null || !consent.accepted()) {
+            ai.finishTask(id,"CANCELLED",task.attempts(),"AI_CONSENT_REVOKED",now);notifyTerminal(task,"本次AI授权已撤回，任务已取消");return null;
+        }
+        if(task.attempts()>=3) { ai.finishTask(id,"FAILED",task.attempts(),"AI_LEASE_EXHAUSTED",now);notifyTerminal(task,"AI辅助任务暂不可用，仍可自行挂号");return null; }
+        String token=UUID.randomUUID().toString();ai.claim(id,token,now+30_000);return new Claim(ai.task(id),token);
     }
 
     private Prepared prepare(String patient, String id, AnalyzeInput input) {
@@ -126,7 +151,7 @@ public class AiService {
         String materialId = material == null ? null : material.id();
         int materialVersion = material == null ? ai.latestDraftVersion(patient) + 1 : material.versionNo();
         var task = new AiMapper.Task(UUID.randomUUID().toString(), id, patient, materialId, consent.id(), input.idempotencyKey(),
-            consent.provider(), consent.purpose(), "RUNNING", 1, null, clock.millis(), null,
+            consent.provider(), consent.purpose(), "PENDING", 0, null, clock.millis(), null,
             consent.provider().equals("LOCAL_MOCK") ? provider.modelVersion() : "external-disabled", provider.promptVersion(),
             input.symptomText(), materialVersion, id == null);
         try { ai.insertTask(task); }
@@ -139,6 +164,7 @@ public class AiService {
         var consent = ai.consent(task.consentId(), task.appointmentId(), task.patientId());
         if (consent.revokedAt() != null) {
             ai.finishTask(task.id(), "CANCELLED", attempt, "AI_CONSENT_REVOKED", clock.millis());
+            notifyTerminal(task,"本次AI授权已撤回，任务已取消");
             ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), task.id(), task.provider(), task.purpose(),
                 "CANCELLED", attempt, Math.max(0, clock.millis() - started), "AI_CONSENT_REVOKED", clock.millis()));
             return true;
@@ -148,12 +174,17 @@ public class AiService {
         if (error == null) {
             ai.insertResult(new AiMapper.Result(UUID.randomUUID().toString(), task.id(), task.appointmentId(), task.materialId(),
                 task.draft() ? task.materialVersion() : ai.nextResultVersion(task.appointmentId()) + 1, task.provider(), body, clock.millis()));
-            ai.finishTask(task.id(), "SUCCEEDED", attempt, null, clock.millis()); return true;
+            ai.finishTask(task.id(), "SUCCEEDED", attempt, null, clock.millis());
+            notifyTerminal(task,"AI辅助任务已完成，请查看结果");return true;
         }
         if (attempt == 3 || error.equals("AI_RESULT_SERIALIZATION_FAILED")) {
-            ai.finishTask(task.id(), "FAILED", attempt, error, clock.millis()); return true;
+            ai.finishTask(task.id(), "FAILED", attempt, error, clock.millis());
+            notifyTerminal(task,"AI辅助任务暂不可用，仍可自行挂号");return true;
         }
         return false;
+    }
+    private void notifyTerminal(AiMapper.Task task,String message) {
+        delivery.publish(task.patientId(),"AI_RESULT",task.appointmentId()==null?task.id():task.appointmentId(),message,"ai-result:"+task.id());
     }
 
     @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
