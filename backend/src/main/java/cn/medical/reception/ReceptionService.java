@@ -60,7 +60,7 @@ public class ReceptionService {
         var next = reception.nextWaiting(entry.scheduleId());
         if (next == null || !next.appointmentId().equals(id)) throw new ApiFailure(409, "QUEUE_ORDER", "请先叫号当前候诊队列的下一位患者");
         long now = clock.millis();
-        if (appointment == null || now >= appointment.endsAt()) throw new ApiFailure(409, "SESSION_ENDED", "门诊时段已经结束");
+        if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt()) throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         if (reception.call(id, now) != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前不在等待叫号状态");
         return reception.queue(id);
     }
@@ -74,10 +74,14 @@ public class ReceptionService {
 
     private ReceptionMapper.QueueEntry transition(String doctor, String id, String action) {
         var entry = requireDoctorQueue(doctor, id);
+        var appointment = reception.appointment(id);
+        long now = clock.millis();
+        if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt())
+            throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         int changed = switch (action) {
-            case "start" -> reception.start(id, clock.millis());
-            case "miss" -> reception.miss(id, clock.millis());
-            default -> reception.complete(id, clock.millis());
+            case "start" -> reception.start(id, now);
+            case "miss" -> reception.miss(id, now);
+            default -> reception.complete(id, now);
         };
         if (changed != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前状态不允许执行该操作");
         return reception.queue(id);
