@@ -6,9 +6,6 @@ import cn.medical.identity.ApiFailure;
 import java.time.Clock;
 import java.util.UUID;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,10 +59,8 @@ public class BookingService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<OrderView> orders(String patient) {
-        Map<String, CatalogService.ScheduleView> schedules = catalog.schedules(true, null, null, null, null).stream()
-            .collect(Collectors.toMap(CatalogService.ScheduleView::id, Function.identity()));
         return booking.list(patient).stream().map(this::expireIfDue).map(appointment -> {
-            var schedule = schedules.get(appointment.scheduleId());
+            var schedule = catalog.scheduleDetails(appointment.scheduleId());
             var financial = billing.financialStatus(appointment.id());
             return new OrderView(appointment.id(), schedule == null ? appointment.doctorId() : schedule.doctorName(),
                 schedule == null ? appointment.departmentId() : schedule.departmentName(), appointment.clinicDate(),

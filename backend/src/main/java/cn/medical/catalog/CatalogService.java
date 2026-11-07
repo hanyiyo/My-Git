@@ -143,6 +143,14 @@ public class CatalogService {
             .map(schedule -> scheduleView(schedule, doctors, departments, now))
             .filter(schedule -> management || schedule.advanceAvailable() || schedule.walkInAvailable()).toList();
     }
+    /** Returns one schedule label for an existing appointment without exposing the management collection. */
+    public ScheduleView scheduleDetails(String id) {
+        var schedule = catalog.schedule(id);
+        if (schedule == null) return null;
+        var doctors = doctors(true, null).stream().collect(Collectors.toMap(DoctorView::id, Function.identity()));
+        var departments = catalog.departments().stream().collect(Collectors.toMap(CatalogMapper.Department::id, Function.identity()));
+        return scheduleView(schedule, doctors, departments, clock.millis());
+    }
     private ScheduleView scheduleView(CatalogMapper.Schedule schedule, Map<String, DoctorView> doctors, Map<String, CatalogMapper.Department> departments, long now) {
         var doctor = doctors.get(schedule.doctorId()); var department = departments.get(schedule.departmentId());
         boolean valid = doctor != null && doctor.enabled() && doctor.credentialStatus().equals("CERTIFIED")

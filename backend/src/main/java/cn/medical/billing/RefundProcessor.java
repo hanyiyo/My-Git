@@ -29,7 +29,7 @@ public class RefundProcessor {
     public BillingService.Refund process(String id) {
         return process(id, false);
     }
-    public BillingService.Refund process(String id, boolean crashAfterClaim) {
+    BillingService.Refund process(String id, boolean crashAfterClaim) {
         var claim = transaction.execute(status -> claim(id, crashAfterClaim));
         if (claim == null) return billing.refundById(id);
         if (crashAfterClaim) return billing.refundById(id);

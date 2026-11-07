@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import cn.medical.billing.RefundProvider;
+import cn.medical.billing.RefundRecoveryTestController;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"medical.captcha-ttl=2m", "spring.data.redis.database=5", "medical.refund-scanner-enabled=false"})
-@Import({TestAnswers.class, BookingHttpTest.TimeControl.class, BookingHttpTest.RefundControl.class})
+@Import({TestAnswers.class, BookingHttpTest.TimeControl.class, BookingHttpTest.RefundControl.class, RefundRecoveryTestController.class})
 class BookingHttpTest extends HttpFixture {
     @LocalServerPort int port;
     Browser administrator;
@@ -430,8 +431,8 @@ class BookingHttpTest extends HttpFixture {
         var firstFailure = admin.call("POST", process, null);
         assertThat(firstFailure.body().path("state").asText()).isEqualTo("REFUND_FAILED");
         assertThat(firstFailure.body().path("attempts").asInt()).isEqualTo(1);
-        // Public recovery seam: claim work and crash before the provider call/finish transaction.
-        var crashed = admin.call("POST", process + "?crashAfterClaim=true", null);
+        // Test-only recovery seam: claim work and crash before the provider call/finish transaction.
+        var crashed = admin.call("POST", "/api/v1/admin/test/refunds/" + refundId + "/crash", null);
         assertThat(crashed.status()).isEqualTo(202);
         assertThat(crashed.body().path("state").asText()).isEqualTo("REFUND_PROCESSING");
         assertThat(crashed.body().path("attempts").asInt()).isEqualTo(2);

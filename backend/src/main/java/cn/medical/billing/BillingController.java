@@ -9,8 +9,7 @@ public class BillingController {
     private final RefundProcessor refunds;
     public BillingController(RefundProcessor refunds) { this.refunds = refunds; }
     @PostMapping("/{id}/process")
-    ResponseEntity<BillingService.Refund> process(@PathVariable String id, @RequestParam(defaultValue="false") boolean crashAfterClaim) {
-        var refund = refunds.process(id, crashAfterClaim);
-        return ResponseEntity.status(crashAfterClaim ? 202 : 200).body(refund);
+    ResponseEntity<BillingService.Refund> process(@PathVariable String id) {
+        return ResponseEntity.ok(refunds.process(id));
     }
 }
