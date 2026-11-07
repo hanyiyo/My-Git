@@ -37,7 +37,8 @@ public class ReceptionService {
         long now = clock.millis();
         if (!current.state().equals("MISSED") || current.restorationCount() >= 1)
             throw new ApiFailure(409, "RESTORE_NOT_ALLOWED", "该预约已恢复排队或当前状态不允许恢复");
-        if (now >= appointment.endsAt()) throw new ApiFailure(409, "SESSION_ENDED", "本次门诊时段已经结束，无法恢复排队");
+        if (now < appointment.startsAt() || now >= appointment.endsAt())
+            throw new ApiFailure(409, "SESSION_ENDED", "本次门诊时段不在允许恢复排队的时间内");
         reception.restore(id, now);
         return summary(reception.queue(id));
     }
@@ -76,7 +77,7 @@ public class ReceptionService {
         var entry = requireDoctorQueue(doctor, id);
         var appointment = reception.appointment(id);
         long now = clock.millis();
-        if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt())
+        if (appointment == null || now < appointment.startsAt() || (now >= appointment.endsAt() && !action.equals("complete")))
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         int changed = switch (action) {
             case "start" -> reception.start(id, now);
