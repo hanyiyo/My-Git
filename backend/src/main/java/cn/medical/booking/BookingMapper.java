@@ -33,4 +33,6 @@ public interface BookingMapper {
     int confirm(@Param("id") String id, @Param("credential") String credential, @Param("now") long now);
     @Update("UPDATE appointment SET state='CANCELLED', cancellation_reason=#{reason}, cancelled_at=#{now} WHERE id=#{id} AND state IN ('PENDING_PAYMENT', 'CONFIRMED')")
     int cancel(@Param("id") String id, @Param("reason") String reason, @Param("now") long now);
+    @Update("UPDATE appointment SET state='COMPLETED' WHERE id=#{id} AND state='CONFIRMED'")
+    int completeAfterEncounter(@Param("id") String id);
 }

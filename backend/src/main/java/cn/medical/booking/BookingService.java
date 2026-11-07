@@ -120,6 +120,10 @@ public class BookingService {
         own(patient, id);
         return billing.financialStatus(id);
     }
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void completeAfterEncounter(String id) {
+        if (booking.completeAfterEncounter(id) != 1) throw new ApiFailure(409, "APPOINTMENT_STATE_CONFLICT", "预约当前不允许结束接诊");
+    }
     private BookingMapper.Appointment expireIfDue(BookingMapper.Appointment appointment) {
         long now = clock.millis();
         if (appointment.state().equals("PENDING_PAYMENT") && appointment.holdExpiresAt() <= now) {

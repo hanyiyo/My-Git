@@ -53,6 +53,8 @@ public class ReceptionService {
     public java.util.List<ReceptionMapper.QueueEntry> doctorQueue(String doctor, String scheduleId, LocalDate date) {
         return reception.doctorQueue(doctor, scheduleId, date);
     }
+    @Transactional(readOnly = true)
+    public ReceptionMapper.QueueEntry queueForAppointment(String id) { return reception.queue(id); }
 
     @Transactional
     public ReceptionMapper.QueueEntry call(String doctor, String id) {
@@ -72,6 +74,13 @@ public class ReceptionService {
     public ReceptionMapper.QueueEntry miss(String doctor, String id) { return transition(doctor, id, "miss"); }
     @Transactional
     public ReceptionMapper.QueueEntry complete(String doctor, String id) { return transition(doctor, id, "complete"); }
+    @Transactional
+    public ReceptionMapper.QueueEntry completeEncounter(String doctor, String id) {
+        var entry = requireDoctorQueue(doctor, id);
+        if (!entry.state().equals("IN_CONSULTATION")) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前不在接诊状态");
+        if (reception.complete(id, clock.millis()) != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前不在接诊状态");
+        return reception.queue(id);
+    }
 
     private ReceptionMapper.QueueEntry transition(String doctor, String id, String action) {
         var entry = requireDoctorQueue(doctor, id);
