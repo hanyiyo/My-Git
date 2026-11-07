@@ -8,9 +8,11 @@ import PatientOrdersView from './views/PatientOrdersView.vue'
 import DoctorReceptionView from './views/DoctorReceptionView.vue'
 import PatientClinicalView from './views/PatientClinicalView.vue'
 import DoctorClinicalView from './views/DoctorClinicalView.vue'
+import BusinessAssistantView from './views/BusinessAssistantView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
+  { path: '/assistant/business', component: BusinessAssistantView },
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders', component: PatientOrdersView, meta: { role: 'PATIENT' } },

@@ -2,9 +2,10 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, download } from '../api'
+interface AiResult { taskId: string; state: string; provider: string; versionNo: number; stale: boolean; errorCode: string | null; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string } | null }
 interface Clinical { consultation: { state: string } | null; materials: { id: string; versionNo: number; symptomText: string; attachments: { id: string; originalName: string }[] }[]; messages: { authorRole: string; body: string }[]; result: { body: string } | null; corrections: { reason: string; body: string }[] }
-const route = useRoute(), id = String(route.params.id), clinical = ref<Clinical | null>(null), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), busy = ref(false)
-async function load() { try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}`) } catch (failure) { error.value = failure instanceof Error ? failure.message : '问诊记录加载失败' } }
+const route = useRoute(), id = String(route.params.id), clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([]), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), busy = ref(false)
+async function load() { try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}`); aiResults.value = await api<AiResult[]>(`/doctor/clinical/${id}/ai`) } catch (failure) { error.value = failure instanceof Error ? failure.message : '问诊记录加载失败' } }
 async function submitResult() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/result`, 'POST', { body: result.value }); result.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '结果提交失败' } finally { busy.value = false } }
 async function submitCorrection() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/corrections`, 'POST', { reason: reason.value, body: correction.value }); reason.value = ''; correction.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '更正提交失败' } finally { busy.value = false } }
 async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/doctor/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60_000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
@@ -32,6 +33,15 @@ onMounted(load)
       <p v-for="item in clinical.messages" :key="item.authorRole + item.body">
         {{ item.authorRole === 'PATIENT' ? '患者' : '医生' }}：{{ item.body }}
       </p>
+    </section>
+
+    <section v-if="aiResults.length">
+      <h3>AI 预问诊辅助摘要</h3>
+      <article v-for="item in aiResults" :key="item.taskId" class="notice">
+        <p>状态：{{ item.state }} · Provider：{{ item.provider }} · 版本：{{ item.versionNo }}<span v-if="item.stale">（材料更新后已过时）</span></p>
+        <template v-if="item.analysis"><p>{{ item.analysis.summary }}</p><p>持续时间：{{ item.analysis.duration }} · 建议科室：{{ item.analysis.departmentHint }}</p><p>追问：{{ item.analysis.followUpQuestions }}</p><p>风险提示：{{ item.analysis.riskAlert }}</p><p>{{ item.analysis.safetyNotice }}</p></template>
+        <p v-else>AI 暂不可用（{{ item.errorCode }}），不影响医生继续接诊。</p>
+      </article>
     </section>
 
     <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="submitResult">
