@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface ReceptionMapper {
+    @Select("SELECT substitution_pending FROM appointment WHERE id=#{id}")
+    boolean substitutionPending(String id);
     record Appointment(String id, String patientId, String scheduleId, String doctorId, LocalDate clinicDate,
         String session, String serviceMode, String source, long startsAt, long endsAt, String state) {}
     record QueueEntry(long id, String appointmentId, String scheduleId, String doctorId, String patientId,
@@ -17,7 +19,7 @@ public interface ReceptionMapper {
     Appointment patientAppointment(@Param("id") String id, @Param("patient") String patient);
     @Select("SELECT id, patient_id, schedule_id, doctor_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, state FROM appointment WHERE id=#{id} FOR UPDATE")
     Appointment appointment(@Param("id") String id);
-    @Select("SELECT id, patient_id, schedule_id, doctor_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, state FROM appointment WHERE state='CONFIRMED' AND ends_at > #{now} AND ends_at - 900000 <= #{now} AND NOT EXISTS (SELECT 1 FROM reception_queue q WHERE q.appointment_id=appointment.id) FOR UPDATE")
+    @Select("SELECT id, patient_id, schedule_id, doctor_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, state FROM appointment WHERE state='CONFIRMED' AND substitution_pending=FALSE AND ends_at > #{now} AND ends_at - 900000 <= #{now} AND NOT EXISTS (SELECT 1 FROM reception_queue q WHERE q.appointment_id=appointment.id) FOR UPDATE")
     List<Appointment> dueNoShows(@Param("now") long now);
     @Select("SELECT q.id, q.appointment_id, q.schedule_id, q.doctor_id, q.patient_id, a.identifier AS patient_identifier, p.clinic_date, p.clinic_session AS session, p.service_mode, p.source, q.queue_group, q.queued_at, q.checked_in_at, q.restoration_count, q.state, q.called_at, q.started_at, q.missed_at, q.completed_at FROM reception_queue q JOIN account a ON a.id=q.patient_id JOIN appointment p ON p.id=q.appointment_id WHERE q.appointment_id=#{id} FOR UPDATE")
     QueueEntry lockedQueue(@Param("id") String id);

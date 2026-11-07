@@ -159,6 +159,7 @@ public class ClinicalService {
     private BookingService.CareScope requireDoctor(String doctor, String id) {
         var appointment = booking.careScope(id);
         if (appointment == null || !appointment.doctorId().equals(doctor)) throw new ApiFailure(404, "NOT_FOUND", "问诊不存在");
+        if (appointment.state().equals("PENDING_SUBSTITUTION")) throw new ApiFailure(403, "SUBSTITUTION_PENDING", "等待患者确认替诊，暂不可访问材料");
         return appointment;
     }
     private void ensureConsultation(String id, long now) {

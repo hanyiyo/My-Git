@@ -6,6 +6,18 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface CatalogMapper {
+    @Insert("INSERT INTO schedule_mutation_guard (schedule_id) VALUES (#{id}) ON DUPLICATE KEY UPDATE schedule_id=schedule_id")
+    void ensureMutationGuard(String id);
+    @Select("SELECT schedule_id FROM schedule_mutation_guard WHERE schedule_id=#{id} FOR UPDATE")
+    String lockMutationGuard(String id);
+    @Update("UPDATE schedule SET state=#{state} WHERE id=#{id}")
+    void setScheduleState(@Param("id") String id, @Param("state") String state);
+    @Update("UPDATE schedule SET doctor_id=#{doctor}, state='PUBLISHED' WHERE id=#{id}")
+    void substitute(@Param("id") String id, @Param("doctor") String doctor);
+    @Update("UPDATE catalog_slot SET active=FALSE, reserved_by=NULL, reserved_until=NULL WHERE schedule_id=#{id}")
+    void deactivateSlots(String id);
+    @Select("SELECT COUNT(*) FROM schedule WHERE doctor_id=#{doctor} AND clinic_date=#{date} AND clinic_session=#{session} AND id<>#{id}")
+    int conflictingSchedule(@Param("doctor") String doctor, @Param("date") LocalDate date, @Param("session") String session, @Param("id") String id);
     record Hospital(String name, String address, String description) {}
     record Department(String id, String name, String description, boolean active) {}
     record Assignment(String doctorId, String departmentId, String departmentName, boolean active) {}

@@ -24,6 +24,7 @@ public class ReceptionService {
     public Summary checkIn(String patient, String id) {
         var appointment = requirePatientAppointment(patient, id);
         if (!appointment.state().equals("CONFIRMED")) throw new ApiFailure(409, "CHECK_IN_NOT_ALLOWED", "只有已确认预约可以签到");
+        if (reception.substitutionPending(id)) throw new ApiFailure(409, "SUBSTITUTION_PENDING", "请先接受替诊安排");
         long now = clock.millis();
         ensureCheckInWindow(appointment, now);
         var current = reception.lockedQueue(id);

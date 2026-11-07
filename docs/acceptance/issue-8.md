@@ -1,25 +1,18 @@
-# #8 MVP-07 停诊、替诊与排班治理
+# #8 MVP-07 停诊、替诊与排班治理验收
 
-依据 GitHub #8、ADR-0009、`mvp-spec`、`reception-rules.md` 和 `GLOSSARY.md`。
+依据 GitHub #8、MVP 规格和 ADR-0009。此前批次绿灯未证明关键 AC，以本轮实际接口与浏览器结果为准。
 
-| 验收规则 | 实现 seam | 当前结果 | 限制 |
-| --- | --- | --- | --- |
-| 医生提前至少24小时申请，紧急由管理员办理 | `POST /doctor/catalog/suspensions`；服务端按排班快照校验24小时 | 已实现；不足24小时返回 `EMERGENCY_REQUIRED` | HTTP 集成延后 |
-| 科主任选择直接停诊或替诊，替诊医生确认/拒绝 | 科主任 inbox/review、替诊医生 inbox/respond | 已实现；拒绝回科主任，科主任自审转管理员 | 通知投递归 #10 |
-| 管理员复核重新检查资质、科室和时间冲突 | `adminReview` 调用替诊重验 | 已实现 | HTTP 集成延后 |
-| 停诊生效释放号源并处理患者影响 | `BookingService.cancelForGovernance`、号源停用、已付款生成停诊退款 | 已实现；未付款占号解除，已付款全额退款意向 | 退款/通知集成延后 |
-| 替诊等待患者选择，接受转交医生，拒绝/超时取消退款 | `substitution_choice`、患者 choices/choose、管理员 expiry scan | 已实现；等待期保留预约名额 | 持久后台扫描归 #10 批次 |
-| 审批和排班变化可审计 | `audit_event` 记录提交、审核、选择和生效动作 | 已实现 | 审计查询归 #9 |
+| AC | 公共接口/用例 | 观察结果 |
+| --- | --- | --- |
+| 提前24小时、紧急管理员办理 | WorkflowHttpTest 停诊时间边界和紧急办理 | 恰好24小时允许；不足24小时拒绝普通申请；管理员可按出诊安排直接紧急停诊 |
+| 科主任替诊或直接停诊、邀请通知 | head review、substitute inbox、站内通知 | 直接停诊进入最终复核；邀请持久化并通知；不能选择原医生自身替诊 |
+| 拒绝回主任、自审回避 | respond/refuse/reinvite、管理员 recusal plan | 替诊拒绝后回主任重选；主任本人申请由管理员选择方案 |
+| 最终复核资质、科室、冲突和排班 | admin review 与冲突复核 HTTP | 生效前重新验证，新增时间冲突阻止审批；通过后出诊安排归属新医生 |
+| 暂停解除未付款占号、保留已付款 | 提交申请前后登记、付款、号源接口 | 未付款解除，已付款保留；迟到付款退款；六患者竞争回归通过 |
+| 患者接受、拒绝、超时及权限撤回 | substitution choices、Clinical/Reception HTTP | 等待时保留名额且禁止接诊；接受幂等转交、原医生失权；拒绝和超时取消退款；已签到队列禁止直接转医生 |
+| 紧急方案逐人明确选择 | emergency-substitution、影响清单 HTTP | 未覆盖所有患者或缺少明确选择时拒绝；逐人选择后转交或退款；重复生效被拒绝 |
+| 医生、主任、管理员和患者页面 | workflows.spec.ts 完整审批链 | 任命主任→申请→邀请→替诊确认→复核→患者接受全部通过；订单显示预约实际医生、保留历史归属 |
 
-## 本轮门禁
+完整门禁：`pwsh -NoProfile -File scripts/verify.ps1` 退出0。文档/架构检查、Vue类型检查与生产构建、真实 MySQL/Redis HTTP、66条后端测试和14条浏览器流程全部成功，零失败、错误或跳过。规范与规格双轴审查发现已修复。
 
-- 后端 `mvn -f backend/pom.xml -DskipTests test-compile`：通过。
-- `GovernanceServiceTest`：通过，覆盖24小时申请边界。
-- 前端 `npm --prefix frontend run build`（含 `vue-tsc --noEmit`）：通过。
-- `git diff --check`：通过。
-
-按当前批次策略未执行 MySQL/Redis HTTP 集成、浏览器 E2E、全量 `npm test` 或 `scripts/verify.ps1`；待一批 issue 合并前统一执行。完整双轴审查和延后门禁通过前不关闭 issue。
-
-## 批次完整门禁补充（2026-11-07）
-
-批次修复完成后重新执行 `pwsh -NoProfile -File scripts/verify.ps1` 并退出 0：文档/架构检查、Vue 类型检查与生产构建、MySQL/Redis HTTP 集成、浏览器验收及后端 45 条测试全部通过（0 失败、0 错误、0 跳过）。治理 HTTP 场景和治理服务测试均包含在全量结果中；本记录此前的“延后”描述仅反映实现当时的阶段性门禁。
+限制：替诊超时的持久定时扫描及通知异步投递由仍开放的 #10 补齐；本轮验证应用入口的超时处理和事务幂等性。已进入签到队列的预约需要管理员人工处理，接口明确拒绝直接替诊。

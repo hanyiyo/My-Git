@@ -29,7 +29,7 @@ public class BookingService {
     @Transactional(readOnly = true)
     public CareScope careScope(String id) {
         var appointment = booking.byId(id);
-        return appointment == null ? null : new CareScope(id, appointment.patientId(), appointment.doctorId(), appointment.serviceMode(), appointment.state());
+        return appointment == null ? null : new CareScope(id, appointment.patientId(), appointment.doctorId(), appointment.serviceMode(), booking.substitutionPending(id) ? "PENDING_SUBSTITUTION" : appointment.state());
     }
     @Transactional
     public void lockCareScope(String id) {
@@ -40,6 +40,7 @@ public class BookingService {
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public BookingMapper.Appointment create(String patient, String schedule, String source, String key) {
+        catalog.lockMutation(schedule);
         var session = catalog.registrationSession(schedule);
         // The stable patient/day/half row always precedes catalog/slot and appointment locks.
         booking.ensureGuard(patient, session.clinicDate(), session.session());
@@ -74,23 +75,24 @@ public class BookingService {
     public record OrderView(String id, String doctorName, String departmentName, java.time.LocalDate clinicDate,
         String session, String serviceMode, long feeMinor, long holdExpiresAt, long startsAt, long endsAt, long serverNow, String state, String credential,
         String cancellationReason, Long cancelledAt, BillingService.Payment payment, BillingService.Refund refund,
-        ReceptionService.Summary reception) {}
+        ReceptionService.Summary reception, boolean substitutionPending) {}
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<OrderView> orders(String patient) {
         return booking.list(patient).stream().map(this::expireIfDue).map(appointment -> {
             var schedule = catalog.scheduleDetails(appointment.scheduleId());
             var financial = billing.financialStatus(appointment.id());
-            return new OrderView(appointment.id(), schedule == null ? appointment.doctorId() : schedule.doctorName(),
+            return new OrderView(appointment.id(), catalog.ownDoctor(appointment.doctorId()).displayName(),
                 schedule == null ? appointment.departmentId() : schedule.departmentName(), appointment.clinicDate(),
                 appointment.session(), appointment.serviceMode(), appointment.feeMinor(), appointment.holdExpiresAt(),
-                appointment.startsAt(), appointment.endsAt(), clock.millis(), appointment.state(), appointment.credential(), appointment.cancellationReason(), appointment.cancelledAt(), financial.payment(), financial.refund(), reception.summaryFor(appointment.id()));
+                appointment.startsAt(), appointment.endsAt(), clock.millis(), appointment.state(), appointment.credential(), appointment.cancellationReason(), appointment.cancelledAt(), financial.payment(), financial.refund(), reception.summaryFor(appointment.id()), booking.substitutionPending(appointment.id()));
         }).toList();
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentReceipt simulatePayment(String patient, String id) {
         var appointment = booking.own(id, patient);
         if (appointment == null) throw new ApiFailure(404, "NOT_FOUND", "预约不存在");
+        catalog.lockMutation(appointment.scheduleId());
         booking.lockGuard(patient, appointment.clinicDate(), appointment.session());
         appointment = booking.own(id, patient);
         var existingPayment = billing.payment(id);
@@ -117,6 +119,7 @@ public class BookingService {
     public BookingMapper.Appointment cancel(String patient, String id) {
         var appointment = booking.own(id, patient);
         if (appointment == null) throw new ApiFailure(404, "NOT_FOUND", "预约不存在");
+        catalog.lockMutation(appointment.scheduleId());
         booking.lockGuard(patient, appointment.clinicDate(), appointment.session());
         appointment = expireIfDue(booking.own(id, patient));
         if (appointment.state().equals("CANCELLED") || appointment.state().equals("EXPIRED")) return appointment;
@@ -153,8 +156,28 @@ public class BookingService {
     }
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     public void transferDoctor(String appointmentId, String doctorId) {
+        if (reception.queueForAppointment(appointmentId) != null) throw new ApiFailure(409, "ENCOUNTER_STARTED", "患者已进入候诊或接诊，请人工处置现场情况后重新安排");
         if (booking.transferDoctor(appointmentId, doctorId) != 1)
             throw new ApiFailure(409, "APPOINTMENT_STATE_CONFLICT", "预约当前不能转交替诊医生");
+        booking.setSubstitutionPending(appointmentId, false);
+    }
+    @Transactional
+    public List<BookingMapper.Appointment> lockSchedulePatients(String scheduleId) {
+        var appointments = booking.activeForSchedule(scheduleId);
+        for (var appointment : appointments) lockCareScope(appointment.id());
+        return booking.activeForSchedule(scheduleId);
+    }
+    @Transactional(readOnly = true)
+    public List<BookingMapper.Appointment> scheduleAppointments(String id) { return booking.historyForSchedule(id); }
+    @Transactional
+    public void awaitSubstitution(String id) { booking.setSubstitutionPending(id, true); }
+    @Transactional
+    public void cancelForGovernance(String id, String reason) {
+        lockCareScope(id);
+        var appointment = booking.byId(id);
+        if (reception.queueForAppointment(id) != null) throw new ApiFailure(409, "ENCOUNTER_STARTED", "患者已进入候诊或接诊，请先人工处理现场情况");
+        cancelForGovernance(appointment, reason, clock.millis());
+        booking.setSubstitutionPending(id, false);
     }
     private BookingMapper.Appointment expireIfDue(BookingMapper.Appointment appointment) {
         long now = clock.millis();

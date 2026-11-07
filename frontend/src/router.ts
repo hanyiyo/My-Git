@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from './views/LoginView.vue'
 import HomeView from './views/HomeView.vue'
+import DoctorGovernanceView from './views/DoctorGovernanceView.vue'
+import AdminGovernanceView from './views/AdminGovernanceView.vue'
 import AdminAiView from './views/AdminAiView.vue'
 import AdminCatalogView from './views/AdminCatalogView.vue'
 import PatientPreconsultationView from './views/PatientPreconsultationView.vue'
@@ -16,6 +18,8 @@ import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
   { path: '/assistant/business', component: BusinessAssistantView },
+  { path: '/admin/governance', component: AdminGovernanceView, meta: { role: 'ADMIN' } },
+  { path: '/doctor/governance', component: DoctorGovernanceView, meta: { role: 'DOCTOR' } },
   { path: '/admin/ai', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
   { path: '/patient/preconsultation', component: PatientPreconsultationView, meta: { role: 'PATIENT' } },

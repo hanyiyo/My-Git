@@ -25,6 +25,42 @@ public class CatalogService {
     private static final ZoneId HOSPITAL_ZONE = ZoneId.of("Asia/Shanghai");
     public CatalogService(CatalogMapper catalog, IdentityService identity, Clock clock) { this.catalog = catalog; this.identity = identity; this.clock = clock; }
     public CatalogMapper.Hospital hospital() { return catalog.hospital(); }
+    @Transactional
+    public void lockMutation(String id) {
+        if (catalog.schedule(id) == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
+        if (catalog.lockMutationGuard(id) == null) { catalog.ensureMutationGuard(id); catalog.lockMutationGuard(id); }
+    }
+    @Transactional
+    public CatalogMapper.Schedule governanceSchedule(String id) {
+        var schedule = catalog.schedule(id);
+        if (schedule == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
+        return schedule;
+    }
+    @Transactional
+    public void validateSubstitute(String id, String doctorId) {
+        var schedule = governanceSchedule(id);
+        if (schedule.doctorId().equals(doctorId)) throw new ApiFailure(409, "SUBSTITUTE_INVALID", "原医生不能替诊本人排班");
+        var doctor = identity.lockDoctor(doctorId);
+        var department = catalog.lockDepartment(schedule.departmentId());
+        if (!doctor.enabled() || !doctor.credentialStatus().equals("CERTIFIED") || department == null || !department.active()
+            || catalog.assignments().stream().noneMatch(value -> value.doctorId().equals(doctorId) && value.departmentId().equals(schedule.departmentId()))
+            || catalog.conflictingSchedule(doctorId, schedule.clinicDate(), schedule.session(), id) > 0)
+            throw new ApiFailure(409, "SUBSTITUTE_INVALID", "替诊医生必须同科室、已认证且无排班冲突");
+    }
+    @Transactional
+    public void changeScheduleState(String id, String state) {
+        if (!Set.of("PUBLISHED", "SUSPENSION_PENDING", "CANCELLED").contains(state)) throw new IllegalArgumentException("Invalid schedule state");
+        var schedule = governanceSchedule(id);
+        identity.lockDoctor(schedule.doctorId()); catalog.lockDepartment(schedule.departmentId()); catalog.lockSchedule(id);
+        catalog.setScheduleState(id, state);
+        if (state.equals("CANCELLED")) catalog.deactivateSlots(id);
+    }
+    @Transactional
+    public void substituteSchedule(String id, String doctor) {
+        validateSubstitute(id, doctor);
+        try { catalog.substitute(id, doctor); }
+        catch (DuplicateKeyException error) { throw new ApiFailure(409, "SUBSTITUTE_INVALID", "替诊医生出现排班冲突，请重新安排"); }
+    }
     public record SlotReservation(String slotId, String scheduleId, String doctorId, String departmentId,
         LocalDate clinicDate, String session, String serviceMode, long startsAt, long endsAt, long feeMinor, long createdAt, long holdExpiresAt) {}
     public record RegistrationSession(LocalDate clinicDate, String session) {}
@@ -178,6 +214,7 @@ public class CatalogService {
         String id = UUID.randomUUID().toString();
         try { catalog.insertSchedule(new CatalogMapper.Schedule(id, doctorId, departmentId, date, session, mode, starts, ends, HOSPITAL_ZONE.getId(), capacity, feeMinor, "PUBLISHED", 0)); }
         catch (DuplicateKeyException error) { throw new ApiFailure(409, "SCHEDULE_CONFLICT", "医生在该日期、半天已有排班，线上线下不能重复发布"); }
+        catalog.ensureMutationGuard(id);
         catalog.insertSlots(java.util.stream.IntStream.rangeClosed(1, capacity).mapToObj(position -> new CatalogMapper.Slot(UUID.randomUUID().toString(), id, position)).toList());
         return schedules(true, doctorId, null, date, mode).stream().filter(schedule -> schedule.id().equals(id)).findFirst().orElseThrow();
     }

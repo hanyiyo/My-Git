@@ -6,6 +6,14 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface GovernanceMapper {
+    @Select("SELECT id, schedule_id, doctor_id, department_id, requested_by, substitute_doctor_id, state, reason, created_at, updated_at FROM suspension_request WHERE id=#{id}")
+    Request request(String id);
+    @Select("SELECT id, schedule_id, doctor_id, department_id, requested_by, substitute_doctor_id, state, reason, created_at, updated_at FROM suspension_request ORDER BY created_at DESC, id")
+    List<Request> allRequests();
+    @Select("SELECT COUNT(*) FROM substitution_choice c JOIN suspension_request r ON r.id=c.request_id WHERE r.schedule_id=#{id} AND c.state='PENDING'")
+    int pendingChoices(String id);
+    @Select("SELECT id, request_id, appointment_id, patient_id, original_doctor_id, substitute_doctor_id, state, deadline_at, responded_at, reason FROM substitution_choice WHERE id=#{id}")
+    Choice choice(String id);
     record Schedule(String id, String doctorId, String departmentId, LocalDate clinicDate, String session, long startsAt, long endsAt, String state) {}
     record Doctor(String id, String departmentId, String credentialStatus, boolean enabled) {}
     record Request(String id, String scheduleId, String doctorId, String departmentId, String requestedBy,

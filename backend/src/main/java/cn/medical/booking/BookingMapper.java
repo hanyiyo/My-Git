@@ -6,6 +6,10 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface BookingMapper {
+    @Select("SELECT substitution_pending FROM appointment WHERE id=#{id}")
+    boolean substitutionPending(String id);
+    @Update("UPDATE appointment SET substitution_pending=#{pending} WHERE id=#{id}")
+    void setSubstitutionPending(@Param("id") String id, @Param("pending") boolean pending);
     record Appointment(String id, String patientId, String scheduleId, String slotId, String doctorId, String departmentId,
         LocalDate clinicDate, String session, String serviceMode, String source, long startsAt, long endsAt,
         long feeMinor, long createdAt, long holdExpiresAt, String state, String idempotencyKey, String credential,
@@ -39,8 +43,10 @@ public interface BookingMapper {
     int cancel(@Param("id") String id, @Param("reason") String reason, @Param("now") long now);
     @Update("UPDATE appointment SET state='COMPLETED' WHERE id=#{id} AND state='CONFIRMED'")
     int completeAfterEncounter(@Param("id") String id);
-    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential, cancellation_reason, cancelled_at FROM appointment WHERE schedule_id=#{scheduleId} AND state IN ('PENDING_PAYMENT', 'CONFIRMED') FOR UPDATE")
+    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential, cancellation_reason, cancelled_at FROM appointment WHERE schedule_id=#{scheduleId} AND state IN ('PENDING_PAYMENT', 'CONFIRMED') ORDER BY patient_id")
     List<Appointment> activeForSchedule(@Param("scheduleId") String scheduleId);
+    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential, cancellation_reason, cancelled_at FROM appointment WHERE schedule_id=#{scheduleId} ORDER BY created_at, id")
+    List<Appointment> historyForSchedule(@Param("scheduleId") String scheduleId);
     @Update("UPDATE appointment SET doctor_id=#{doctorId} WHERE id=#{id} AND state='CONFIRMED'")
     int transferDoctor(@Param("id") String id, @Param("doctorId") String doctorId);
 }

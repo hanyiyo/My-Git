@@ -241,10 +241,12 @@ class WorkflowHttpTest extends HttpFixture {
                             while (fields.next()) columns.add("`" + fields.getString("COLUMN_NAME") + "`");
                         }
                         String names = String.join(",", columns);
+                        // Version 15 could not store the longer suspension state; retain a valid historical fixture.
+                        String selection = table.equals("schedule") ? names.replace("`state`", "CASE WHEN LENGTH(state)>16 THEN 'PUBLISHED' ELSE state END") : names;
                         String filter = Set.of("ai_consent", "ai_task", "ai_result").contains(table) ? " WHERE appointment_id IS NOT NULL"
                             : table.equals("ai_call_log") ? " WHERE task_id IN (SELECT id FROM `" + sourceDatabase + "`.ai_task WHERE appointment_id IS NOT NULL)" : "";
                         copy.executeUpdate("DELETE FROM `" + database + "`.`" + table + "`");
-                        copy.executeUpdate("INSERT INTO `" + database + "`.`" + table + "` (" + names + ") SELECT " + names + " FROM `" + sourceDatabase + "`.`" + table + "`" + filter);
+                        copy.executeUpdate("INSERT INTO `" + database + "`.`" + table + "` (" + names + ") SELECT " + selection + " FROM `" + sourceDatabase + "`.`" + table + "`" + filter);
                     }
                     copy.execute("SET FOREIGN_KEY_CHECKS=1");
                 }
@@ -314,6 +316,125 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(address.path("answer").asText()).contains(hospital.path("address").asText());
         var symptom = admin().call("GET", "/api/v1/assistant/business?question=" + java.net.URLEncoder.encode("我胸痛，医院地址在哪", StandardCharsets.UTF_8), null).body();
         assertThat(symptom.path("mode").asText()).isEqualTo("PRECONSULTATION_REQUIRED"); assertThat(symptom.path("answer").asText()).contains("急救");
+    }
+    String submitSuspension(Scenario s) throws Exception {
+        var reply = s.doctor().browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "虚构停诊理由"));
+        assertThat(reply.status()).isEqualTo(201); return reply.body().path("id").asText();
+    }
+    void assignHead(Scenario s, Actor head) throws Exception {
+        assertThat(admin().call("PUT", "/api/v1/admin/catalog/departments/" + s.departmentId() + "/head/" + head.id(), null).status()).isEqualTo(204);
+    }
+    String approveSubstitution(Scenario s, Actor head, Actor substitute) throws Exception {
+        assignHead(s, head); String id = submitSuspension(s);
+        assertThat(head.browser().call("POST", "/api/v1/doctor/catalog/head/suspensions/" + id + "/review", Map.of("plan", "SUBSTITUTE", "substituteDoctorId", substitute.id(), "reason", "同科替诊")).status()).isEqualTo(200);
+        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/substitutions/" + id + "/respond", Map.of("accepted", true, "reason", "同意替诊")).status()).isEqualTo(200);
+        var review = admin().call("POST", "/api/v1/admin/catalog/suspensions/" + id + "/review", Map.of("approve", true, "reason", "复核资质科室和时间"));
+        assertThat(review.status()).isEqualTo(200); return id;
+    }
+    @Test void suspensionPausesUnpaidHoldsAndStopCancelsPaidOrdersWithAudit() throws Exception {
+        var s = scenario("ONLINE"); var head = doctor(s.departmentId()); assignHead(s, head);
+        var unpaid = actor("PATIENT").browser(); String scheduleId = s.schedule().path("id").asText();
+        var hold = unpaid.call("POST", "/api/v1/patient/appointments", Map.of("scheduleId", scheduleId, "source", "ADVANCE", "idempotencyKey", identifier()));
+        assertThat(hold.status()).isEqualTo(201); String holdId = hold.body().path("id").asText();
+        String id = submitSuspension(s);
+        assertThat(unpaid.call("GET", "/api/v1/patient/appointments/" + holdId, null).body().path("state").asText()).isEqualTo("CANCELLED");
+        assertThat(s.patient().browser().call("GET", patientPath(s), null).body().path("state").asText()).isEqualTo("CONFIRMED");
+        var extra = actor("PATIENT").browser();
+        assertThat(extra.call("POST", "/api/v1/patient/appointments", Map.of("scheduleId", scheduleId, "source", "ADVANCE", "idempotencyKey", identifier())).status()).isEqualTo(409);
+        var late = unpaid.call("POST", "/api/v1/patient/appointments/" + holdId + "/simulate-payment", null);
+        assertThat(late.status()).isEqualTo(200); assertThat(late.body().path("appointment").path("state").asText()).isEqualTo("CANCELLED");
+        assertThat(head.browser().call("POST", "/api/v1/doctor/catalog/head/suspensions/" + id + "/review", Map.of("plan", "STOP", "reason", "同意停诊")).status()).isEqualTo(200);
+        assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + id + "/review", Map.of("approve", true, "reason", "复核停诊")).status()).isEqualTo(200);
+        assertThat(s.patient().browser().call("GET", patientPath(s), null).body().path("state").asText()).isEqualTo("CANCELLED");
+        var financial = s.patient().browser().call("GET", patientPath(s) + "/billing", null);
+        assertThat(financial.status()).isEqualTo(200); assertThat(financial.body().path("refund").path("reason").asText()).isEqualTo("CLINIC_SUSPENSION");
+        assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + id + "/review", Map.of("approve", true, "reason", "重复")).status()).isEqualTo(409);
+        assertThat(admin().call("GET", "/api/v1/admin/medical/audits/" + scheduleId, null).body()).isNotEmpty();
+    }
+    @Test void substitutionRequiresPatientChoiceRetainsSlotAndRevokesOriginalDoctor() throws Exception {
+        var s = scenario("ONLINE"); var head = doctor(s.departmentId()); var substitute = doctor(s.departmentId());
+        assertThat(materials(s.patient().browser(), s.appointmentId(), true, "替诊共享材料").status()).isEqualTo(200);
+        approveSubstitution(s, head, substitute);
+        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "禁止叠加变更")).status()).isEqualTo(409);
+        var ordersBefore = s.patient().browser().call("GET", "/api/v1/patient/appointments", null).body().get(0);
+        assertThat(ordersBefore.path("substitutionPending").asBoolean()).isTrue();
+        assertThat(ordersBefore.path("doctorName").asText()).isEqualTo("虚构工作流医生");
+        var choices = s.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body(); assertThat(choices).hasSize(1);
+        var choice = choices.get(0); assertThat(choice.path("deadlineAt").asLong()).isEqualTo(clock.millis() + Duration.ofHours(2).toMillis());
+        assertThat(s.patient().browser().call("GET", patientPath(s), null).body().path("state").asText()).isEqualTo("CONFIRMED");
+        assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(403);
+        assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
+        String path = "/api/v1/patient/substitution-choices/" + choice.path("id").asText();
+        assertThat(actor("PATIENT").browser().call("POST", path, Map.of("accepted", true, "reason", "越权")).status()).isEqualTo(404);
+        var accepted = s.patient().browser().call("POST", path, Map.of("accepted", true, "reason", "同意新医生")); assertThat(accepted.status()).isEqualTo(200);
+        assertThat(s.patient().browser().call("POST", path, Map.of("accepted", true, "reason", "重复同意")).body()).isEqualTo(accepted.body());
+        assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
+        assertThat(substitute.browser().call("GET", doctorPath(s), null).body().path("materials")).hasSize(1);
+        var updated = admin().call("GET", "/api/v1/admin/catalog/schedules", null).body();
+        assertThat(java.util.stream.StreamSupport.stream(updated.spliterator(), false).filter(item -> item.path("id").equals(s.schedule().path("id"))).findFirst().orElseThrow().path("doctorId").asText()).isEqualTo(substitute.id());
+        clock.now = Instant.ofEpochMilli(s.schedule().path("startsAt").asLong());
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/check-in", null).status()).isEqualTo(200);
+        assertThat(substitute.browser().call("POST", "/api/v1/doctor/reception/" + s.appointmentId() + "/call", null).status()).isEqualTo(200);
+    }
+    @Test void substitutionRefusalRecusalFinalConflictAndDeadlinesAreEnforced() throws Exception {
+        var s = scenario("ONLINE"); var head = doctor(s.departmentId()); var substitute = doctor(s.departmentId()); assignHead(s, head);
+        String id = submitSuspension(s);
+        String reviewPath = "/api/v1/doctor/catalog/head/suspensions/" + id + "/review";
+        assertThat(head.browser().call("POST", reviewPath, Map.of("plan", "SUBSTITUTE", "substituteDoctorId", s.doctor().id(), "reason", "不能自替")).status()).isEqualTo(409);
+        assertThat(head.browser().call("POST", reviewPath, Map.of("plan", "SUBSTITUTE", "substituteDoctorId", substitute.id(), "reason", "邀请替诊")).status()).isEqualTo(200);
+        assertThat(substitute.browser().call("GET", "/api/v1/notifications", null).body().toString()).contains("SUBSTITUTE_INVITED");
+        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/substitutions/" + id + "/respond", Map.of("accepted", false, "reason", "无法出诊")).body().path("state").asText()).isEqualTo("HEAD_REVIEW");
+        assertThat(head.browser().call("POST", reviewPath, Map.of("plan", "SUBSTITUTE", "substituteDoctorId", substitute.id(), "reason", "重新邀请")).status()).isEqualTo(200);
+        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/substitutions/" + id + "/respond", Map.of("accepted", true, "reason", "可以出诊")).status()).isEqualTo(200);
+        var conflict = admin().call("POST", "/api/v1/admin/catalog/schedules", Map.of("doctorId", substitute.id(), "departmentId", s.departmentId(), "clinicDate", s.schedule().path("clinicDate").asText(), "session", "AM", "serviceMode", "OFFLINE", "capacity", 1, "feeMinor", 1500));
+        assertThat(conflict.status()).isEqualTo(201);
+        assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + id + "/review", Map.of("approve", true, "reason", "重新检查冲突")).status()).isEqualTo(409);
+        var other = scenario("OFFLINE"); assignHead(other, other.doctor());
+        String own = submitSuspension(other);
+        assertThat(other.doctor().browser().call("POST", "/api/v1/doctor/catalog/head/suspensions/" + own + "/review", Map.of("plan", "STOP", "reason", "自审禁止")).status()).isEqualTo(403);
+        assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + own + "/review", Map.of("approve", true, "reason", "管理员回避审核")).status()).isEqualTo(200);
+        var expiry = scenario("ONLINE"); var head2 = doctor(expiry.departmentId()); var substitute2 = doctor(expiry.departmentId()); approveSubstitution(expiry, head2, substitute2);
+        var choice = expiry.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body().get(0);
+        clock.now = Instant.ofEpochMilli(choice.path("deadlineAt").asLong());
+        var expired = expiry.patient().browser().call("POST", "/api/v1/patient/substitution-choices/" + choice.path("id").asText(), Map.of("accepted", true, "reason", "超时同意"));
+        assertThat(expired.body().path("state").asText()).isEqualTo("EXPIRED");
+        assertThat(expiry.patient().browser().call("GET", patientPath(expiry), null).body().path("state").asText()).isEqualTo("CANCELLED");
+    }
+    @Test void emergencyStopCanBeAppliedWithoutAnOrdinaryRequestAndDoesNotRepeat() throws Exception {
+        var s = scenario("ONLINE"); clock.now = Instant.ofEpochMilli(s.schedule().path("startsAt").asLong()).minus(Duration.ofHours(23));
+        assertThat(s.doctor().browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "不足24小时")).status()).isEqualTo(409);
+        var stopped = admin().call("POST", "/api/v1/admin/catalog/schedules/" + s.schedule().path("id").asText() + "/emergency-stop", Map.of("reason", "医院紧急处置"));
+        assertThat(stopped.status()).isEqualTo(200); assertThat(stopped.body().path("state").asText()).isEqualTo("EMERGENCY_STOP");
+        assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + stopped.body().path("id").asText() + "/emergency-stop", Map.of("reason", "重复")).status()).isEqualTo(409);
+        assertThat(s.patient().browser().call("GET", patientPath(s), null).body().path("state").asText()).isEqualTo("CANCELLED");
+    }
+    @Test void lateSubstitutionRequiresExplicitRecordedPatientChoicesAndTwentyFourHourBoundaryIsInclusive() throws Exception {
+        var s = scenario("ONLINE"); var head = doctor(s.departmentId()); var substitute = doctor(s.departmentId()); assignHead(s, head);
+        clock.now = Instant.ofEpochMilli(s.schedule().path("startsAt").asLong()).minus(Duration.ofHours(24));
+        String id = submitSuspension(s);
+        assertThat(head.browser().call("POST", "/api/v1/doctor/catalog/head/suspensions/" + id + "/review", Map.of("plan", "SUBSTITUTE", "substituteDoctorId", substitute.id(), "reason", "替诊")).status()).isEqualTo(200);
+        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/substitutions/" + id + "/respond", Map.of("accepted", true, "reason", "同意")).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(s.schedule().path("startsAt").asLong()).minus(Duration.ofMinutes(90));
+        assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + id + "/review", Map.of("approve", true, "reason", "临近开诊")).status()).isEqualTo(409);
+        String path = "/api/v1/admin/catalog/suspensions/" + id + "/emergency-substitution";
+        assertThat(admin().call("POST", path, Map.of("patientChoices", Map.of(), "reason", "尚未联系患者")).status()).isEqualTo(400);
+        assertThat(s.patient().browser().call("GET", patientPath(s), null).body().path("state").asText()).isEqualTo("CONFIRMED");
+        var applied = admin().call("POST", path, Map.of("patientChoices", Map.of(s.appointmentId(), true), "reason", "已电话取得虚构患者明确同意"));
+        assertThat(applied.status()).isEqualTo(200); assertThat(applied.body().path("state").asText()).isEqualTo("APPROVED_SUBSTITUTE");
+        assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(200);
+        assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
+    }
+    @Test void emergencySubstitutionDoesNotTransferAnAlreadyCheckedInPatient() throws Exception {
+        var s = scenario("ONLINE"); var head = doctor(s.departmentId()); var substitute = doctor(s.departmentId()); assignHead(s, head);
+        String id = submitSuspension(s);
+        assertThat(head.browser().call("POST", "/api/v1/doctor/catalog/head/suspensions/" + id + "/review", Map.of("plan", "SUBSTITUTE", "substituteDoctorId", substitute.id(), "reason", "替诊")).status()).isEqualTo(200);
+        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/substitutions/" + id + "/respond", Map.of("accepted", true, "reason", "同意")).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(s.schedule().path("startsAt").asLong()).minus(Duration.ofMinutes(20));
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/check-in", null).status()).isEqualTo(200);
+        var response = admin().call("POST", "/api/v1/admin/catalog/suspensions/" + id + "/emergency-substitution", Map.of("patientChoices", Map.of(s.appointmentId(), true), "reason", "患者已进入候诊"));
+        assertThat(response.status()).isEqualTo(409); assertThat(response.body().path("error").path("code").asText()).isEqualTo("ENCOUNTER_STARTED");
+        assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(200);
+        assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
     }
     @Test void materialUploadChecksAuthorizationContentCountAndTenMegabyteBoundary() throws Exception {
         var scenario = scenario("ONLINE"); var patient = scenario.patient().browser(); String id = scenario.appointmentId();

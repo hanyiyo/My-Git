@@ -8,7 +8,7 @@ interface Reception { state: string; queueGroup: number; queuedAt: number; check
 interface Order {
   id: string; doctorName: string; departmentName: string; clinicDate: string; session: string
   serviceMode: string; feeMinor: number; holdExpiresAt: number; startsAt: number; endsAt: number; serverNow: number; state: string; credential: string | null
-  cancellationReason: string | null; cancelledAt: number | null; payment: Payment | null; refund: Refund | null; reception: Reception | null
+  cancellationReason: string | null; cancelledAt: number | null; payment: Payment | null; refund: Refund | null; reception: Reception | null; substitutionPending: boolean
 }
 
 const orders = ref<Order[]>([]), error = ref(''), busy = ref(false)
@@ -83,7 +83,7 @@ onMounted(load)
       <p v-if="order.reception?.state === 'MISSED' && now >= order.endsAt" class="hint">本次门诊时段已经结束，无法恢复排队；此情况不退款。</p>
       <p v-if="order.credential">预约凭证：{{ order.credential }}</p>
       <div v-if="order.refund" class="notice"><p>{{ refundLabel(order.refund) }}</p><p>退款编号：{{ order.refund.id }} · 金额：{{ money(order.refund.amountMinor) }}</p><p>退款原因：{{ refundReasonLabels[order.refund.reason] ?? order.refund.reason }} · 尝试次数：{{ order.refund.attempts }}</p><p v-if="order.refund.providerReference">支付渠道参考号：{{ order.refund.providerReference }}</p><p v-if="order.refund.lastError">最近状态：{{ refundErrorLabel(order.refund) }}</p></div>
-      <div class="catalog-links"><RouterLink v-if="order.state === 'CONFIRMED' || order.state === 'COMPLETED'" :to="`/patient/orders/${order.id}/clinical`">问诊材料与结果</RouterLink><button v-if="order.state === 'PENDING_PAYMENT'" type="button" :disabled="busy" @click="simulatePayment(order)">模拟支付</button><button v-if="order.state === 'CONFIRMED' && !order.reception" type="button" :disabled="busy || now < order.startsAt - 1800000 || now >= order.endsAt - 900000" @click="checkIn(order)">签到</button><button v-if="order.reception?.state === 'MISSED' && order.reception.calledAt != null && order.reception.restorationCount === 0" type="button" :disabled="busy || now < order.startsAt || now >= order.endsAt" @click="restoreQueue(order)">恢复排队</button><button v-if="order.state === 'PENDING_PAYMENT' || order.state === 'CONFIRMED'" type="button" class="secondary" :disabled="busy" @click="cancel(order)">取消预约</button></div>
+      <p v-if="order.substitutionPending">等待确认替诊，原名额保留。<RouterLink to="/patient/substitutions">查看并选择替诊</RouterLink></p><div class="catalog-links"><RouterLink v-if="order.state === 'CONFIRMED' || order.state === 'COMPLETED'" :to="`/patient/orders/${order.id}/clinical`">问诊材料与结果</RouterLink><button v-if="order.state === 'PENDING_PAYMENT'" type="button" :disabled="busy" @click="simulatePayment(order)">模拟支付</button><button v-if="order.state === 'CONFIRMED' && !order.reception && !order.substitutionPending" type="button" :disabled="busy || now < order.startsAt - 1800000 || now >= order.endsAt - 900000" @click="checkIn(order)">签到</button><button v-if="order.reception?.state === 'MISSED' && order.reception.calledAt != null && order.reception.restorationCount === 0" type="button" :disabled="busy || now < order.startsAt || now >= order.endsAt" @click="restoreQueue(order)">恢复排队</button><button v-if="order.state === 'PENDING_PAYMENT' || order.state === 'CONFIRMED'" type="button" class="secondary" :disabled="busy" @click="cancel(order)">取消预约</button></div>
     </li></ul>
   </section>
 </template>
