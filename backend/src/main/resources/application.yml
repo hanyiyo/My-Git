@@ -25,6 +25,7 @@ mybatis:
     map-underscore-to-camel-case: true
 medical:
   jwt-secret: ${MEDICAL_JWT_SECRET:}
+  audit-directory: ${MEDICAL_AUDIT_DIRECTORY:data/audit}
   captcha-secret: ${MEDICAL_CAPTCHA_SECRET:}
   cookie-secure: ${MEDICAL_COOKIE_SECURE:true}
   captcha-ttl: 2m

@@ -25,6 +25,7 @@ class WorkflowHttpTest extends HttpFixture {
     @Autowired org.springframework.core.env.Environment environment;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean cn.medical.clinical.ClinicalFileStore fileStore;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean cn.medical.ai.LocalAiTextProvider aiProvider;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean cn.medical.booking.BookingService bookingService;
     Browser administrator;
     record Actor(Browser browser, String id, String identifier) {}
     record Scenario(Actor patient, Actor doctor, String departmentId, JsonNode schedule, String appointmentId) {}
@@ -435,6 +436,145 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(response.status()).isEqualTo(409); assertThat(response.body().path("error").path("code").asText()).isEqualTo("ENCOUNTER_STARTED");
         assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(200);
         assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
+    }
+    Actor reviewer() throws Exception {
+        String name = identifier();
+        var created = admin().call("POST","/api/v1/admin/accounts",Map.of("identifier",name,"password",PASSWORD,"role","ADMIN"));
+        assertThat(created.status()).isEqualTo(201);
+        var browser = new Browser(port); assertThat(browser.login(name,PASSWORD).status()).isEqualTo(200);
+        assertThat(admin().call("POST","/api/v1/admin/medical/permissions",Map.of("identifier",name,"enabled",true,"reason","独立指派虚构审核人员")).status()).isEqualTo(204);
+        return new Actor(browser,created.body().path("account").path("id").asText(),name);
+    }
+    String review(Actor actor, Scenario s, String scope) throws Exception {
+        var grant = actor.browser().call("POST","/api/v1/admin/medical/reviews",Map.of("appointmentId",s.appointmentId(),"scope",scope,"reason","处理虚构争议内容"));
+        assertThat(grant.status()).isEqualTo(200); return grant.body().path("id").asText();
+    }
+    Reply flag(Actor actor, String reviewId, Scenario s, String type, String target, String state) throws Exception {
+        return actor.browser().call("POST","/api/v1/admin/medical/flags",Map.of("reviewId",reviewId,"appointmentId",s.appointmentId(),"targetType",type,"targetId",target,"state",state,"reason","虚构内容复核"));
+    }
+    @Test void medicalReviewRequiresIndependentPermissionAndSeparatesRecordAndAttachmentScopes() throws Exception {
+        var s = scenario("ONLINE"); var uploaded = materials(s.patient().browser(),s.appointmentId(),true,"保留原始医疗正文",PDF).body();
+        String attachment = uploaded.path("materials").get(0).path("attachments").get(0).path("id").asText();
+        var request = Map.of("appointmentId",s.appointmentId(),"reason","虚构审核理由","scope","ALL");
+        assertThat(admin().call("POST","/api/v1/admin/medical/reviews",request).status()).isEqualTo(403);
+        assertThat(admin().call("POST","/api/v1/admin/medical/permissions",Map.of("identifier","admin-foundation-test","enabled",true,"reason","禁止自授")).status()).isEqualTo(403);
+        assertThat(s.patient().browser().call("GET","/api/v1/admin/medical/appointments",null).status()).isEqualTo(403);
+        assertThat(s.doctor().browser().call("POST","/api/v1/admin/medical/reviews",request).status()).isEqualTo(403);
+        var reviewer = reviewer(); String record = review(reviewer,s,"RECORD"); String attachmentOnly = review(reviewer,s,"ATTACHMENTS");
+        String base = "/api/v1/admin/medical/reviews/";
+        var recordView = reviewer.browser().call("GET",base+record+"/content",null);
+        assertThat(recordView.status()).isEqualTo(200); assertThat(recordView.body().toString()).contains("保留原始医疗正文").doesNotContain("fictional.pdf","storageKey");
+        assertThat(download(reviewer.browser(),base+record+"/attachments/"+attachment).statusCode()).isEqualTo(403);
+        var attachmentView = reviewer.browser().call("GET",base+attachmentOnly+"/content",null);
+        assertThat(attachmentView.body().toString()).contains("fictional.pdf").doesNotContain("保留原始医疗正文","storageKey");
+        assertThat(download(reviewer.browser(),base+attachmentOnly+"/attachments/"+attachment).body()).isEqualTo(PDF.bytes());
+        assertThat(flag(reviewer,attachmentOnly,s,"MATERIAL",uploaded.path("materials").get(0).path("id").asText(),"LIMITED").status()).isEqualTo(403);
+        var other = reviewer(); assertThat(other.browser().call("GET",base+record+"/content",null).status()).isEqualTo(404);
+        var foreign = scenario("ONLINE"); var otherUpload = materials(foreign.patient().browser(),foreign.appointmentId(),true,"外人材料",PDF).body();
+        assertThat(flag(reviewer,record,s,"MATERIAL",otherUpload.path("materials").get(0).path("id").asText(),"LIMITED").status()).isEqualTo(404);
+        assertThat(download(reviewer.browser(),base+attachmentOnly+"/attachments/"+otherUpload.path("materials").get(0).path("attachments").get(0).path("id").asText()).statusCode()).isEqualTo(404);
+        assertThat(reviewer.browser().call("POST",base+record+"/revoke",Map.of("reason","审核完成")).status()).isEqualTo(204);
+        assertThat(reviewer.browser().call("GET",base+record+"/content",null).status()).isEqualTo(403);
+        assertThat(admin().call("POST","/api/v1/admin/medical/permissions",Map.of("identifier",reviewer.identifier(),"enabled",false,"reason","撤回独立权限")).status()).isEqualTo(204);
+        assertThat(download(reviewer.browser(),base+attachmentOnly+"/attachments/"+attachment).statusCode()).isEqualTo(403);
+        assertThat(reviewer.browser().call("POST","/api/v1/admin/medical/reviews",request).status()).isEqualTo(403);
+    }
+    @Test void medicalRestrictionsApplyToAllClinicalReadersAndAiDerivativesAndCanBeCleared() throws Exception {
+        var s = scenario("ONLINE"); String text = "受限材料派生的虚构咳嗽3天";
+        var generated = analyze(s,consent(s,true,"LOCAL_MOCK",text).path("id").asText(),text,identifier()).body();
+        var uploaded = materials(s.patient().browser(),s.appointmentId(),true,"另一份受限材料",PDF).body();
+        String material = uploaded.path("materials").get(0).path("id").asText(), attachment = uploaded.path("materials").get(0).path("attachments").get(0).path("id").asText();
+        start(s);
+        assertThat(s.patient().browser().call("POST",patientPath(s)+"/clinical/messages",Map.of("body","受限消息原文")).status()).isEqualTo(200);
+        var completed = s.doctor().browser().call("POST",doctorPath(s)+"/result",Map.of("body","受限结果原文")).body();
+        var corrected = s.doctor().browser().call("POST",doctorPath(s)+"/corrections",Map.of("reason","受限更正理由","body","受限更正原文")).body();
+        var reviewer = reviewer(); String review = review(reviewer,s,"ALL");
+        assertThat(flag(reviewer,review,s,"MATERIAL",generated.path("materialId").asText(),"LIMITED").status()).isEqualTo(200);
+        assertThat(s.doctor().browser().call("GET",doctorPath(s)+"/ai",null).body().toString()).doesNotContain(text).contains("内容已限制展示");
+        var aiResults = s.patient().browser().call("GET",patientPath(s)+"/ai/results",null).body().toString();
+        assertThat(aiResults).doesNotContain(text).contains("内容已限制展示");
+        assertThat(flag(reviewer,review,s,"ATTACHMENT",attachment,"LIMITED").status()).isEqualTo(200);
+        assertThat(download(s.patient().browser(),"/api/v1/patient/clinical/attachments/"+attachment).statusCode()).isEqualTo(403);
+        assertThat(download(s.doctor().browser(),"/api/v1/doctor/clinical/attachments/"+attachment).statusCode()).isEqualTo(403);
+        for (var target : List.of(new String[]{"MATERIAL",material},new String[]{"MESSAGE",completed.path("messages").get(0).path("id").asText()},new String[]{"RESULT",completed.path("result").path("id").asText()},new String[]{"CORRECTION",corrected.path("corrections").get(0).path("id").asText()}))
+            assertThat(flag(reviewer,review,s,target[0],target[1],"LIMITED").status()).isEqualTo(200);
+        for (Browser reader : List.of(s.patient().browser(),s.doctor().browser())) {
+            String path = reader == s.patient().browser() ? patientPath(s)+"/clinical" : doctorPath(s);
+            assertThat(reader.call("GET",path,null).body().toString()).doesNotContain("另一份受限材料","受限消息原文","受限结果原文","受限更正原文","受限更正理由");
+        }
+        var originals = reviewer.browser().call("GET","/api/v1/admin/medical/reviews/"+review+"/content",null).body().toString();
+        assertThat(originals).contains("另一份受限材料","受限消息原文","受限结果原文","受限更正原文");
+        assertThat(flag(reviewer,review,s,"MATERIAL",material,"CLEARED").status()).isEqualTo(200);
+        assertThat(flag(reviewer,review,s,"ATTACHMENT",attachment,"CLEARED").status()).isEqualTo(200);
+        assertThat(s.patient().browser().call("GET",patientPath(s)+"/clinical",null).body().toString()).contains("另一份受限材料");
+        assertThat(download(s.patient().browser(),"/api/v1/patient/clinical/attachments/"+attachment).statusCode()).isEqualTo(200);
+        assertThat(admin().call("GET","/api/v1/admin/medical/audits/"+completed.path("result").path("id").asText(),null).body().toString()).doesNotContain("受限更正理由","受限更正原文");
+        var head = doctor(s.departmentId()); assignHead(s,head);
+        assertThat(head.browser().call("GET",doctorPath(s),null).status()).isEqualTo(404);
+        assertThat(s.patient().browser().call("POST",patientPath(s)+"/clinical/sharing/revoke",null).status()).isEqualTo(200);
+        assertThat(download(s.doctor().browser(),"/api/v1/doctor/clinical/attachments/"+attachment).statusCode()).isEqualTo(403);
+    }
+    @Test void medicalReviewExpiresAtThirtyMinutesAndAuditDetectsChangedContentAndMissingTail() throws Exception {
+        var s = scenario("ONLINE"); var reviewer = reviewer(); String id = review(reviewer,s,"ALL");
+        clock.now = clock.instant().plus(Duration.ofMinutes(30));
+        assertThat(reviewer.browser().call("GET","/api/v1/admin/medical/reviews/"+id+"/content",null).status()).isEqualTo(403);
+        assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isTrue();
+        var events = admin().call("GET","/api/v1/admin/medical/audits/"+id,null).body();
+        assertThat(events).hasSize(1); String event = events.get(0).path("id").asText(), original = "处理虚构争议内容";
+        try (var connection = dataSource.getConnection()) {
+            try (var update = connection.prepareStatement("UPDATE audit_event SET reason=? WHERE id=?")) {
+                update.setString(1,"模拟数据库篡改");update.setString(2,event);update.executeUpdate();
+                try { assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isFalse(); }
+                finally { update.setString(1,original);update.executeUpdate(); }
+            }
+            try (var query = connection.createStatement(); var row = query.executeQuery("SELECT sequence_no,event_id,previous_signature,signature FROM audit_signature ORDER BY sequence_no DESC LIMIT 1")) {
+                assertThat(row.next()).isTrue(); long sequence = row.getLong(1); String eventId = row.getString(2), previous = row.getString(3), signature = row.getString(4);
+                try (var delete = connection.prepareStatement("DELETE FROM audit_signature WHERE sequence_no=?")) { delete.setLong(1,sequence); delete.executeUpdate(); }
+                try {
+                    assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isFalse();
+                    try (var rollback = connection.prepareStatement("UPDATE audit_chain_head SET sequence_no=?,signature=? WHERE id=1")) { rollback.setLong(1,sequence-1);rollback.setString(2,previous);rollback.executeUpdate(); }
+                    // Even rolling the database head back cannot erase the separate filesystem checkpoint.
+                    assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isFalse();
+                    for (int attempt=0;attempt<2;attempt++) {
+                        var blocked = reviewer.browser().call("POST","/api/v1/admin/medical/reviews",Map.of("appointmentId",s.appointmentId(),"scope","RECORD","reason","普通写入不能覆盖损坏的历史"));
+                        assertThat(blocked.status()).isEqualTo(503); assertThat(blocked.body().path("error").path("code").asText()).isEqualTo("AUDIT_INTEGRITY_FAILED");
+                    }
+                    assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isFalse();
+                }
+                finally { try (var restore = connection.prepareStatement("INSERT INTO audit_signature (sequence_no,event_id,previous_signature,signature) VALUES (?,?,?,?)")) {
+                    restore.setLong(1,sequence);restore.setString(2,eventId);restore.setString(3,previous);restore.setString(4,signature);restore.executeUpdate();
+                    try (var restoreHead = connection.prepareStatement("UPDATE audit_chain_head SET sequence_no=?,signature=? WHERE id=1")) { restoreHead.setLong(1,sequence);restoreHead.setString(2,signature);restoreHead.executeUpdate(); }
+                } }
+            }
+        }
+        assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isTrue();
+    }
+    @Test void sharingRevocationSerializesWithAnAuthorizedAttachmentDownload() throws Exception {
+        var s = scenario("ONLINE"); var upload = materials(s.patient().browser(),s.appointmentId(),true,"并发撤回材料",PDF).body();
+        String attachment = upload.path("materials").get(0).path("attachments").get(0).path("id").asText();
+        var entered = new java.util.concurrent.CountDownLatch(1); var release = new java.util.concurrent.CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> { entered.countDown(); if (!release.await(10,java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("test timeout"); return invocation.callRealMethod(); }).when(fileStore).read(org.mockito.ArgumentMatchers.anyString());
+        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var reading = executor.submit(() -> download(s.doctor().browser(),"/api/v1/doctor/clinical/attachments/"+attachment));
+            assertThat(entered.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var revoking = executor.submit(() -> s.patient().browser().call("POST",patientPath(s)+"/clinical/sharing/revoke",null));
+            try {
+                org.assertj.core.api.Assertions.assertThatThrownBy(() -> revoking.get(300,java.util.concurrent.TimeUnit.MILLISECONDS)).isInstanceOf(java.util.concurrent.TimeoutException.class);
+            } finally { release.countDown(); }
+            assertThat(reading.get().statusCode()).isEqualTo(200); assertThat(revoking.get().status()).isEqualTo(200);
+            assertThat(download(s.doctor().browser(),"/api/v1/doctor/clinical/attachments/"+attachment).statusCode()).isEqualTo(403);
+        } finally { release.countDown(); org.mockito.Mockito.reset(fileStore); }
+    }
+    @Test void concurrentReviewGrantsAppendAnIntactAuditChainWithoutSnapshotFalseAlarms() throws Exception {
+        var s = scenario("ONLINE"); var reviewer = reviewer(); var start = new java.util.concurrent.CountDownLatch(1);
+        var snapshots = new java.util.concurrent.CountDownLatch(4);
+        org.mockito.Mockito.doAnswer(invocation -> { var result = invocation.callRealMethod(); snapshots.countDown(); if (!snapshots.await(10,java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("snapshot barrier timeout"); return result; }).when(bookingService).careScope(s.appointmentId());
+        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var futures = new ArrayList<java.util.concurrent.Future<Reply>>();
+            for (int index=0;index<4;index++) futures.add(executor.submit(() -> { start.await(); return reviewer.browser().call("POST","/api/v1/admin/medical/reviews",Map.of("appointmentId",s.appointmentId(),"scope","RECORD","reason","并发访问授权")); }));
+            start.countDown(); for (var future : futures) assertThat(future.get().status()).isEqualTo(200);
+        } finally { org.mockito.Mockito.reset(bookingService); }
+        assertThat(admin().call("GET","/api/v1/admin/medical/audit-integrity",null).body().path("valid").asBoolean()).isTrue();
     }
     @Test void materialUploadChecksAuthorizationContentCountAndTenMegabyteBoundary() throws Exception {
         var scenario = scenario("ONLINE"); var patient = scenario.patient().browser(); String id = scenario.appointmentId();

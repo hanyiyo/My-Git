@@ -5,6 +5,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $services = $null
 try {
     $services = Start-TestServices $root
+    $env:MEDICAL_TEST_AUDIT_DIRECTORY = Join-Path ([IO.Path]::GetTempPath()) ('medical-test-audit-' + [guid]::NewGuid().ToString('N'))
     $maven = if ($env:MEDICAL_MAVEN) { $env:MEDICAL_MAVEN } elseif (Get-Command mvn -ErrorAction SilentlyContinue) { (Get-Command mvn).Source } else { 'D:\apache-maven-3.6.3\bin\mvn.cmd' }
     if ($IsWindows -and (Test-Path 'D:\jdk\jdk-25')) { $env:JAVA_HOME = 'D:\jdk\jdk-25' }
     if ($IsWindows -and -not $env:MEDICAL_BROWSER_CHANNEL -and (Test-Path 'C:\Program Files\Google\Chrome\Application\chrome.exe')) { $env:MEDICAL_BROWSER_CHANNEL = 'chrome' }

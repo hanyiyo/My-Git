@@ -77,6 +77,13 @@ public class IdentityService {
 
     public List<Doctor> doctors() { return accounts.doctors(); }
 
+    public Profile administrator(String identifier) {
+        var account = accounts.byIdentifier(normalize(identifier));
+        if (account == null || !account.enabled() || !accounts.roles(account.id()).contains("ADMIN"))
+            throw new ApiFailure(404, "NOT_FOUND", "有效管理员账户不存在");
+        return profile(account.id());
+    }
+
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     public Doctor lockDoctor(String id) {
         var doctor = accounts.lockDoctor(id);

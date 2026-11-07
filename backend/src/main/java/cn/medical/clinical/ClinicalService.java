@@ -3,6 +3,8 @@ package cn.medical.clinical;
 import cn.medical.booking.BookingService;
 import cn.medical.identity.ApiFailure;
 import cn.medical.reception.ReceptionService;
+import cn.medical.governance.ReviewPolicyService;
+import cn.medical.governance.AuditService;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -23,27 +25,36 @@ public class ClinicalService {
     public record ClinicalView(ClinicalMapper.Consultation consultation, List<MaterialView> materials,
         List<ClinicalMapper.Message> messages, ClinicalMapper.Result result, List<ClinicalMapper.Correction> corrections) {}
     public record Download(ByteArrayResource resource, String mediaType, String originalName) {}
+    public record ReviewSnapshot(List<MaterialView> materials, List<ClinicalMapper.Result> results,
+        List<ClinicalMapper.Message> messages, List<ClinicalMapper.Correction> corrections) {}
     private final ClinicalMapper clinical;
     private final ReceptionService reception;
     private final BookingService booking;
     private final Clock clock;
     private final ClinicalFileStore files;
+    private final ReviewPolicyService policy;
+    private final AuditService audit;
 
     public ClinicalService(ClinicalMapper clinical, ReceptionService reception, BookingService booking, Clock clock,
-        ClinicalFileStore files) {
+        ClinicalFileStore files, ReviewPolicyService policy, AuditService audit) {
         this.clinical = clinical; this.reception = reception; this.booking = booking; this.clock = clock;
         this.files = files;
+        this.policy = policy; this.audit = audit;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ClinicalView patientView(String patient, String id) {
         requirePatient(patient, id);
+        booking.lockCareScope(id); requirePatient(patient,id);
+        audit.record(patient, "MEDICAL_RECORD_VIEWED", "APPOINTMENT", id, "患者查看本人问诊");
         return view(id);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ClinicalView doctorView(String doctor, String id) {
         requireDoctor(doctor, id);
+        booking.lockCareScope(id); requireDoctor(doctor,id);
+        audit.record(doctor, "MEDICAL_RECORD_VIEWED", "APPOINTMENT", id, "当前负责医生查看本次问诊");
         return view(id, true);
     }
 
@@ -82,6 +93,7 @@ public class ClinicalService {
         }
         clinical.insertMaterial(new ClinicalMapper.Material(materialId, id, version, symptoms.trim(), true, now));
         stored.forEach(clinical::insertAttachment);
+        audit.record(patient, "MATERIAL_SHARED", "MATERIAL", materialId, "主动共享本次材料及附件");
         return view(id);
     }
 
@@ -109,6 +121,7 @@ public class ClinicalService {
         clinical.insertResult(new ClinicalMapper.Result(UUID.randomUUID().toString(), id, clinical.nextResultVersion(id) + 1, doctor, type, body.trim(), now));
         clinical.markReplied(id); clinical.closeConsultation(id, now);
         reception.completeEncounter(doctor, id); booking.completeAfterEncounter(id);
+        audit.record(doctor, "CLINICAL_RESULT_SUBMITTED", "APPOINTMENT", id, "提交结果并结束接诊");
         return view(id, true);
     }
 
@@ -122,26 +135,39 @@ public class ClinicalService {
         if (reason == null || reason.isBlank() || reason.length() > 500 || body == null || body.isBlank() || body.length() > 20000)
             throw new ApiFailure(400, "INVALID_INPUT", "更正原因和内容不能为空且长度受限");
         clinical.insertCorrection(new ClinicalMapper.Correction(UUID.randomUUID().toString(), result.id(), id, doctor, reason.trim(), body.trim(), clock.millis()));
+        audit.record(doctor, "CLINICAL_RESULT_CORRECTED", "RESULT", result.id(), "追加更正；医疗理由保留于受控更正记录");
         return view(id, true);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Download download(String actor, String role, String attachmentId) {
         var attachment = clinical.attachment(attachmentId);
         if (attachment == null) throw new ApiFailure(404, "NOT_FOUND", "医疗附件不存在");
+        if (role.equals("PATIENT")) requirePatient(actor, attachment.appointmentId()); else requireDoctor(actor, attachment.appointmentId());
+        booking.lockCareScope(attachment.appointmentId());
         if (role.equals("PATIENT")) requirePatient(actor, attachment.appointmentId()); else requireDoctor(actor, attachment.appointmentId());
         if (role.equals("DOCTOR")) {
             var material = clinical.material(attachment.materialId());
             if (material == null || !material.shared()) throw new ApiFailure(403, "SHARING_REVOKED", "患者已撤回该材料共享授权");
         }
-        try { return new Download(new ByteArrayResource(files.read(attachment.storageKey())), attachment.mediaType(), attachment.originalName()); }
-        catch (IOException error) { throw new ApiFailure(404, "NOT_FOUND", "医疗附件不可用"); }
+        policy.requireVisible(attachment.appointmentId(), "MATERIAL", attachment.materialId());
+        policy.requireVisible(attachment.appointmentId(), "ATTACHMENT", attachment.id());
+        var result = readAttachment(attachment);
+        audit.record(actor, "MEDICAL_ATTACHMENT_DOWNLOADED", "ATTACHMENT", attachment.id(), "当前预约授权下载");
+        return result;
     }
 
     private ClinicalView view(String id) { return view(id, false); }
     private ClinicalView view(String id, boolean doctor) {
-        var materials = clinical.materials(id).stream().filter(material -> !doctor || material.shared()).map(material -> new MaterialView(material.id(), material.versionNo(), material.symptomText(), material.shared(), material.createdAt(), clinical.attachments(material.id()).stream().map(a -> new AttachmentView(a.id(), a.originalName(), a.mediaType(), a.sizeBytes(), a.createdAt())).toList())).toList();
-        return new ClinicalView(clinical.consultation(id), materials, clinical.messages(id), clinical.latestResult(id), clinical.corrections(id));
+        var materials = clinical.materials(id).stream().filter(material -> !doctor || material.shared()).map(material -> new MaterialView(material.id(), material.versionNo(), policy.display(id, "MATERIAL", material.id(), material.symptomText()), material.shared(), material.createdAt(),
+            policy.limited(id, "MATERIAL", material.id()) ? List.of() : attachmentViews(material.id(), true))).toList();
+        var messages = clinical.messages(id).stream().map(m -> new ClinicalMapper.Message(m.id(), m.appointmentId(), m.authorId(), m.authorRole(), policy.display(id,"MESSAGE",m.id(),m.body()),m.createdAt())).toList();
+        var result = clinical.latestResult(id);
+        if (result != null) result = new ClinicalMapper.Result(result.id(), id, result.versionNo(), result.authorId(), result.encounterType(), policy.display(id,"RESULT",result.id(),result.body()),result.createdAt());
+        var corrections = clinical.corrections(id).stream().map(c -> new ClinicalMapper.Correction(c.id(),c.resultId(),id,c.authorId(),
+            policy.limited(id,"CORRECTION",c.id()) || policy.limited(id,"RESULT",c.resultId()) ? ReviewPolicyService.LIMITED : c.reason(),
+            policy.limited(id,"RESULT",c.resultId()) ? ReviewPolicyService.LIMITED : policy.display(id,"CORRECTION",c.id(),c.body()),c.createdAt())).toList();
+        return new ClinicalView(clinical.consultation(id), materials, messages, result, corrections);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -149,7 +175,44 @@ public class ClinicalService {
         booking.lockCareScope(id);
         requirePatient(patient, id);
         clinical.revokeSharing(id);
+        audit.record(patient, "MATERIAL_SHARING_REVOKED", "APPOINTMENT", id, "患者主动撤回材料共享");
         return view(id);
+    }
+    // Reviewers see preserved originals only through an independently authorized, audited application seam.
+    @Transactional
+    public ReviewSnapshot reviewSnapshot(String actor, String reviewId) {
+        var review = policy.active(actor, reviewId, null); String id = review.appointmentId();
+        boolean record = !review.scope().equals("ATTACHMENTS"), attachments = !review.scope().equals("RECORD");
+        var materials = clinical.materials(id).stream().map(m -> new MaterialView(m.id(),m.versionNo(),record ? m.symptomText() : null,m.shared(),m.createdAt(),attachments ? attachmentViews(m.id(),false) : List.of())).toList();
+        return new ReviewSnapshot(materials,record ? clinical.results(id) : List.of(),record ? clinical.messages(id) : List.of(),record ? clinical.corrections(id) : List.of());
+    }
+    @Transactional
+    public boolean ownsReviewTarget(String actor, String reviewId, String type, String target) {
+        var snapshot = reviewSnapshot(actor,reviewId);
+        return switch (type) {
+            case "MATERIAL" -> snapshot.materials().stream().anyMatch(m -> m.id().equals(target));
+            case "ATTACHMENT" -> snapshot.materials().stream().flatMap(m -> m.attachments().stream()).anyMatch(a -> a.id().equals(target));
+            case "RESULT" -> snapshot.results().stream().anyMatch(r -> r.id().equals(target));
+            case "MESSAGE" -> snapshot.messages().stream().anyMatch(m -> m.id().equals(target));
+            case "CORRECTION" -> snapshot.corrections().stream().anyMatch(c -> c.id().equals(target));
+            default -> false;
+        };
+    }
+    @Transactional
+    public Download reviewDownload(String actor, String reviewId, String attachmentId) {
+        var review = policy.active(actor,reviewId,"ATTACHMENTS");
+        var attachment = clinical.attachment(attachmentId);
+        if (attachment == null || !attachment.appointmentId().equals(review.appointmentId())) throw new ApiFailure(404,"NOT_FOUND","附件不属于此次审核授权");
+        var result = readAttachment(attachment);
+        audit.record(actor,"MEDICAL_REVIEW_ATTACHMENT_DOWNLOADED","ATTACHMENT",attachmentId,review.reason());
+        return result;
+    }
+    private List<AttachmentView> attachmentViews(String material, boolean restricted) {
+        return clinical.attachments(material).stream().map(a -> new AttachmentView(a.id(), restricted && policy.limited(a.appointmentId(),"ATTACHMENT",a.id()) ? ReviewPolicyService.LIMITED : a.originalName(),a.mediaType(),a.sizeBytes(),a.createdAt())).toList();
+    }
+    private Download readAttachment(ClinicalMapper.Attachment attachment) {
+        try { return new Download(new ByteArrayResource(files.read(attachment.storageKey())),attachment.mediaType(),attachment.originalName()); }
+        catch (IOException error) { throw new ApiFailure(404,"NOT_FOUND","医疗附件不可用"); }
     }
     private BookingService.CareScope requirePatient(String patient, String id) {
         var appointment = booking.careScope(id);

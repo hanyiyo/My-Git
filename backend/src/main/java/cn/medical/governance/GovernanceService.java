@@ -26,9 +26,11 @@ public class GovernanceService {
     private final DeliveryService delivery;
     private final Clock clock;
     private final TransactionTemplate transactions;
-    public GovernanceService(GovernanceMapper governance, BookingService bookings, CatalogService catalog, DeliveryService delivery, Clock clock, PlatformTransactionManager manager) {
+    private final AuditService auditService;
+    public GovernanceService(GovernanceMapper governance, BookingService bookings, CatalogService catalog, DeliveryService delivery, Clock clock, PlatformTransactionManager manager, AuditService auditService) {
         this.governance = governance; this.bookings = bookings; this.catalog = catalog; this.delivery = delivery; this.clock = clock;
         transactions = new TransactionTemplate(manager); transactions.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        this.auditService = auditService;
     }
     public RequestView submit(String doctorId, String scheduleId, String reason) {
         catalog.lockMutation(scheduleId);
@@ -176,7 +178,7 @@ public class GovernanceService {
     private void expireChoice(GovernanceMapper.Choice choice) {
         bookings.cancelForGovernance(choice.appointmentId(), "SUBSTITUTE_TIMEOUT");
         governance.updateChoice(choice.id(), "EXPIRED", clock.millis(), "患者未在期限内确认替诊");
-        audit(choice.patientId(), "SUBSTITUTE_CHOICE_EXPIRED", "CHOICE", choice.id(), "超过确认期限");
+        audit(governance.request(choice.requestId()).requestedBy(), "SUBSTITUTE_CHOICE_EXPIRED", "CHOICE", choice.id(), "系统按截止时间自动执行；非患者主动操作");
     }
     public void assignHead(String admin, String departmentId, String doctorId) {
         var doctor = catalog.ownDoctor(doctorId);
@@ -220,5 +222,5 @@ public class GovernanceService {
     private RequestView view(GovernanceMapper.Request v) { return new RequestView(v.id(), v.scheduleId(), v.doctorId(), v.departmentId(), v.substituteDoctorId(), v.state(), v.reason(), v.createdAt(), v.updatedAt()); }
     private ChoiceView choice(GovernanceMapper.Choice v) { return new ChoiceView(v.id(), v.requestId(), v.appointmentId(), v.substituteDoctorId(), v.state(), v.deadlineAt(), v.respondedAt(), v.reason()); }
     private void notify(String recipient, String type, String id, String text, String key) { delivery.publish(recipient, type, id, text, key); }
-    private void audit(String actor, String action, String type, String id, String reason) { governance.audit(UUID.randomUUID().toString(), actor, action, type, id, reason, clock.millis()); }
+    private void audit(String actor, String action, String type, String id, String reason) { auditService.record(actor, action, type, id, reason); }
 }

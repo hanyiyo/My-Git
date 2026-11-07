@@ -16,6 +16,9 @@ import org.springframework.transaction.annotation.Isolation;
 
 @Service
 public class BookingService {
+    public record ReviewAppointment(String id, String patientId, String doctorId, String state) {}
+    @Transactional(readOnly = true)
+    public List<ReviewAppointment> adminAppointments() { return booking.reviewAppointments(); }
     private final BookingMapper booking;
     private final CatalogService catalog;
     private final BillingService billing;

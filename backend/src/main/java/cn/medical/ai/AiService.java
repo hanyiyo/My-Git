@@ -7,6 +7,8 @@ import cn.medical.catalog.CatalogMapper;
 import cn.medical.catalog.CatalogService;
 import cn.medical.clinical.ClinicalService;
 import cn.medical.identity.ApiFailure;
+import cn.medical.governance.AuditService;
+import cn.medical.governance.ReviewPolicyService;
 import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -46,11 +48,14 @@ public class AiService {
     private final ObjectMapper json;
     private final Clock clock;
     private final TransactionTemplate transactions;
+    private final AuditService audit;
+    private final ReviewPolicyService policy;
 
     public AiService(AiMapper ai, ClinicalService clinical, BookingService booking, CatalogService catalog, AiTextProvider provider,
-        ObjectMapper json, Clock clock, PlatformTransactionManager manager) {
+        ObjectMapper json, Clock clock, PlatformTransactionManager manager, AuditService audit, ReviewPolicyService policy) {
         this.ai = ai; this.clinical = clinical; this.booking = booking; this.catalog = catalog; this.provider = provider;
         this.json = json; this.clock = clock;
+        this.audit = audit; this.policy = policy;
         transactions = new TransactionTemplate(manager);
         transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
@@ -66,6 +71,7 @@ public class AiService {
         String consentId = UUID.randomUUID().toString(); long now = clock.millis();
         ai.insertConsent(new AiMapper.Consent(consentId, id, patient, input.provider(), input.purpose(), input.scope(),
             input.accepted(), now, null, input.accepted() ? hash(input.symptomText()) : null));
+        audit.record(patient, input.accepted() ? "AI_CONSENT_ACCEPTED" : "AI_CONSENT_REFUSED", "AI_CONSENT", consentId, input.purpose() + ":" + input.scope());
         return new ConsentView(consentId, input.provider(), input.purpose(), input.scope(), input.accepted(), now, null);
     }
 
@@ -75,6 +81,7 @@ public class AiService {
         if (id != null) requirePatient(patient, id);
         if (ai.consent(consentId, id, patient) == null) throw new ApiFailure(404, "NOT_FOUND", "授权不存在");
         ai.revokeConsent(consentId, patient, clock.millis());
+        audit.record(patient, "AI_CONSENT_REVOKED", "AI_CONSENT", consentId, "患者主动撤回本次文本授权");
     }
 
     public ResultView analyze(String patient, String id, AnalyzeInput input) {
@@ -149,12 +156,12 @@ public class AiService {
         return false;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public List<ResultView> doctorResults(String doctor, String id) {
         var view = clinical.doctorView(doctor, id);
         return appointmentResults(id, view);
     }
-    @Transactional(readOnly = true)
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public List<ResultView> patientResults(String patient, String id) {
         var view = id == null ? null : clinical.patientView(patient, id);
         return id == null ? ai.drafts(patient).stream().map(task -> resultView(task, null)).toList() : appointmentResults(id, view);
@@ -216,6 +223,8 @@ public class AiService {
         boolean stale = view == null ? ai.latestDraftVersion(task.patientId()) > task.materialVersion()
             : latest != null && !latest.id().equals(materialId);
         Analysis analysis = result == null ? null : readAnalysis(result.body());
+        if (view != null && view.consultation() != null && materialId != null && policy.limited(view.consultation().appointmentId(), "MATERIAL", materialId))
+            analysis = new Analysis(ReviewPolicyService.LIMITED, "", "", "", "", "", task.provider());
         return new ResultView(task.id(), task.state(), task.provider(), task.purpose(), task.attempts(), task.errorCode(),
             result == null ? 0 : result.versionNo(), stale, analysis, analysis == null ? List.of() : recommendations(analysis.departmentHint()),
             materialId, materialVersion, task.consentId(), task.modelVersion(), task.promptVersion());

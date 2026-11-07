@@ -58,7 +58,4 @@ public interface GovernanceMapper {
     @Update("UPDATE substitution_choice SET state=#{state}, responded_at=#{now}, reason=#{reason} WHERE id=#{id} AND state='PENDING'")
     int updateChoice(@Param("id") String id, @Param("state") String state, @Param("now") long now, @Param("reason") String reason);
 
-    @Insert("INSERT INTO audit_event (id, actor_id, action, object_type, object_id, reason, created_at) VALUES (#{id}, #{actorId}, #{action}, #{objectType}, #{objectId}, #{reason}, #{createdAt})")
-    void audit(@Param("id") String id, @Param("actorId") String actorId, @Param("action") String action,
-        @Param("objectType") String objectType, @Param("objectId") String objectId, @Param("reason") String reason, @Param("createdAt") long createdAt);
 }

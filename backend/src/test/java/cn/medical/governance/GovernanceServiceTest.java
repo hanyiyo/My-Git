@@ -20,7 +20,7 @@ class GovernanceServiceTest {
         var schedule = new cn.medical.catalog.CatalogMapper.Schedule("schedule", "doctor", "department", LocalDate.of(2026, 11, 7), "AM", "ONLINE", 100_000L, 200_000L, "Asia/Shanghai", 3, 1000, "PUBLISHED", 3);
         when(catalog.governanceSchedule("schedule")).thenReturn(schedule);
         var service = new GovernanceService(governance, mock(BookingService.class), catalog, mock(cn.medical.delivery.DeliveryService.class),
-            Clock.fixed(Instant.ofEpochMilli(100_000L - 23 * 60 * 60 * 1000L), ZoneOffset.UTC), mock(org.springframework.transaction.PlatformTransactionManager.class));
+            Clock.fixed(Instant.ofEpochMilli(100_000L - 23 * 60 * 60 * 1000L), ZoneOffset.UTC), mock(org.springframework.transaction.PlatformTransactionManager.class), mock(AuditService.class));
 
         assertThatThrownBy(() -> service.submit("doctor", "schedule", "临时停诊"))
             .isInstanceOfSatisfying(ApiFailure.class, failure -> org.assertj.core.api.Assertions.assertThat(failure.code).isEqualTo("EMERGENCY_REQUIRED"));

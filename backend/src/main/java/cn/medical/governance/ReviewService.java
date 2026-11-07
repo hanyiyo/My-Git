@@ -1,6 +1,7 @@
 package cn.medical.governance;
 
-import cn.medical.clinical.ClinicalMapper;
+import cn.medical.booking.BookingService;
+import cn.medical.clinical.ClinicalService;
 import cn.medical.identity.ApiFailure;
 import java.time.Clock;
 import java.time.Duration;
@@ -10,60 +11,56 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ReviewService {
-    public record MaterialContent(String id, int versionNo, String body, boolean shared, List<String> attachments) {}
-    public record ResultContent(String id, int versionNo, String body, String encounterType, long createdAt) {}
-    public record ReviewContent(String reviewId, String appointmentId, String scope, List<MaterialContent> materials, List<ResultContent> results, List<ReviewMapper.Flag> flags) {}
     public record ReviewView(String id, String appointmentId, String scope, String state, long expiresAt) {}
-
+    public record ReviewContent(String reviewId, String appointmentId, String scope, ClinicalService.ReviewSnapshot content, List<ReviewMapper.Flag> flags) {}
     private final ReviewMapper reviews;
-    private final ClinicalMapper clinical;
+    private final ClinicalService clinical;
+    private final BookingService booking;
+    private final ReviewPolicyService policy;
+    private final AuditService audit;
     private final Clock clock;
-    public ReviewService(ReviewMapper reviews, ClinicalMapper clinical, Clock clock) { this.reviews = reviews; this.clinical = clinical; this.clock = clock; }
-
-    @Transactional
-    public ReviewView request(String adminId, String appointmentId, String reason, String scope) {
-        if (reason == null || reason.isBlank() || reason.length() > 1000 || !Set.of("RECORD", "ATTACHMENTS", "ALL").contains(scope))
-            throw new ApiFailure(400, "INVALID_INPUT", "审核理由和访问范围不能为空");
-        if (clinical.appointment(appointmentId) == null) throw new ApiFailure(404, "NOT_FOUND", "问诊不存在");
-        long now = clock.millis(); String id = UUID.randomUUID().toString();
-        reviews.insertReview(new ReviewMapper.ReviewCase(id, appointmentId, adminId, reason.trim(), scope, "GRANTED", now, now + Duration.ofMinutes(30).toMillis()));
-        audit(adminId, "MEDICAL_REVIEW_GRANTED", "REVIEW", id, reason);
-        return new ReviewView(id, appointmentId, scope, "GRANTED", now + Duration.ofMinutes(30).toMillis());
+    public ReviewService(ReviewMapper reviews, ClinicalService clinical, BookingService booking, ReviewPolicyService policy, AuditService audit, Clock clock) {
+        this.reviews = reviews; this.clinical = clinical; this.booking = booking; this.policy = policy; this.audit = audit; this.clock = clock;
     }
-
-    @Transactional(readOnly = true)
-    public ReviewContent content(String adminId, String reviewId) {
-        var review = requireActiveReview(adminId, reviewId);
-        var flags = reviews.flags(review.appointmentId());
-        var materials = clinical.materials(review.appointmentId()).stream().map(material -> new MaterialContent(material.id(), material.versionNo(),
-            limited(flags, "MATERIAL", material.id()) ? "[内容已限制展示]" : material.symptomText(), material.shared(),
-            clinical.attachments(material.id()).stream().map(ClinicalMapper.Attachment::originalName).toList())).toList();
-        var results = clinical.results(review.appointmentId()).stream().map(result -> new ResultContent(result.id(), result.versionNo(),
-            limited(flags, "RESULT", result.id()) ? "[内容已限制展示]" : result.body(), result.encounterType(), result.createdAt())).toList();
-        audit(adminId, "MEDICAL_CONTENT_VIEWED", "REVIEW", reviewId, review.reason());
-        return new ReviewContent(review.id(), review.appointmentId(), review.scope(), materials, results, flags);
-    }
-
     @Transactional
-    public ReviewMapper.Flag flag(String adminId, String appointmentId, String targetType, String targetId, String state, String reason) {
-        if (!Set.of("MATERIAL", "RESULT").contains(targetType) || !Set.of("LIMITED", "CLEARED").contains(state) || reason == null || reason.isBlank())
+    public ReviewView request(String admin, String appointment, String reason, String scope) {
+        policy.requireReviewer(admin); ReviewPolicyService.validateReason(reason);
+        if (!Set.of("RECORD", "ATTACHMENTS", "ALL").contains(Objects.toString(scope, ""))) throw new ApiFailure(400, "INVALID_INPUT", "请选择正文、附件或全部范围");
+        if (booking.careScope(appointment) == null) throw new ApiFailure(404, "NOT_FOUND", "问诊不存在");
+        long now = clock.millis(); String id = UUID.randomUUID().toString(); long expires = now + Duration.ofMinutes(30).toMillis();
+        reviews.insertReview(new ReviewMapper.ReviewCase(id, appointment, admin, reason.trim(), scope, "GRANTED", now, expires));
+        audit.record(admin, "MEDICAL_REVIEW_GRANTED", "REVIEW", id, reason.trim());
+        return new ReviewView(id, appointment, scope, "GRANTED", expires);
+    }
+    @Transactional
+    public ReviewContent content(String admin, String id) {
+        var review = policy.active(admin, id, null);
+        var snapshot = clinical.reviewSnapshot(admin, id);
+        audit.record(admin, "MEDICAL_CONTENT_VIEWED", "REVIEW", id, review.reason());
+        var flags = reviews.flags(review.appointmentId()).stream().filter(f -> review.scope().equals("ALL") || (review.scope().equals("ATTACHMENTS") == f.targetType().equals("ATTACHMENT"))).toList();
+        return new ReviewContent(id, review.appointmentId(), review.scope(), snapshot, flags);
+    }
+    @Transactional
+    public ReviewMapper.Flag flag(String admin, String reviewId, String appointment, String type, String target, String state, String reason) {
+        ReviewPolicyService.validateReason(reason);
+        if (!Set.of("MATERIAL", "RESULT", "MESSAGE", "CORRECTION", "ATTACHMENT").contains(Objects.toString(type, "")) || !Set.of("LIMITED", "CLEARED").contains(Objects.toString(state, "")))
             throw new ApiFailure(400, "INVALID_INPUT", "问题内容标记参数无效");
-        if (clinical.appointment(appointmentId) == null) throw new ApiFailure(404, "NOT_FOUND", "问诊不存在");
-        var value = new ReviewMapper.Flag(UUID.randomUUID().toString(), appointmentId, targetType, targetId, adminId, state, reason.trim(), clock.millis());
-        reviews.insertFlag(value); audit(adminId, "MEDICAL_CONTENT_FLAGGED", targetType, targetId, reason); return value;
+        var review = policy.active(admin, reviewId, type.equals("ATTACHMENT") ? "ATTACHMENTS" : "RECORD");
+        if (!review.appointmentId().equals(appointment) || !clinical.ownsReviewTarget(admin, reviewId, type, target)) throw new ApiFailure(404, "NOT_FOUND", "内容不属于此次审核授权");
+        var flag = new ReviewMapper.Flag(UUID.randomUUID().toString(), appointment, type, target, admin, state, reason.trim(), clock.millis());
+        reviews.insertFlag(flag); audit.record(admin, "MEDICAL_CONTENT_" + state, type, target, reason.trim()); return flag;
     }
-
-    @Transactional(readOnly = true)
-    public List<ReviewMapper.Audit> audits(String adminId, String objectId) { return reviews.audits(objectId); }
-
-    private ReviewMapper.ReviewCase requireActiveReview(String adminId, String id) {
-        var review = reviews.review(id, adminId);
+    @Transactional
+    public void revoke(String admin, String id, String reason) {
+        ReviewPolicyService.validateReason(reason);
+        var review = reviews.review(id, admin);
         if (review == null) throw new ApiFailure(404, "NOT_FOUND", "审核授权不存在");
-        if (!review.state().equals("GRANTED") || review.expiresAt() <= clock.millis()) {
-            reviews.updateReviewState(id, "EXPIRED"); throw new ApiFailure(403, "REVIEW_EXPIRED", "审核授权已撤回或过期");
-        }
-        return review;
+        if (review.state().equals("REVOKED")) return;
+        reviews.updateReviewState(id, "REVOKED"); audit.record(admin, "MEDICAL_REVIEW_REVOKED", "REVIEW", id, reason.trim());
     }
-    private boolean limited(List<ReviewMapper.Flag> flags, String type, String id) { return flags.stream().anyMatch(flag -> flag.targetType().equals(type) && flag.targetId().equals(id) && flag.state().equals("LIMITED")); }
-    private void audit(String actor, String action, String type, String id, String reason) { reviews.audit(UUID.randomUUID().toString(), actor, action, type, id, reason == null ? "" : reason, clock.millis()); }
+    @Transactional(readOnly = true)
+    public List<ReviewMapper.Audit> audits(String admin, String id) {
+        return reviews.audits(id).stream().map(e -> new ReviewMapper.Audit(e.id(),e.actorId(),e.action(),e.objectType(),e.objectId(),"[理由已留存于受控审计]",e.createdAt())).toList();
+    }
+    public List<BookingService.ReviewAppointment> appointments() { return booking.adminAppointments(); }
 }

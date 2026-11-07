@@ -16,10 +16,14 @@ public interface ReviewMapper {
     int updateReviewState(@Param("id") String id, @Param("state") String state);
     @Insert("INSERT INTO medical_content_flag (id, appointment_id, target_type, target_id, marked_by, state, reason, created_at) VALUES (#{id}, #{appointmentId}, #{targetType}, #{targetId}, #{markedBy}, #{state}, #{reason}, #{createdAt})")
     void insertFlag(Flag value);
-    @Select("SELECT id, appointment_id, target_type, target_id, marked_by, state, reason, created_at FROM medical_content_flag WHERE appointment_id=#{appointmentId} ORDER BY created_at, id")
+    @Select("SELECT id, appointment_id, target_type, target_id, marked_by, state, reason, created_at FROM medical_content_flag WHERE appointment_id=#{appointmentId} ORDER BY sequence_no")
     List<Flag> flags(@Param("appointmentId") String appointmentId);
-    @Insert("INSERT INTO audit_event (id, actor_id, action, object_type, object_id, reason, created_at) VALUES (#{id}, #{actorId}, #{action}, #{objectType}, #{objectId}, #{reason}, #{createdAt})")
-    void audit(@Param("id") String id, @Param("actorId") String actorId, @Param("action") String action, @Param("objectType") String objectType, @Param("objectId") String objectId, @Param("reason") String reason, @Param("createdAt") long createdAt);
+    @Select("SELECT id, appointment_id, target_type, target_id, marked_by, state, reason, created_at FROM medical_content_flag WHERE appointment_id=#{appointment} AND target_type=#{type} AND target_id=#{id} ORDER BY sequence_no DESC LIMIT 1")
+    Flag latestFlag(@Param("appointment") String appointment, @Param("type") String type, @Param("id") String id);
+    @Insert("INSERT INTO medical_reviewer_permission (account_id,granted_by,enabled,reason,updated_at) VALUES (#{account},#{admin},#{enabled},#{reason},#{now}) ON DUPLICATE KEY UPDATE granted_by=#{admin},enabled=#{enabled},reason=#{reason},updated_at=#{now}")
+    void permission(@Param("account") String account, @Param("admin") String admin, @Param("enabled") boolean enabled, @Param("reason") String reason, @Param("now") long now);
+    @Select("SELECT COUNT(*) > 0 FROM medical_reviewer_permission WHERE account_id=#{actor} AND enabled=TRUE") boolean permissionEnabled(String actor);
+    @Update("UPDATE medical_review_case SET state='REVOKED' WHERE requester_id=#{actor} AND state='GRANTED'") void revokeForReviewer(String actor);
     @Select("SELECT id, actor_id, action, object_type, object_id, reason, created_at FROM audit_event WHERE object_id=#{objectId} ORDER BY created_at, id")
     List<Audit> audits(@Param("objectId") String objectId);
 }

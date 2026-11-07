@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface BookingMapper {
+    @Select("SELECT id,patient_id,doctor_id,state FROM appointment ORDER BY created_at DESC,id LIMIT 200")
+    List<BookingService.ReviewAppointment> reviewAppointments();
     @Select("SELECT substitution_pending FROM appointment WHERE id=#{id}")
     boolean substitutionPending(String id);
     @Update("UPDATE appointment SET substitution_pending=#{pending} WHERE id=#{id}")

@@ -15,6 +15,7 @@ const symptoms = ref(''), files = ref<File[]>([]), message = ref(''), aiSymptoms
 const error = ref(''), busy = ref(false), aiBusy = ref(false)
 
 async function load() {
+  clinical.value = null; aiResults.value = []; drafts.value = []; error.value = ''
   try {
     clinical.value = await api<Clinical>(`/patient/appointments/${id}/clinical`)
     aiResults.value = await api<AiResult[]>(`/patient/appointments/${id}/ai/results`)
