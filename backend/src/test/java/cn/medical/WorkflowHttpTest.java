@@ -173,6 +173,46 @@ class WorkflowHttpTest extends HttpFixture {
     Reply analyze(Scenario scenario, String consent, String text, String key) throws Exception {
         return scenario.patient().browser().call("POST", patientPath(scenario) + "/ai/preconsultations", Map.of("consentId", consent, "symptomText", text, "idempotencyKey", key));
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void aiIdempotencyKeyBindsExactTextAndConsent(boolean appointmentBound) throws Exception {
+        var scenario = appointmentBound ? scenario("ONLINE") : null;
+        var patient = appointmentBound ? scenario.patient().browser() : actor("PATIENT").browser();
+        String root = "/api/v1/patient" + (appointmentBound ? "/appointments/" + scenario.appointmentId() : "") + "/ai";
+        String text = "虚构咳嗽持续3天", key = identifier();
+        var grant = patient.call("POST", root + "/consents", Map.of("accepted", true, "provider", "LOCAL_MOCK",
+            "purpose", "PRECONSULTATION_SUMMARY", "scope", "SYMPTOM_TEXT", "symptomText", text));
+        assertThat(grant.status()).isEqualTo(200);
+        String consentId = grant.body().path("id").asText();
+        var command = Map.of("consentId", consentId, "symptomText", text, "idempotencyKey", key);
+        var first = patient.call("POST", root + "/preconsultations", command);
+        assertThat(first.status()).isEqualTo(200);
+        assertThat(first.body().path("state").asText()).isEqualTo("SUCCEEDED");
+        var replay = patient.call("POST", root + "/preconsultations", command);
+        assertThat(replay.status()).isEqualTo(200);
+        assertThat(replay.body()).isEqualTo(first.body());
+        var originalResults = patient.call("GET", root + "/results", null);
+        assertThat(originalResults.status()).isEqualTo(200);
+        JsonNode originalMaterials = appointmentBound
+            ? patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("materials") : null;
+        var secondGrant = patient.call("POST", root + "/consents", Map.of("accepted", true, "provider", "LOCAL_MOCK",
+            "purpose", "PRECONSULTATION_SUMMARY", "scope", "SYMPTOM_TEXT", "symptomText", text));
+        assertThat(secondGrant.status()).isEqualTo(200);
+        for (var changed : List.of(
+            Map.of("consentId", consentId, "symptomText", text + "新增症状", "idempotencyKey", key),
+            Map.of("consentId", consentId, "symptomText", text + " ", "idempotencyKey", key),
+            Map.of("consentId", secondGrant.body().path("id").asText(), "symptomText", text, "idempotencyKey", key))) {
+            var conflict = patient.call("POST", root + "/preconsultations", changed);
+            assertThat(conflict.status()).isEqualTo(409);
+            assertThat(conflict.body().path("error").path("code").asText()).isEqualTo("IDEMPOTENCY_CONFLICT");
+        }
+        assertThat(patient.call("GET", root + "/results", null).body()).isEqualTo(originalResults.body());
+        if (appointmentBound)
+            assertThat(patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("materials")).isEqualTo(originalMaterials);
+        org.mockito.Mockito.verify(aiProvider, org.mockito.Mockito.times(1)).analyze(
+            org.mockito.ArgumentMatchers.eq(text), org.mockito.ArgumentMatchers.anyList());
+        assertThat(patient.call("POST", root + "/preconsultations", command).body()).isEqualTo(first.body());
+    }
     @Test void aiAuthorizationBindsOneTextAndRefusalDoesNotBlockIndependentBooking() throws Exception {
         var s = scenario("ONLINE"); var patient = s.patient().browser(); String text = "虚构咳嗽持续3天";
         assertThat(analyze(s, UUID.randomUUID().toString(), text, identifier()).status()).isEqualTo(403);

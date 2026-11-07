@@ -138,7 +138,10 @@ public class AiService {
             throw new ApiFailure(400, "INVALID_INPUT", "预问诊提交标识不能为空且长度受限");
         var existing = ai.taskByKey(patient, input.idempotencyKey());
         if (existing != null) {
-            if (!Objects.equals(existing.appointmentId(), id)) throw new ApiFailure(409, "IDEMPOTENCY_CONFLICT", "提交标识已用于其他预约");
+            if (!Objects.equals(existing.appointmentId(), id)
+                || !Objects.equals(existing.consentId(), input.consentId())
+                || !Objects.equals(existing.symptomText(), input.symptomText()))
+                throw new ApiFailure(409, "IDEMPOTENCY_CONFLICT", "提交标识已用于不同的预问诊请求");
             return new Prepared(existing, false);
         }
         validateText(input.symptomText());
