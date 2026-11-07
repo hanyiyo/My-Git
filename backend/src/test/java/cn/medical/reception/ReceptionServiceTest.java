@@ -45,6 +45,22 @@ class ReceptionServiceTest {
         verify(mapper).complete("appointment", 3_000L);
     }
 
+    @Test
+    void doctorCanProcessCheckedInPatientDuringCheckInWindow() {
+        var mapper = mock(ReceptionMapper.class);
+        var waiting = entry("WAITING", 0);
+        var called = entry("CALLED", 0);
+        when(mapper.queue("appointment")).thenReturn(waiting, called);
+        when(mapper.appointment("appointment")).thenReturn(appointment(1_000L, 2_000L));
+        when(mapper.nextWaiting("schedule")).thenReturn(waiting);
+        when(mapper.call("appointment", 1_000L - 29 * 60_000L)).thenReturn(1);
+
+        var service = new ReceptionService(mapper, Clock.fixed(Instant.ofEpochMilli(1_000L - 29 * 60_000L), ZoneOffset.UTC));
+
+        assertThat(service.call("doctor", "appointment").state()).isEqualTo("CALLED");
+        verify(mapper).call("appointment", 1_000L - 29 * 60_000L);
+    }
+
     private static ReceptionMapper.Appointment appointment(long startsAt, long endsAt) {
         return new ReceptionMapper.Appointment("appointment", "patient", "schedule", "doctor", DATE,
             "AM", "ONLINE", "ADVANCE", startsAt, endsAt, "CONFIRMED");

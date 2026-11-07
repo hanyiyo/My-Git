@@ -8,6 +8,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -24,6 +25,7 @@ public class GovernanceService {
     private final Clock clock;
     private final DeliveryService delivery;
     public GovernanceService(GovernanceMapper governance, BookingMapper booking, BookingService bookings, Clock clock) { this(governance, booking, bookings, null, clock); }
+    @Autowired
     public GovernanceService(GovernanceMapper governance, BookingMapper booking, BookingService bookings, DeliveryService delivery, Clock clock) {
         this.governance = governance; this.booking = booking; this.bookings = bookings; this.delivery = delivery; this.clock = clock;
     }

@@ -515,6 +515,7 @@ class BookingHttpTest extends HttpFixture {
         var doctor = new Browser(port); assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/call", null).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/miss", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt());
         var restored = patient.call("POST", path + "/restore-queue", null);
         assertThat(restored.status()).isEqualTo(200);
         assertThat(restored.body().path("state").asText()).isEqualTo("WAITING");

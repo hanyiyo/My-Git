@@ -5,6 +5,7 @@ import cn.medical.delivery.DeliveryService;
 import java.time.Clock;
 import java.time.LocalDate;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +17,7 @@ public class ReceptionService {
     private final DeliveryService delivery;
     private final Clock clock;
     public ReceptionService(ReceptionMapper reception, Clock clock) { this(reception, null, clock); }
+    @Autowired
     public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock) { this.reception = reception; this.delivery = delivery; this.clock = clock; }
 
     @Transactional
@@ -67,7 +69,7 @@ public class ReceptionService {
         var next = reception.nextWaiting(entry.scheduleId());
         if (next == null || !next.appointmentId().equals(id)) throw new ApiFailure(409, "QUEUE_ORDER", "请先叫号当前候诊队列的下一位患者");
         long now = clock.millis();
-        if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt()) throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
+        ensureReceptionWindow(appointment, now);
         if (reception.call(id, now) != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前不在等待叫号状态");
         var result = reception.queue(id);
         if (delivery != null) delivery.publish(result.patientId(), "CALLED", id, "医生已叫号", "called:" + id + ":" + result.calledAt());
@@ -92,7 +94,8 @@ public class ReceptionService {
         var entry = requireDoctorQueue(doctor, id);
         var appointment = reception.appointment(id);
         long now = clock.millis();
-        if (appointment == null || now < appointment.startsAt() || (now >= appointment.endsAt() && !action.equals("complete")))
+        if (appointment == null || now < appointment.startsAt() - 30 * 60_000L
+            || (now >= appointment.endsAt() && !(action.equals("complete") && entry.state().equals("IN_CONSULTATION"))))
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         int changed = switch (action) {
             case "start" -> reception.start(id, now);
@@ -117,6 +120,10 @@ public class ReceptionService {
     private void ensureCheckInWindow(ReceptionMapper.Appointment appointment, long now) {
         if (now < appointment.startsAt() - 30 * 60_000L || now >= appointment.endsAt() - 15 * 60_000L)
             throw new ApiFailure(409, "CHECK_IN_CLOSED", "当前不在签到时间窗口内");
+    }
+    private void ensureReceptionWindow(ReceptionMapper.Appointment appointment, long now) {
+        if (appointment == null || now < appointment.startsAt() - 30 * 60_000L || now >= appointment.endsAt())
+            throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
     }
     private Summary summary(ReceptionMapper.QueueEntry entry) {
         return entry == null ? null : new Summary(entry.state(), entry.queueGroup(), entry.queuedAt(), entry.checkedInAt(), entry.restorationCount(), entry.calledAt(), entry.startedAt(), entry.missedAt(), entry.completedAt());
