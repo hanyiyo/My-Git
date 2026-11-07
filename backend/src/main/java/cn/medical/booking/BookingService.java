@@ -55,7 +55,7 @@ public class BookingService {
     public record PaymentReceipt(BookingMapper.Appointment appointment, BillingService.Payment payment) {}
     public record OrderView(String id, String doctorName, String departmentName, java.time.LocalDate clinicDate,
         String session, String serviceMode, long feeMinor, long holdExpiresAt, String state, String credential,
-        String cancellationReason, BillingService.Payment payment, BillingService.Refund refund) {}
+        String cancellationReason, Long cancelledAt, BillingService.Payment payment, BillingService.Refund refund) {}
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<OrderView> orders(String patient) {
@@ -65,7 +65,7 @@ public class BookingService {
             return new OrderView(appointment.id(), schedule == null ? appointment.doctorId() : schedule.doctorName(),
                 schedule == null ? appointment.departmentId() : schedule.departmentName(), appointment.clinicDate(),
                 appointment.session(), appointment.serviceMode(), appointment.feeMinor(), appointment.holdExpiresAt(),
-                appointment.state(), appointment.credential(), appointment.cancellationReason(), financial.payment(), financial.refund());
+                appointment.state(), appointment.credential(), appointment.cancellationReason(), appointment.cancelledAt(), financial.payment(), financial.refund());
         }).toList();
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)

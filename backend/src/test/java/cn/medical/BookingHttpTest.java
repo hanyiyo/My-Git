@@ -380,7 +380,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(failed.status()).isEqualTo(200);
         assertThat(failed.body().path("state").asText()).isEqualTo("REFUND_FAILED");
         assertThat(failed.body().path("attempts").asInt()).isEqualTo(1);
-        assertThat(failed.body().path("lastError").asText()).isEqualTo("simulated refund unavailable");
+        assertThat(failed.body().path("lastError").asText()).isEqualTo("REFUND_PROVIDER_UNAVAILABLE");
         assertThat(failed.body().path("nextAttemptAt").asLong()).isEqualTo(clock.millis() + 60_000);
         assertThat(owner.call("GET", orderPath + "/billing", null).body().path("refund")).isEqualTo(failed.body());
         assertThat(owner.call("GET", orderPath, null).body().path("state").asText()).isEqualTo("CANCELLED");

@@ -39,8 +39,7 @@ public class RefundProcessor {
             if (reference == null || reference.isBlank() || reference.length() > 200)
                 throw new IllegalStateException("Refund provider returned an invalid reference");
         } catch (Exception failure) {
-            String message = failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
-            error = message.substring(0, Math.min(message.length(), 500));
+            error = "REFUND_PROVIDER_UNAVAILABLE";
         }
         String resultReference = reference; String resultError = error;
         return transaction.execute(status -> finish(claim, resultReference, resultError));

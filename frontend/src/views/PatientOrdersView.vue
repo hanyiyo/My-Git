@@ -2,18 +2,27 @@
 import { onMounted, ref } from 'vue'
 import { api } from '../api'
 
-interface Payment { id: string; amountMinor: number; state: string; paidAt: number }
-interface Refund { id: string; amountMinor: number; reason: string; state: string; attempts: number; lastError: string | null; providerReference: string | null }
+interface Payment { id: string; amountMinor: number; state: string; mode: string; paidAt: number }
+interface Refund { id: string; amountMinor: number; reason: string; state: string; attempts: number; nextAttemptAt: number | null; lastError: string | null; providerReference: string | null }
 interface Order {
   id: string; doctorName: string; departmentName: string; clinicDate: string; session: string
   serviceMode: string; feeMinor: number; holdExpiresAt: number; state: string; credential: string | null
-  cancellationReason: string | null; payment: Payment | null; refund: Refund | null
+  cancellationReason: string | null; cancelledAt: number | null; payment: Payment | null; refund: Refund | null
 }
 
 const orders = ref<Order[]>([]), error = ref(''), busy = ref(false)
 const stateLabels: Record<string, string> = { PENDING_PAYMENT: '待支付', CONFIRMED: '已确认', CANCELLED: '已取消', EXPIRED: '已过期' }
 const refundLabels: Record<string, string> = { REFUND_PENDING: '退款处理中', REFUNDED: '已退款', REFUND_FAILED: '退款待重试' }
 const refundReasonLabels: Record<string, string> = { PATIENT_CANCELLATION: '患者取消', LATE_PAYMENT: '迟到付款', CLINIC_SUSPENSION: '停诊' }
+const refundErrorLabels: Record<string, string> = { REFUND_PROVIDER_UNAVAILABLE: '退款服务暂不可用，系统将自动重试' }
+function refundLabel(refund: Refund) {
+  if (refund.state === 'REFUND_FAILED' && refund.nextAttemptAt === null) return '退款失败（已达重试上限）'
+  return refundLabels[refund.state] ?? refund.state
+}
+function refundErrorLabel(refund: Refund) {
+  if (refund.lastError && refundErrorLabels[refund.lastError]) return refundErrorLabels[refund.lastError]
+  return refund.nextAttemptAt === null ? '退款处理已达重试上限，请人工处理' : '退款处理遇到可重试错误'
+}
 function sessionLabel(value: string) { return value === 'AM' ? '上午' : '下午' }
 function modeLabel(value: string) { return value === 'ONLINE' ? '线上' : '线下' }
 function money(value: number) { return `¥${(value / 100).toFixed(2)}` }
@@ -46,9 +55,12 @@ onMounted(load)
       <p>{{ order.clinicDate }} {{ sessionLabel(order.session) }} · {{ modeLabel(order.serviceMode) }} · {{ money(order.feeMinor) }}</p>
       <p>预约登记编号：{{ order.id }}</p>
       <p>状态：{{ stateLabels[order.state] ?? order.state }}</p>
+      <p v-if="order.payment">支付事实：{{ order.payment.state === 'SUCCEEDED' ? '已支付' : order.payment.state }} {{ money(order.payment.amountMinor) }}（{{ order.payment.mode === 'SIMULATED' ? '模拟支付' : order.payment.mode }}）</p>
+      <p v-if="order.payment">支付时间：{{ new Date(order.payment.paidAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p>
+      <p v-if="order.cancellationReason">取消事实：{{ order.cancellationReason === 'PATIENT_CANCELLATION' ? '患者取消' : order.cancellationReason }}<span v-if="order.cancelledAt">（{{ new Date(order.cancelledAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}）</span></p>
       <p v-if="order.state === 'PENDING_PAYMENT'">支付截止：{{ new Date(order.holdExpiresAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p>
       <p v-if="order.credential">预约凭证：{{ order.credential }}</p>
-      <div v-if="order.refund" class="notice"><p>{{ refundLabels[order.refund.state] ?? order.refund.state }}</p><p>退款编号：{{ order.refund.id }} · 金额：{{ money(order.refund.amountMinor) }}</p><p>退款原因：{{ refundReasonLabels[order.refund.reason] ?? order.refund.reason }} · 尝试次数：{{ order.refund.attempts }}</p><p v-if="order.refund.providerReference">支付渠道参考号：{{ order.refund.providerReference }}</p><p v-if="order.refund.lastError">最近错误：{{ order.refund.lastError }}</p></div>
+      <div v-if="order.refund" class="notice"><p>{{ refundLabel(order.refund) }}</p><p>退款编号：{{ order.refund.id }} · 金额：{{ money(order.refund.amountMinor) }}</p><p>退款原因：{{ refundReasonLabels[order.refund.reason] ?? order.refund.reason }} · 尝试次数：{{ order.refund.attempts }}</p><p v-if="order.refund.providerReference">支付渠道参考号：{{ order.refund.providerReference }}</p><p v-if="order.refund.lastError">最近状态：{{ refundErrorLabel(order.refund) }}</p></div>
       <div class="catalog-links"><button v-if="order.state === 'PENDING_PAYMENT'" type="button" :disabled="busy" @click="simulatePayment(order)">模拟支付</button><button v-if="order.state === 'PENDING_PAYMENT' || order.state === 'CONFIRMED'" type="button" class="secondary" :disabled="busy" @click="cancel(order)">取消预约</button></div>
     </li></ul>
   </section>

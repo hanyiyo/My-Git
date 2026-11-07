@@ -4,6 +4,14 @@ import { api } from '../api'
 import type { Hospital, Department, Doctor, Schedule } from '../catalog'
 const hospital = ref<Hospital | null>(null), departments = ref<Department[]>([]), doctors = ref<Doctor[]>([]), schedules = ref<Schedule[]>([])
 const departmentId = ref(''), doctorId = ref(''), date = ref(''), mode = ref(''), error = ref(''), status = ref(''), busy = ref(false), registering = ref('')
+const idempotencyKeys = new Map<string, string>()
+function idempotencyKeyName(item: Schedule, source: 'ADVANCE' | 'WALK_IN') { return `medical:appointment:${item.id}:${source}` }
+function idempotencyKey(item: Schedule, source: 'ADVANCE' | 'WALK_IN') {
+  const storageKey = idempotencyKeyName(item, source)
+  const existing = idempotencyKeys.get(storageKey)
+  if (existing) return { storageKey, key: existing }
+  const key = crypto.randomUUID(); idempotencyKeys.set(storageKey, key); return { storageKey, key }
+}
 const availableDoctors = computed(() => doctors.value.filter(value => !departmentId.value || value.departmentId === departmentId.value))
 watch(departmentId, () => { doctorId.value = '' })
 async function search() {
@@ -21,9 +29,11 @@ async function search() {
 }
 async function register(item: Schedule, source: 'ADVANCE' | 'WALK_IN') {
   error.value = ''; status.value = ''; registering.value = item.id
+  const attempt = idempotencyKey(item, source)
   try {
-    await api(`/patient/appointments`, 'POST', { scheduleId: item.id, source, idempotencyKey: crypto.randomUUID() })
-    status.value = source === 'WALK_IN' ? '现场挂号成功' : '预约登记成功'
+    await api(`/patient/appointments`, 'POST', { scheduleId: item.id, source, idempotencyKey: attempt.key })
+    idempotencyKeys.delete(attempt.storageKey)
+    status.value = source === 'WALK_IN' ? '现场登记已提交，待支付' : '预约登记已提交，待支付'
   } catch (failure) { error.value = failure instanceof Error ? failure.message : '登记失败，请重试' }
   finally { registering.value = '' }
 }
