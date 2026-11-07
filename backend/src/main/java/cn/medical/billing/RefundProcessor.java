@@ -27,8 +27,12 @@ public class RefundProcessor {
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
     public BillingService.Refund process(String id) {
-        var claim = transaction.execute(status -> claim(id));
+        return process(id, false);
+    }
+    public BillingService.Refund process(String id, boolean crashAfterClaim) {
+        var claim = transaction.execute(status -> claim(id, crashAfterClaim));
         if (claim == null) return billing.refundById(id);
+        if (crashAfterClaim) return billing.refundById(id);
         String reference = null; String error = null;
         try {
             reference = provider.refund(claim.id(), claim.paymentId(), claim.amountMinor());
@@ -41,7 +45,7 @@ public class RefundProcessor {
         String resultReference = reference; String resultError = error;
         return transaction.execute(status -> finish(claim, resultReference, resultError));
     }
-    private Claim claim(String id) {
+    private Claim claim(String id, boolean force) {
         var work = billing.lockRefund(id);
         if (work == null) throw new ApiFailure(404, "NOT_FOUND", "退款记录不存在");
         long now = clock.millis();
@@ -54,7 +58,7 @@ public class RefundProcessor {
                 billing.finishRefund(id, work.attemptToken(), "REFUND_FAILED", null, error, null);
                 return null;
             }
-        } else if (work.attempts() >= MAX_ATTEMPTS || work.nextAttemptAt() == null || work.nextAttemptAt() > now) return null;
+        } else if (work.attempts() >= MAX_ATTEMPTS || (!force && (work.nextAttemptAt() == null || work.nextAttemptAt() > now))) return null;
         String token = UUID.randomUUID().toString();
         billing.claimRefund(id, token, now + LEASE_MILLIS);
         billing.insertAttempt(id, token, work.attempts() + 1, now);

@@ -417,6 +417,36 @@ class BookingHttpTest extends HttpFixture {
         assertThat(refundProvider.transferred).doesNotContainKey(exhaustedId);
         assertThat(owner.call("GET", secondPath, null).body().path("state").asText()).isEqualTo("CANCELLED");
     }
+    @Test void abandonedRefundLeaseIsReclaimedAfterClockAdvanceAndCompletesSameRefund() throws Exception {
+        var schedule = published("ONLINE", "AM", 1); var owner = patient(); var admin = administrator();
+        var order = owner.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
+        assertThat(order.status()).isEqualTo(201);
+        String path = "/api/v1/patient/appointments/" + order.body().path("id").asText();
+        assertThat(owner.call("POST", path + "/simulate-payment", null).status()).isEqualTo(200);
+        assertThat(owner.call("POST", path + "/cancel", null).status()).isEqualTo(200);
+        String refundId = owner.call("GET", path + "/billing", null).body().path("refund").path("id").asText();
+        refundProvider.failures.put(refundId, new AtomicInteger(1));
+        String process = "/api/v1/admin/billing/refunds/" + refundId + "/process";
+        var firstFailure = admin.call("POST", process, null);
+        assertThat(firstFailure.body().path("state").asText()).isEqualTo("REFUND_FAILED");
+        assertThat(firstFailure.body().path("attempts").asInt()).isEqualTo(1);
+        // Public recovery seam: claim work and crash before the provider call/finish transaction.
+        var crashed = admin.call("POST", process + "?crashAfterClaim=true", null);
+        assertThat(crashed.status()).isEqualTo(202);
+        assertThat(crashed.body().path("state").asText()).isEqualTo("REFUND_PROCESSING");
+        assertThat(crashed.body().path("attempts").asInt()).isEqualTo(2);
+        clock.now = Instant.ofEpochMilli(clock.millis() + 31_000);
+        var recovered = admin.call("POST", process, null);
+        assertThat(recovered.status()).isEqualTo(200);
+        assertThat(recovered.body().path("state").asText()).isEqualTo("REFUNDED");
+        assertThat(recovered.body().path("attempts").asInt()).isEqualTo(3);
+        assertThat(recovered.body().path("id").asText()).isEqualTo(refundId);
+        assertThat(owner.call("GET", path, null).body().path("state").asText()).isEqualTo("CANCELLED");
+        assertThat(owner.call("GET", path + "/billing", null).body().path("refund")).isEqualTo(recovered.body());
+        // The first failed attempt and the post-lease recovery each call the provider;
+        // claiming the abandoned lease itself performs no external refund.
+        assertThat(refundProvider.amounts.get(refundId)).containsExactly(2000L, 2000L);
+    }
 
     @Test void patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot() throws Exception {
         var admin = new Browser(port);
