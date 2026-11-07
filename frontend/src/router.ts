@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from './views/LoginView.vue'
 import HomeView from './views/HomeView.vue'
+import AdminAiView from './views/AdminAiView.vue'
 import AdminCatalogView from './views/AdminCatalogView.vue'
+import PatientPreconsultationView from './views/PatientPreconsultationView.vue'
 import PatientCatalogView from './views/PatientCatalogView.vue'
 import DoctorCatalogView from './views/DoctorCatalogView.vue'
 import PatientOrdersView from './views/PatientOrdersView.vue'
@@ -14,7 +16,9 @@ import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
   { path: '/assistant/business', component: BusinessAssistantView },
+  { path: '/admin/ai', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
+  { path: '/patient/preconsultation', component: PatientPreconsultationView, meta: { role: 'PATIENT' } },
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders', component: PatientOrdersView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders/:id/clinical', component: PatientClinicalView, meta: { role: 'PATIENT' } },

@@ -10,6 +10,7 @@ interface Clinical { consultation: { state: string } | null; materials: Material
 
 const route = useRoute(), id = String(route.params.id)
 const clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([])
+const drafts = ref<AiResult[]>([])
 const symptoms = ref(''), files = ref<File[]>([]), message = ref(''), aiSymptoms = ref(''), aiConsent = ref(false)
 const error = ref(''), busy = ref(false), aiBusy = ref(false)
 
@@ -17,11 +18,12 @@ async function load() {
   try {
     clinical.value = await api<Clinical>(`/patient/appointments/${id}/clinical`)
     aiResults.value = await api<AiResult[]>(`/patient/appointments/${id}/ai/results`)
+    drafts.value = (await api<AiResult[]>('/patient/ai/results')).filter(item => item.state === 'SUCCEEDED')
   } catch (failure) { error.value = failure instanceof Error ? failure.message : '问诊记录加载失败' }
 }
 async function submitMaterials() {
   busy.value = true; error.value = ''
-  try { const form = new FormData(); form.append('symptoms', symptoms.value); form.append('shared', 'true'); files.value.forEach(file => form.append('files', file)); clinical.value = await upload<Clinical>(`/patient/appointments/${id}/clinical/materials`, form); symptoms.value = ''; files.value = [] }
+  try { const form = new FormData(); form.append('symptoms', symptoms.value); form.append('shared', 'true'); files.value.forEach(file => form.append('files', file)); clinical.value = await upload<Clinical>(`/patient/appointments/${id}/clinical/materials`, form); symptoms.value = ''; files.value = []; await load() }
   catch (failure) { error.value = failure instanceof Error ? failure.message : '材料提交失败' }
   finally { busy.value = false }
 }
@@ -29,11 +31,17 @@ async function runPreconsultation() {
   if (!aiConsent.value) { error.value = '请先确认预问诊授权'; return }
   aiBusy.value = true; error.value = ''
   try {
-    const consent = await api<{ id: string }>(`/patient/appointments/${id}/ai/consents`, 'POST', { accepted: true, provider: 'LOCAL_MOCK', purpose: 'PRECONSULTATION_SUMMARY', scope: 'SYMPTOM_TEXT' })
+    const consent = await api<{ id: string }>(`/patient/appointments/${id}/ai/consents`, 'POST', { accepted: true, provider: 'LOCAL_MOCK', purpose: 'PRECONSULTATION_SUMMARY', scope: 'SYMPTOM_TEXT', symptomText: aiSymptoms.value })
     const result = await api<AiResult>(`/patient/appointments/${id}/ai/preconsultations`, 'POST', { consentId: consent.id, symptomText: aiSymptoms.value, idempotencyKey: `web-${Date.now()}` })
-    aiResults.value = [result, ...aiResults.value.filter(item => item.taskId !== result.taskId)]; aiSymptoms.value = ''
+    aiResults.value = [result, ...aiResults.value.filter(item => item.taskId !== result.taskId)]; aiSymptoms.value = ''; aiConsent.value = false; await load()
   } catch (failure) { error.value = failure instanceof Error ? failure.message : '预问诊暂不可用' }
   finally { aiBusy.value = false }
+}
+async function shareDraft(taskId: string) {
+  busy.value = true; error.value = ''
+  try { await api(`/patient/appointments/${id}/ai/drafts/${taskId}/share`, 'POST', { shared: true }); await load() }
+  catch (failure) { error.value = failure instanceof Error ? failure.message : '共享摘要失败' }
+  finally { busy.value = false }
 }
 async function sendMessage() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/patient/appointments/${id}/clinical/messages`, 'POST', { body: message.value }); message.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '消息发送失败' } finally { busy.value = false } }
 async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/patient/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60_000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
@@ -46,6 +54,11 @@ onMounted(load)
     <h2>问诊材料与结果</h2>
     <p v-if="error" role="alert" class="notice">{{ error }}</p>
     <p v-if="clinical?.consultation">问诊状态：{{ clinical.consultation.state === 'CLOSED' ? '已结束（只读）' : clinical.consultation.state }}</p>
+    <section v-if="drafts.length && clinical?.consultation?.state !== 'CLOSED'"><h3>已有预约前摘要</h3>
+      <article v-for="item in drafts" :key="item.taskId"><p>{{ item.analysis?.summary }}<span v-if="item.stale">（材料更新后已过时）</span></p>
+        <button type="button" :disabled="busy || aiResults.some(result => result.taskId === item.taskId)" @click="shareDraft(item.taskId)">确认将此文本和摘要共享给当前医生</button>
+      </article>
+    </section>
 
     <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="submitMaterials">
       <label for="symptoms">症状文本</label>

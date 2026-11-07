@@ -26,4 +26,8 @@ class LocalAiTextProviderTest {
         assertThat(result.departmentHint()).isEqualTo("外科");
         assertThat(result.followUpQuestions()).contains("既往病史");
     }
+
+    @Test void unmatchedSymptomsDoNotSelectAnArbitraryDepartment() {
+        assertThat(provider.analyze("皮肤瘙痒持续3天", List.of("内科", "外科")).departmentHint()).contains("未匹配科室");
+    }
 }

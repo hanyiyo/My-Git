@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
+import { useRoute } from 'vue-router'
 import type { Hospital, Department, Doctor, Schedule } from '../catalog'
 const hospital = ref<Hospital | null>(null), departments = ref<Department[]>([]), doctors = ref<Doctor[]>([]), schedules = ref<Schedule[]>([])
-const departmentId = ref(''), doctorId = ref(''), date = ref(''), mode = ref(''), error = ref(''), status = ref(''), busy = ref(false), registering = ref('')
+const route = useRoute()
+const departmentId = ref(''), doctorId = ref(String(route.query.doctorId ?? '')), date = ref(''), mode = ref(''), error = ref(''), status = ref(''), busy = ref(false), registering = ref('')
 const idempotencyKeys = new Map<string, string>()
 function idempotencyKeyName(item: Schedule, source: 'ADVANCE' | 'WALK_IN') { return `medical:appointment:${item.id}:${source}` }
 function idempotencyKey(item: Schedule, source: 'ADVANCE' | 'WALK_IN') {

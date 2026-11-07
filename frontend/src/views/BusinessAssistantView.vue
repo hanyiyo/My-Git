@@ -22,8 +22,9 @@ async function ask() {
     </form>
     <p v-if="error" role="alert" class="notice">{{ error }}</p>
     <section v-if="answer" class="notice">
-      <h3>业务事实</h3>
+      <h3>{{ answer.mode === 'LOCAL_FACTS' ? '业务事实' : '服务指引' }}</h3>
       <p>{{ answer.answer }}</p>
+      <p v-if="answer.mode === 'PRECONSULTATION_REQUIRED'"><RouterLink to="/patient/preconsultation">前往预约前预问诊并确认文本授权</RouterLink> · <RouterLink to="/patient/catalog">自行查询挂号</RouterLink></p>
       <small>来源：{{ answer.sources.join('、') }} · {{ answer.mode }}</small>
     </section>
   </section>

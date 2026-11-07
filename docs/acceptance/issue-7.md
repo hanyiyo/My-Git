@@ -1,25 +1,17 @@
 # #7 MVP-06 AI 业务助手与文本预问诊
 
-依据 GitHub #7、`mvp-spec`、`GLOSSARY.md`、ADR-0006、ADR-0008 和 ADR-0010。实现只分析文本；附件仍由临床模块保存供医生查看。
+依据 GitHub #7、mvp-spec、Q58/Q60/Q66、ADR-0002/0004/0008/0010/0013。此前批次绿灯未证明关键 AC，旧“已全部验收”推断撤回，以本轮证据为准。
 
-| 验收规则 | 实现与 seam | 当前结果 | 限制 |
-| --- | --- | --- | --- |
-| 普通业务助手只回答医院地址、流程和科室职责 | `GET /api/v1/assistant/business`；来源只取 `hospital` 与启用科室 | 已实现本地事实回答；未知主题返回 `BUSINESS_TOPIC_UNSUPPORTED` | 集成 HTTP 验证延后 |
-| 症状分析前必须确认授权，拒绝后仍可预约 | `POST /patient/appointments/{id}/ai/consents` + `.../ai/preconsultations`；患者页显示授权范围并勾选 | 已实现；未接受授权时不创建材料或任务 | 集成 HTTP 验证延后 |
-| 输出持续时间、科室建议、追问和风险提示，不作诊断/处方 | `LocalAiTextProviderTest` | 2 条本地 Provider 单测通过；输出带安全边界文案 | 规则型本地 Provider，不分析图片/PDF |
-| 推荐只引用认证医生和有效排班 | `AiService.recommendations` 调用目录服务过滤医生资质、科室和可用排班 | 已实现，返回真实 doctor/schedule ID | 集成数据验证延后 |
-| 医生可看摘要，材料变化后旧摘要标过时 | `/doctor/clinical/{id}/ai`；以结果关联的 material 版本与最新材料比较 | 已实现；医生页展示 Provider、版本和过时状态 | 集成 HTTP 验证延后 |
-| Provider 失败显示不可用且调用可追踪，不静默切模拟 | `ai_task`、`ai_call_log` 持久化；`EXTERNAL_TEXT` 失败不回退 | 已实现失败状态/错误码和成功、失败调用日志 | 外部 Provider 本身未接入，按 ADR 默认关闭 |
+| AC | 公共接口/用例 | 观察结果 |
+| --- | --- | --- |
+| 普通业务助手只使用医院事实，症状先本地引导 | GET /assistant/business；WorkflowHttpTest.aiFailureRemainsVisibleWithBoundedMetadataAndBusinessSymptomsStayLocal | 医院地址匹配目录；胸痛混合地址查询转授权并显示急救指引，不先发外部分类；未知主题拒答 |
+| 预约前授权，拒绝不阻塞挂号 | /patient/ai/consents、/preconsultations、/results；prebookingPreconsultationNeedsNoAppointmentAndSharingIsExplicit；aiAuthorizationBindsOneTextAndRefusalDoesNotBlockIndependentBooking | 零预约可分析；未接受、文本改变、撤回403，外人404；拒绝后独立登记支付仍成功；每次授权仅限精确文本且单次使用 |
+| 提取症状、持续时间、科室、追问、风险，不作诊断处方 | LocalAiTextProviderTest 3条 + HTTP + 两条业务浏览器流程 | 本地模拟始终标明；3天、胸痛安全提示和非诊断文案均验证；无法匹配时明确不确定，不任意推荐首个科室 |
+| 只推荐真实医生和有效排班 | aiResultsUseRealRecommendationsKeepVersionsAndRespectRevokedSharing | 推荐ID逐一与公开有效排班交叉校验；目录服务只返回有效认证医生；推荐到目录仍经独立登记校验 |
+| 医生可读摘要、材料变化标旧摘要过时、撤回共享 | HTTP版本和归属矩阵；workflows.spec.ts | 新结果关联材料/授权/provider/模型与提示版本，旧结果保留；预约前摘要须主动共享给具体预约，撤回后医生不可见 |
+| provider失败不可用、元数据可追踪 | EXTERNAL_TEXT HTTP+浏览器失败刷新保留；/admin/ai/calls及管理页 | 三次失败、不产生模拟答案；失败任务刷新可见；患者/医生访问管理日志403，管理日志不含医疗正文 |
+| 已有数据升级版本准确 | populatedVersion15DatabaseUpgradesWithCorrectAiMaterialProvenance | 单独构造带数据V15库升级V16，原第2版材料正确回填为2及对应文本 |
 
-## 本轮门禁
+完整门禁：pwsh -NoProfile -File scripts/verify.ps1 退出0。文档/架构检查、Vue类型/生产构建、真实 MySQL/Redis HTTP、60条后端测试、13条浏览器流程均成功，零失败/错误/跳过。规范与规格双轴审查已知发现均已修复。
 
-- 后端 `mvn -f backend/pom.xml -DskipTests test-compile`：通过。
-- 本批单元测试：`ReceptionServiceTest`、`ClinicalAttachmentValidatorTest`、`LocalAiTextProviderTest`、`AiServiceTest` 全部通过。
-- 前端 `npm --prefix frontend run build`（含 `vue-tsc --noEmit`）：通过。
-- `git diff --check`：通过。
-
-按当前批次策略未执行 MySQL/Redis HTTP 集成、浏览器 E2E、全量 `npm test` 或 `scripts/verify.ps1`；待一批 issue 合并前统一执行。完整双轴审查和延后门禁通过前不关闭 issue。
-
-## 批次完整门禁补充（2026-11-07）
-
-批次修复完成后重新执行 `pwsh -NoProfile -File scripts/verify.ps1` 并退出 0：文档/架构检查、Vue 类型检查与生产构建、MySQL/Redis HTTP 集成、浏览器验收及后端 45 条测试全部通过（0 失败、0 错误、0 跳过）。AI 本地 Provider、AI 服务和 HTTP 集成相关测试均包含在全量结果中；本记录此前的“延后”描述仅反映实现当时的阶段性门禁。
+限制：默认只用标识明确的 LOCAL_MOCK，未接入或启用真实付费外部模型。MySQL 持久任务的重启抢占/有限重试恢复属于仍开放的 #10，不能从本 issue 的同步三次尝试推断已具备。
