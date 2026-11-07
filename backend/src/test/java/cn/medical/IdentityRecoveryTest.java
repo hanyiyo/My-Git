@@ -55,7 +55,7 @@ class IdentityRecoveryTest extends HttpFixture {
 
     @Test void hospitalDoctorAndPublishedSlotsSurviveApplicationRestart() throws Exception {
         Browser original; String doctorId; String scheduleId;
-        try (var first = start("--spring.data.redis.database=5", "--medical.captcha-ttl=2m")) {
+        try (var first = start("--spring.data.redis.database=6", "--medical.captcha-ttl=2m")) {
             original = new Browser(first.getWebServer().getPort());
             assertThat(original.login("admin-foundation-test", "fictional-test-administrator-password").status()).isEqualTo(200);
             assertThat(original.call("PUT", "/api/v1/admin/catalog/hospital", Map.of("name", "虚构重启测试医院", "address", "虚构重启路", "description", "重启持久化验证")).status()).isEqualTo(200);
@@ -65,7 +65,7 @@ class IdentityRecoveryTest extends HttpFixture {
             var published = original.call("POST", "/api/v1/admin/catalog/schedules", Map.of("doctorId", doctorId, "departmentId", department, "clinicDate", java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).plusDays(3).toString(), "session", "PM", "serviceMode", "OFFLINE", "capacity", 2, "feeMinor", 750));
             assertThat(published.status()).isEqualTo(201); scheduleId = published.body().path("id").asText();
         }
-        try (var restarted = start("--spring.data.redis.database=5", "--medical.captcha-ttl=2m")) {
+        try (var restarted = start("--spring.data.redis.database=6", "--medical.captcha-ttl=2m")) {
             var restored = original.copyCookies(restarted.getWebServer().getPort()); restored.access = original.access;
             assertThat(restored.call("GET", "/api/v1/catalog/hospital", null).body().path("address").asText()).isEqualTo("虚构重启路");
             var schedules = restored.call("GET", "/api/v1/catalog/schedules?doctorId=" + doctorId, null).body();
