@@ -1,6 +1,6 @@
 # #5 MVP-04 签到、候诊与现场挂号
 
-实现分支：`codex/reception-queue`。依据 GitHub #5、mvp-spec、GLOSSARY.md 与预约/候诊架构决策。
+实现来源：`codex/reception-queue`，已合入当前预约分支。依据 GitHub #5、mvp-spec、GLOSSARY.md 与预约/候诊架构决策。
 
 | 验收规则 | 公共 seam / 用例 | 当前实现 | 备注 |
 | --- | --- | --- | --- |
@@ -11,4 +11,13 @@
 | 患者最多恢复排队一次，时段结束后不可恢复且不退款 | `POST /patient/appointments/{id}/restore-queue` | 已实现 | 持久化 `restoration_count`；恢复不产生新预约或退款 |
 | 患者与医生查询签到、候诊和叫号状态 | 订单 API 的 `reception` 事实与医生候诊页面 | 已实现 | 患者订单页和医生工作台已接入 |
 
-本轮按用户要求暂缓执行完整测试；测试 seam 和用例需在全部 MVP issue 完成后统一运行。已完成前端类型检查/构建和后端 `test-compile`，未启动 MySQL/Redis 集成或浏览器测试。最终交付仍必须执行完整 `npm test` / `scripts/verify.ps1`、真实 MySQL/Redis HTTP 集成、浏览器验收和双轴审查后再关闭 issue。
+## 本轮门禁
+
+按当前批次策略，仅执行编译、静态检查和本模块单元测试：
+
+- 后端 `mvn -f backend/pom.xml -DskipTests test-compile`：通过。
+- `ReceptionServiceTest`：2 条通过，覆盖“门诊开始前禁止恢复排队”和“接诊已开始后允许跨时段结束”。
+- 前端 `npm --prefix frontend run build`：通过（包含 `vue-tsc --noEmit`）。
+- `git diff --check`：通过。
+
+本轮未启动 MySQL/Redis HTTP 集成、浏览器 E2E、全量 `npm test` 或 `scripts/verify.ps1`；这些检查在一批 issue 合并前统一执行。完整验收仍需双轴审查和上述延后测试通过后再关闭 issue。
