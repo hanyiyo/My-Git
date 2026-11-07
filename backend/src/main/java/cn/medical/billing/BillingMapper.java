@@ -14,6 +14,8 @@ public interface BillingMapper {
     void insertRefund(BillingService.Refund refund);
     @Select("SELECT id, payment_id, amount_minor, reason, state, created_at, attempts, next_attempt_at, last_error, provider_reference FROM refund WHERE id=#{id}")
     BillingService.Refund refundById(String id);
+    @Select("SELECT a.patient_id FROM payment_order p JOIN appointment a ON a.id=p.appointment_id WHERE p.id=#{paymentId}")
+    String refundRecipient(@Param("paymentId") String paymentId);
     record Work(String id, String paymentId, long amountMinor, String state, int attempts,
         Long nextAttemptAt, String attemptToken, Long leaseExpiresAt) {}
     @Select("SELECT id, payment_id, amount_minor, state, attempts, next_attempt_at, attempt_token, lease_expires_at FROM refund WHERE id=#{id} FOR UPDATE")

@@ -20,8 +20,10 @@ public class DeliveryService {
         try { delivery.insert(event); } catch (DuplicateKeyException ignored) { return; }
         var persisted = delivery.byDedupe(dedupeKey);
         if (persisted == null) return;
-        delivery.delivery(persisted.id(), "SENT", 1, null, now);
-        emit(persisted.id(), recipientId, eventType, payload);
+        if (emit(persisted.id(), recipientId, eventType, payload))
+            delivery.delivery(persisted.id(), "SENT", 1, null, now);
+        else
+            delivery.delivery(persisted.id(), "FAILED", 1, "SSE_DELIVERY_FAILED", now + 60_000L);
     }
 
     public List<DeliveryMapper.Notification> after(String recipientId, long cursor, int limit) {
@@ -34,8 +36,11 @@ public class DeliveryService {
         int retried = 0; long now = clock.millis();
         for (var event : delivery.retryable(now)) {
             if (event.attempts() >= 3) continue;
-            delivery.delivery(event.id(), "SENT", event.attempts() + 1, null, now);
-            emit(event.id(), event.recipientId(), event.eventType(), event.payload()); retried++;
+            if (emit(event.id(), event.recipientId(), event.eventType(), event.payload())) {
+                delivery.delivery(event.id(), "SENT", event.attempts() + 1, null, now); retried++;
+            } else {
+                delivery.delivery(event.id(), "FAILED", event.attempts() + 1, "SSE_DELIVERY_FAILED", now + 60_000L);
+            }
         }
         return retried;
     }
@@ -49,12 +54,14 @@ public class DeliveryService {
         for (var event : after(recipientId, cursor, 100)) send(emitter, event.id(), event.eventType(), event.payload());
         return emitter;
     }
-    private void emit(long id, String recipientId, String eventType, String payload) {
-        var userStreams = streams.get(recipientId); if (userStreams == null) return;
-        for (var emitter : userStreams.values()) send(emitter, id, eventType, payload);
+    private boolean emit(long id, String recipientId, String eventType, String payload) {
+        var userStreams = streams.get(recipientId); if (userStreams == null) return true;
+        boolean delivered = true;
+        for (var emitter : userStreams.values()) delivered &= send(emitter, id, eventType, payload);
+        return delivered;
     }
-    private void send(SseEmitter emitter, long id, String type, String payload) {
-        try { emitter.send(SseEmitter.event().id(Long.toString(id)).name(type).data(payload)); }
-        catch (Exception error) { emitter.completeWithError(error); }
+    private boolean send(SseEmitter emitter, long id, String type, String payload) {
+        try { emitter.send(SseEmitter.event().id(Long.toString(id)).name(type).data(payload)); return true; }
+        catch (Exception error) { emitter.completeWithError(error); return false; }
     }
 }

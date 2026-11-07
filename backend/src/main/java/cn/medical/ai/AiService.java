@@ -83,24 +83,32 @@ public class AiService {
             consent.provider(), consent.purpose(), "RUNNING", 1, null, now, null);
         try { ai.insertTask(task); }
         catch (DuplicateKeyException duplicate) { return resultView(ai.taskByKey(patient, input.idempotencyKey()), appointmentId); }
-        long started = clock.millis();
-        try {
-            if (consent.provider().equals("EXTERNAL_TEXT")) throw new ProviderFailure("AI_PROVIDER_UNAVAILABLE");
-            var departmentNames = catalog.departments(false).stream().map(CatalogMapper.Department::name).toList();
-            var analysis = localProvider.analyze(input.symptomText(), departmentNames);
-            ai.insertResult(new AiMapper.Result(UUID.randomUUID().toString(), taskId, appointmentId, materialId,
-                ai.nextResultVersion(appointmentId) + 1, consent.provider(), json.writeValueAsString(analysis), clock.millis()));
-            ai.finishTask(taskId, "SUCCEEDED", 1, null, clock.millis());
-            ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), taskId, consent.provider(), consent.purpose(),
-                "SUCCEEDED", 1, Math.max(0, clock.millis() - started), null, clock.millis()));
-        } catch (ProviderFailure failure) {
-            ai.finishTask(taskId, "FAILED", 1, failure.code(), clock.millis());
-            ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), taskId, consent.provider(), consent.purpose(),
-                "FAILED", 1, Math.max(0, clock.millis() - started), failure.code(), clock.millis()));
-        } catch (JsonProcessingException failure) {
-            ai.finishTask(taskId, "FAILED", 1, "AI_RESULT_SERIALIZATION_FAILED", clock.millis());
-            ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), taskId, consent.provider(), consent.purpose(),
-                "FAILED", 1, Math.max(0, clock.millis() - started), "AI_RESULT_SERIALIZATION_FAILED", clock.millis()));
+        var departmentNames = catalog.departments(false).stream().map(CatalogMapper.Department::name).toList();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            long started = clock.millis();
+            try {
+                if (consent.provider().equals("EXTERNAL_TEXT")) throw new ProviderFailure("AI_PROVIDER_UNAVAILABLE");
+                var analysis = localProvider.analyze(input.symptomText(), departmentNames);
+                ai.insertResult(new AiMapper.Result(UUID.randomUUID().toString(), taskId, appointmentId, materialId,
+                    ai.nextResultVersion(appointmentId) + 1, consent.provider(), json.writeValueAsString(analysis), clock.millis()));
+                ai.finishTask(taskId, "SUCCEEDED", attempt, null, clock.millis());
+                ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), taskId, consent.provider(), consent.purpose(),
+                    "SUCCEEDED", attempt, Math.max(0, clock.millis() - started), null, clock.millis()));
+                break;
+            } catch (ProviderFailure failure) {
+                ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), taskId, consent.provider(), consent.purpose(),
+                    "FAILED", attempt, Math.max(0, clock.millis() - started), failure.code(), clock.millis()));
+                if (attempt == 3) ai.finishTask(taskId, "FAILED", attempt, failure.code(), clock.millis());
+            } catch (JsonProcessingException failure) {
+                ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), taskId, consent.provider(), consent.purpose(),
+                    "FAILED", attempt, Math.max(0, clock.millis() - started), "AI_RESULT_SERIALIZATION_FAILED", clock.millis()));
+                ai.finishTask(taskId, "FAILED", attempt, "AI_RESULT_SERIALIZATION_FAILED", clock.millis());
+                break;
+            } catch (RuntimeException failure) {
+                ai.insertCallLog(new AiMapper.CallLog(UUID.randomUUID().toString(), taskId, consent.provider(), consent.purpose(),
+                    "FAILED", attempt, Math.max(0, clock.millis() - started), "AI_PROVIDER_UNAVAILABLE", clock.millis()));
+                if (attempt == 3) ai.finishTask(taskId, "FAILED", attempt, "AI_PROVIDER_UNAVAILABLE", clock.millis());
+            }
         }
         return resultView(ai.task(taskId), appointmentId);
     }

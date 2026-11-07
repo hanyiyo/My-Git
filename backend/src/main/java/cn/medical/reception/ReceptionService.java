@@ -63,13 +63,27 @@ public class ReceptionService {
     public ReceptionMapper.QueueEntry queueForAppointment(String id) { return reception.queue(id); }
 
     @Transactional
+    public int markNoShows() {
+        long now = clock.millis();
+        int marked = 0;
+        for (var appointment : reception.dueNoShows(now)) {
+            try {
+                reception.insertNoShow(appointment.id(), appointment.scheduleId(), appointment.doctorId(), appointment.patientId(), now);
+                marked++;
+            } catch (DuplicateKeyException ignored) { }
+        }
+        return marked;
+    }
+
+    @Transactional
     public ReceptionMapper.QueueEntry call(String doctor, String id) {
         var entry = requireDoctorQueue(doctor, id);
         var appointment = reception.appointment(id);
         var next = reception.nextWaiting(entry.scheduleId());
         if (next == null || !next.appointmentId().equals(id)) throw new ApiFailure(409, "QUEUE_ORDER", "请先叫号当前候诊队列的下一位患者");
         long now = clock.millis();
-        ensureReceptionWindow(appointment, now);
+        if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt())
+            throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         if (reception.call(id, now) != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前不在等待叫号状态");
         var result = reception.queue(id);
         if (delivery != null) delivery.publish(result.patientId(), "CALLED", id, "医生已叫号", "called:" + id + ":" + result.calledAt());
@@ -94,7 +108,7 @@ public class ReceptionService {
         var entry = requireDoctorQueue(doctor, id);
         var appointment = reception.appointment(id);
         long now = clock.millis();
-        if (appointment == null || now < appointment.startsAt() - 30 * 60_000L
+        if (appointment == null || now < appointment.startsAt()
             || (now >= appointment.endsAt() && !(action.equals("complete") && entry.state().equals("IN_CONSULTATION"))))
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         int changed = switch (action) {

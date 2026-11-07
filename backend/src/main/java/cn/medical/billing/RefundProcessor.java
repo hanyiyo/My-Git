@@ -1,9 +1,11 @@
 package cn.medical.billing;
 
 import cn.medical.identity.ApiFailure;
+import cn.medical.delivery.DeliveryService;
 import java.time.Clock;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -19,10 +21,16 @@ public class RefundProcessor {
     private final BillingMapper billing;
     private final RefundProvider provider;
     private final Clock clock;
+    private final DeliveryService delivery;
     private final TransactionTemplate transaction;
     private record Claim(String id, String paymentId, long amountMinor, String token) {}
     public RefundProcessor(BillingMapper billing, RefundProvider provider, Clock clock, PlatformTransactionManager manager) {
+        this(billing, provider, clock, manager, null);
+    }
+    @Autowired
+    public RefundProcessor(BillingMapper billing, RefundProvider provider, Clock clock, PlatformTransactionManager manager, DeliveryService delivery) {
         this.billing = billing; this.provider = provider; this.clock = clock;
+        this.delivery = delivery;
         transaction = new TransactionTemplate(manager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
@@ -42,7 +50,13 @@ public class RefundProcessor {
             error = "REFUND_PROVIDER_UNAVAILABLE";
         }
         String resultReference = reference; String resultError = error;
-        return transaction.execute(status -> finish(claim, resultReference, resultError));
+        var result = transaction.execute(status -> finish(claim, resultReference, resultError));
+        if (delivery != null) {
+            String recipient = billing.refundRecipient(claim.paymentId());
+            if (recipient != null) delivery.publish(recipient, "REFUND_RESULT", claim.id(),
+                result.state().equals("REFUNDED") ? "退款已完成" : "退款处理失败，将按计划重试", "refund-result:" + claim.id() + ":" + result.attempts());
+        }
+        return result;
     }
     private Claim claim(String id, boolean force) {
         var work = billing.lockRefund(id);

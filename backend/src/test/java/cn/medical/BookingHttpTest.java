@@ -495,6 +495,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(checkedIn.status()).isEqualTo(200);
         assertThat(checkedIn.body().path("state").asText()).isEqualTo("WAITING");
         assertThat(checkedIn.body().path("queueGroup").asInt()).isEqualTo(1);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt());
         var doctor = new Browser(port);
         assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
         var queue = doctor.call("GET", "/api/v1/doctor/reception", null);
@@ -512,6 +513,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(patient.call("POST", path + "/simulate-payment", null).status()).isEqualTo(200);
         clock.now = Instant.ofEpochMilli(schedule.startsAt() - Duration.ofMinutes(29).toMillis());
         assertThat(patient.call("POST", path + "/check-in", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt());
         var doctor = new Browser(port); assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/call", null).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/miss", null).status()).isEqualTo(200);

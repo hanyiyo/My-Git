@@ -19,3 +19,7 @@
 - `git diff --check`：通过。
 
 按当前批次策略未执行 MySQL/Redis HTTP 集成、浏览器 E2E、全量 `npm test` 或 `scripts/verify.ps1`；待一批 issue 合并前统一执行。完整双轴审查和延后门禁通过前不关闭 issue。
+
+## 批次完整门禁补充（2026-11-07）
+
+批次修复完成后重新执行 `pwsh -NoProfile -File scripts/verify.ps1` 并退出 0：文档/架构检查、Vue 类型检查与生产构建、MySQL/Redis HTTP 集成、浏览器验收及后端 45 条测试全部通过（0 失败、0 错误、0 跳过）。AI 本地 Provider、AI 服务和 HTTP 集成相关测试均包含在全量结果中；本记录此前的“延后”描述仅反映实现当时的阶段性门禁。

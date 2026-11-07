@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ReceptionServiceTest {
@@ -46,19 +47,13 @@ class ReceptionServiceTest {
     }
 
     @Test
-    void doctorCanProcessCheckedInPatientDuringCheckInWindow() {
+    void confirmedUnattendedAppointmentIsMarkedNoShowAtCheckInCutoff() {
         var mapper = mock(ReceptionMapper.class);
-        var waiting = entry("WAITING", 0);
-        var called = entry("CALLED", 0);
-        when(mapper.queue("appointment")).thenReturn(waiting, called);
-        when(mapper.appointment("appointment")).thenReturn(appointment(1_000L, 2_000L));
-        when(mapper.nextWaiting("schedule")).thenReturn(waiting);
-        when(mapper.call("appointment", 1_000L - 29 * 60_000L)).thenReturn(1);
+        when(mapper.dueNoShows(1_000L)).thenReturn(List.of(appointment(0L, 2_000L)));
+        var service = new ReceptionService(mapper, Clock.fixed(Instant.ofEpochMilli(1_000L), ZoneOffset.UTC));
 
-        var service = new ReceptionService(mapper, Clock.fixed(Instant.ofEpochMilli(1_000L - 29 * 60_000L), ZoneOffset.UTC));
-
-        assertThat(service.call("doctor", "appointment").state()).isEqualTo("CALLED");
-        verify(mapper).call("appointment", 1_000L - 29 * 60_000L);
+        assertThat(service.markNoShows()).isEqualTo(1);
+        verify(mapper).insertNoShow("appointment", "schedule", "doctor", "patient", 1_000L);
     }
 
     private static ReceptionMapper.Appointment appointment(long startsAt, long endsAt) {

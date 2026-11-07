@@ -40,7 +40,7 @@ public class GovernanceService {
         if (governance.pauseSchedule(scheduleId) != 1) throw new ApiFailure(409, "SUSPENSION_CONFLICT", "该排班已有变更流程");
         String state = doctorId.equals(governance.departmentHead(schedule.departmentId())) ? "ADMIN_REVIEW" : "HEAD_REVIEW";
         String id = UUID.randomUUID().toString();
-        governance.insertRequest(new GovernanceMapper.Request(id, scheduleId, doctorId, schedule.departmentId(), doctorId, null, state, reason.trim(), now, now));
+        governance.insertRequest(new GovernanceMapper.Request(id, scheduleId, doctorId, schedule.departmentId(), null, null, state, reason.trim(), now, now));
         audit(doctorId, "SUSPENSION_SUBMITTED", "SUSPENSION", id, reason);
         return view(governance.lockRequest(id));
     }
@@ -154,6 +154,8 @@ public class GovernanceService {
         governance.deactivateSlots(request.scheduleId()); audit(actor, "SUSPENSION_EFFECTIVE", "SCHEDULE", request.scheduleId(), reason);
     }
     private void applySubstitution(String actor, GovernanceMapper.Request request, GovernanceMapper.Schedule schedule, String reason) {
+        if (schedule.startsAt() - clock.millis() < Duration.ofHours(2).toMillis())
+            throw new ApiFailure(409, "EMERGENCY_REQUIRED", "距离出诊不足2小时，请转人工紧急处理");
         long deadline = Math.min(clock.millis() + Duration.ofHours(2).toMillis(), schedule.startsAt() - Duration.ofHours(2).toMillis());
         for (var appointment : booking.activeForSchedule(request.scheduleId())) {
             if (appointment.state().equals("PENDING_PAYMENT")) bookings.cancelForGovernance(appointment, "CLINIC_SUSPENSION", clock.millis());
