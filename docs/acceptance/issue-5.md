@@ -1,5 +1,19 @@
 # #5 MVP-04 签到、候诊与现场挂号
 
+当前状态：2026-11-07 收尾修复已通过本地完整门禁与规格/规范复查；本次提交推送后的远程 Verify 成功后关闭 issue。
+
+## 收尾验收（2026-11-07）
+
+- 签到左右边界：`BookingHttpTest.checkInWindowIncludesOpeningAndExcludesCutoffForBothSessions` 验证上午/下午均在开始前30分钟包含、结束前15分钟不包含。
+- 来源与顺序：既有现场号源用例及 `laterAdvanceCheckInPrecedesWalkInAndRestoredPatientsAndEndPreventsRestoration` 验证提前预约→现场→恢复三组及组内先后；较晚签到的正常患者仍优先恢复者。
+- 延迟服务：`confirmedAppointmentChecksInAndDoctorCompletesEncounter` 验证已签到患者在门诊结束后仍可被叫号、开始和结束接诊。
+- 一次恢复与幂等：`missedPatientCanRestoreQueueOnlyOnceAsThirdGroup` 验证重试返回原恢复结果，再次过号拒绝第二次恢复；时段结束拒绝恢复且不产生退款。
+- 爽约不可恢复：`unattendedPatientCannotUseRestorationToBypassCheckInCutoff` 验证未签到者扫描为爽约后不能绕过签到截止；只有医生叫号后过号才提供恢复入口。
+- 页面窗口：`frontend/tests/orders.spec.ts` 两个新增浏览器用例验证结束后按钮禁用及不退款说明、患者设备时间偏差不影响按服务器时间开放签到。浏览器使用固定订单响应验证展示，真实后端规则由上述 HTTP 用例验证。
+- 最近门禁：`pwsh -NoProfile -File scripts/verify.ps1` 于医院时区 2026-11-07 19:56 退出0，48条 Java 测试与11条浏览器流程通过，0失败/错误/跳过；Vue 类型检查/构建、真实 MySQL/Redis 和文档/架构检查均通过。
+- 审查：规范轴无发现；规格轴提出的设备时钟、延迟服务、恢复幂等、签到按钮窗口及爽约绕过已修复并复查通过。
+- 测试管理员在 `BookingHttpTest` 内复用会话，避免重复登录污染限流计数；生产限流阈值未更改。
+
 实现来源：`codex/reception-queue`，已合入当前预约分支。依据 GitHub #5、mvp-spec、GLOSSARY.md 与预约/候诊架构决策。
 
 | 验收规则 | 公共 seam / 用例 | 当前实现 | 备注 |

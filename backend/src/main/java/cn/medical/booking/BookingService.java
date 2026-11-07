@@ -59,7 +59,7 @@ public class BookingService {
     }
     public record PaymentReceipt(BookingMapper.Appointment appointment, BillingService.Payment payment) {}
     public record OrderView(String id, String doctorName, String departmentName, java.time.LocalDate clinicDate,
-        String session, String serviceMode, long feeMinor, long holdExpiresAt, String state, String credential,
+        String session, String serviceMode, long feeMinor, long holdExpiresAt, long startsAt, long endsAt, long serverNow, String state, String credential,
         String cancellationReason, Long cancelledAt, BillingService.Payment payment, BillingService.Refund refund,
         ReceptionService.Summary reception) {}
 
@@ -71,7 +71,7 @@ public class BookingService {
             return new OrderView(appointment.id(), schedule == null ? appointment.doctorId() : schedule.doctorName(),
                 schedule == null ? appointment.departmentId() : schedule.departmentName(), appointment.clinicDate(),
                 appointment.session(), appointment.serviceMode(), appointment.feeMinor(), appointment.holdExpiresAt(),
-                appointment.state(), appointment.credential(), appointment.cancellationReason(), appointment.cancelledAt(), financial.payment(), financial.refund(), reception.summaryFor(appointment.id()));
+                appointment.startsAt(), appointment.endsAt(), clock.millis(), appointment.state(), appointment.credential(), appointment.cancellationReason(), appointment.cancelledAt(), financial.payment(), financial.refund(), reception.summaryFor(appointment.id()));
         }).toList();
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)

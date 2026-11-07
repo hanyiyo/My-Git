@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
 
 interface Payment { id: string; amountMinor: number; state: string; mode: string; paidAt: number }
@@ -7,11 +7,15 @@ interface Refund { id: string; amountMinor: number; reason: string; state: strin
 interface Reception { state: string; queueGroup: number; queuedAt: number; checkedInAt: number; restorationCount: number; calledAt: number | null; startedAt: number | null; missedAt: number | null; completedAt: number | null }
 interface Order {
   id: string; doctorName: string; departmentName: string; clinicDate: string; session: string
-  serviceMode: string; feeMinor: number; holdExpiresAt: number; state: string; credential: string | null
+  serviceMode: string; feeMinor: number; holdExpiresAt: number; startsAt: number; endsAt: number; serverNow: number; state: string; credential: string | null
   cancellationReason: string | null; cancelledAt: number | null; payment: Payment | null; refund: Refund | null; reception: Reception | null
 }
 
 const orders = ref<Order[]>([]), error = ref(''), busy = ref(false)
+const now = ref(0)
+let serverNow = 0, receivedAt = performance.now()
+const timer = setInterval(() => { now.value = serverNow + performance.now() - receivedAt }, 1000)
+onUnmounted(() => clearInterval(timer))
 const stateLabels: Record<string, string> = { PENDING_PAYMENT: '待支付', CONFIRMED: '已确认', CANCELLED: '已取消', EXPIRED: '已过期' }
 const refundLabels: Record<string, string> = { REFUND_PENDING: '退款处理中', REFUNDED: '已退款', REFUND_FAILED: '退款待重试' }
 const refundReasonLabels: Record<string, string> = { PATIENT_CANCELLATION: '患者取消', LATE_PAYMENT: '迟到付款', CLINIC_SUSPENSION: '停诊' }
@@ -31,7 +35,10 @@ function modeLabel(value: string) { return value === 'ONLINE' ? '线上' : '线�
 function money(value: number) { return `¥${(value / 100).toFixed(2)}` }
 async function load() {
   busy.value = true; error.value = ''
-  try { orders.value = await api<Order[]>('/patient/appointments') }
+  try {
+    orders.value = await api<Order[]>('/patient/appointments')
+    serverNow = orders.value[0]?.serverNow ?? 0; receivedAt = performance.now(); now.value = serverNow
+  }
   catch (failure) { error.value = failure instanceof Error ? failure.message : '订单加载失败，请重试' }
   finally { busy.value = false }
 }
@@ -71,11 +78,12 @@ onMounted(load)
       <p v-if="order.payment">支付事实：{{ order.payment.state === 'SUCCEEDED' ? '已支付' : order.payment.state }} {{ money(order.payment.amountMinor) }}（{{ order.payment.mode === 'SIMULATED' ? '模拟支付' : order.payment.mode }}）</p>
       <p v-if="order.payment">支付时间：{{ new Date(order.payment.paidAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p>
       <p v-if="order.cancellationReason">取消事实：{{ order.cancellationReason === 'PATIENT_CANCELLATION' ? '患者取消' : order.cancellationReason }}<span v-if="order.cancelledAt">（{{ new Date(order.cancelledAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}）</span></p>
-      <div v-if="order.reception" class="notice"><p>签到与候诊：{{ queueStateLabels[order.reception.state] ?? order.reception.state }} · {{ queueGroupLabels[order.reception.queueGroup] ?? '候诊组' }}</p><p>签到时间：{{ new Date(order.reception.checkedInAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p><p v-if="order.reception.calledAt">叫号时间：{{ new Date(order.reception.calledAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p><p v-if="order.reception.missedAt">过号时间：{{ new Date(order.reception.missedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p></div>
+      <div v-if="order.reception" class="notice"><p>签到与候诊：{{ order.reception.state === 'MISSED' && order.reception.calledAt == null ? '未签到爽约' : queueStateLabels[order.reception.state] ?? order.reception.state }} · {{ queueGroupLabels[order.reception.queueGroup] ?? '候诊组' }}</p><p v-if="order.reception.calledAt != null || order.reception.state !== 'MISSED'">签到时间：{{ new Date(order.reception.checkedInAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p><p v-if="order.reception.calledAt">叫号时间：{{ new Date(order.reception.calledAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p><p v-if="order.reception.missedAt">过号时间：{{ new Date(order.reception.missedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p></div>
       <p v-if="order.state === 'PENDING_PAYMENT'">支付截止：{{ new Date(order.holdExpiresAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p>
+      <p v-if="order.reception?.state === 'MISSED' && now >= order.endsAt" class="hint">本次门诊时段已经结束，无法恢复排队；此情况不退款。</p>
       <p v-if="order.credential">预约凭证：{{ order.credential }}</p>
       <div v-if="order.refund" class="notice"><p>{{ refundLabel(order.refund) }}</p><p>退款编号：{{ order.refund.id }} · 金额：{{ money(order.refund.amountMinor) }}</p><p>退款原因：{{ refundReasonLabels[order.refund.reason] ?? order.refund.reason }} · 尝试次数：{{ order.refund.attempts }}</p><p v-if="order.refund.providerReference">支付渠道参考号：{{ order.refund.providerReference }}</p><p v-if="order.refund.lastError">最近状态：{{ refundErrorLabel(order.refund) }}</p></div>
-      <div class="catalog-links"><RouterLink v-if="order.state === 'CONFIRMED' || order.state === 'COMPLETED'" :to="`/patient/orders/${order.id}/clinical`">问诊材料与结果</RouterLink><button v-if="order.state === 'PENDING_PAYMENT'" type="button" :disabled="busy" @click="simulatePayment(order)">模拟支付</button><button v-if="order.state === 'CONFIRMED' && !order.reception" type="button" :disabled="busy" @click="checkIn(order)">签到</button><button v-if="order.reception?.state === 'MISSED' && order.reception.restorationCount === 0" type="button" :disabled="busy" @click="restoreQueue(order)">恢复排队</button><button v-if="order.state === 'PENDING_PAYMENT' || order.state === 'CONFIRMED'" type="button" class="secondary" :disabled="busy" @click="cancel(order)">取消预约</button></div>
+      <div class="catalog-links"><RouterLink v-if="order.state === 'CONFIRMED' || order.state === 'COMPLETED'" :to="`/patient/orders/${order.id}/clinical`">问诊材料与结果</RouterLink><button v-if="order.state === 'PENDING_PAYMENT'" type="button" :disabled="busy" @click="simulatePayment(order)">模拟支付</button><button v-if="order.state === 'CONFIRMED' && !order.reception" type="button" :disabled="busy || now < order.startsAt - 1800000 || now >= order.endsAt - 900000" @click="checkIn(order)">签到</button><button v-if="order.reception?.state === 'MISSED' && order.reception.calledAt != null && order.reception.restorationCount === 0" type="button" :disabled="busy || now < order.startsAt || now >= order.endsAt" @click="restoreQueue(order)">恢复排队</button><button v-if="order.state === 'PENDING_PAYMENT' || order.state === 'CONFIRMED'" type="button" class="secondary" :disabled="busy" @click="cancel(order)">取消预约</button></div>
     </li></ul>
   </section>
 </template>

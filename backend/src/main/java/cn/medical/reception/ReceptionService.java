@@ -40,8 +40,9 @@ public class ReceptionService {
         var appointment = requirePatientAppointment(patient, id);
         var current = reception.lockedQueue(id);
         if (current == null) throw new ApiFailure(409, "RESTORE_NOT_ALLOWED", "请先签到并等待医生叫号");
+        if (current.state().equals("WAITING") && current.restorationCount() == 1) return summary(current);
         long now = clock.millis();
-        if (!current.state().equals("MISSED") || current.restorationCount() >= 1)
+        if (!current.state().equals("MISSED") || current.calledAt() == null || current.restorationCount() >= 1)
             throw new ApiFailure(409, "RESTORE_NOT_ALLOWED", "该预约已恢复排队或当前状态不允许恢复");
         if (now < appointment.startsAt() || now >= appointment.endsAt())
             throw new ApiFailure(409, "SESSION_ENDED", "本次门诊时段不在允许恢复排队的时间内");
@@ -82,7 +83,7 @@ public class ReceptionService {
         var next = reception.nextWaiting(entry.scheduleId());
         if (next == null || !next.appointmentId().equals(id)) throw new ApiFailure(409, "QUEUE_ORDER", "请先叫号当前候诊队列的下一位患者");
         long now = clock.millis();
-        if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt())
+        if (appointment == null || now < appointment.startsAt())
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         if (reception.call(id, now) != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前不在等待叫号状态");
         var result = reception.queue(id);
@@ -108,8 +109,7 @@ public class ReceptionService {
         var entry = requireDoctorQueue(doctor, id);
         var appointment = reception.appointment(id);
         long now = clock.millis();
-        if (appointment == null || now < appointment.startsAt()
-            || (now >= appointment.endsAt() && !(action.equals("complete") && entry.state().equals("IN_CONSULTATION"))))
+        if (appointment == null || now < appointment.startsAt())
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         int changed = switch (action) {
             case "start" -> reception.start(id, now);

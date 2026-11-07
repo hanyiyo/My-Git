@@ -64,6 +64,6 @@ class ReceptionServiceTest {
     private static ReceptionMapper.QueueEntry entry(String state, int restorationCount) {
         return new ReceptionMapper.QueueEntry(1L, "appointment", "schedule", "doctor", "patient", "patient",
             DATE, "AM", "ONLINE", "ADVANCE", 1, 1_000L, 1_000L, restorationCount, state,
-            null, null, null, null);
+            500L, null, null, null);
     }
 }

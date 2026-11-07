@@ -13,6 +13,7 @@ import cn.medical.billing.RefundProvider;
 import cn.medical.billing.RefundRecoveryTestController;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,11 +28,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"medical.captcha-ttl=2m", "spring.data.redis.database=5", "medical.refund-scanner-enabled=false"})
 @Import({TestAnswers.class, BookingHttpTest.TimeControl.class, BookingHttpTest.RefundControl.class, RefundRecoveryTestController.class})
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class BookingHttpTest extends HttpFixture {
     @LocalServerPort int port;
     Browser administrator;
     @Autowired AdjustableClock clock;
     @Autowired TestRefundProvider refundProvider;
+    @Autowired cn.medical.reception.ReceptionService reception;
     @BeforeEach @AfterEach void resetClock() { clock.now = Instant.now(); }
     static class AdjustableClock extends Clock {
         volatile Instant now = Instant.now();
@@ -485,6 +488,74 @@ class BookingHttpTest extends HttpFixture {
         assertThat(remaining.body().get(0).path("availableSlots").asInt()).isEqualTo(1);
     }
 
+    @Test void checkInWindowIncludesOpeningAndExcludesCutoffForBothSessions() throws Exception {
+        for (String session : List.of("AM", "PM")) {
+            var schedule = published("OFFLINE", session, 1); var patient = patient();
+            var created = patient.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
+            String path = "/api/v1/patient/appointments/" + created.body().path("id").asText();
+            assertThat(patient.call("POST", path + "/simulate-payment", null).status()).isEqualTo(200);
+            clock.now = Instant.ofEpochMilli(schedule.startsAt() - Duration.ofMinutes(30).toMillis() - 1);
+            assertThat(patient.call("POST", path + "/check-in", null).body().path("error").path("code").asText()).isEqualTo("CHECK_IN_CLOSED");
+            clock.now = clock.now.plusMillis(1);
+            assertThat(patient.call("POST", path + "/check-in", null).status()).isEqualTo(200);
+            clock.now = Instant.ofEpochMilli(schedule.endsAt() - Duration.ofMinutes(15).toMillis() - 1);
+            assertThat(patient.call("POST", path + "/check-in", null).status()).isEqualTo(200);
+            clock.now = clock.now.plusMillis(1);
+            assertThat(patient.call("POST", path + "/check-in", null).body().path("error").path("code").asText()).isEqualTo("CHECK_IN_CLOSED");
+            clock.now = Instant.now();
+        }
+    }
+
+    @Test void laterAdvanceCheckInPrecedesWalkInAndRestoredPatientsAndEndPreventsRestoration() throws Exception {
+        var schedule = published("OFFLINE", "AM", 4);
+        var restored = patient(); var advance = patient(); var walkIn = patient(); var laterWalkIn = patient();
+        String root = "/api/v1/patient/appointments";
+        String restoredId = restored.call("POST", root, command(schedule, identifier())).body().path("id").asText();
+        String advanceId = advance.call("POST", root, command(schedule, identifier())).body().path("id").asText();
+        assertThat(restored.call("POST", root + "/" + restoredId + "/simulate-payment", null).status()).isEqualTo(200);
+        assertThat(advance.call("POST", root + "/" + advanceId + "/simulate-payment", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt());
+        assertThat(restored.call("POST", root + "/" + restoredId + "/check-in", null).status()).isEqualTo(200);
+        var doctor = new Browser(port); assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
+        String queue = "/api/v1/doctor/reception/";
+        assertThat(doctor.call("POST", queue + restoredId + "/call", null).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", queue + restoredId + "/miss", null).status()).isEqualTo(200);
+        assertThat(restored.call("POST", root + "/" + restoredId + "/restore-queue", null).status()).isEqualTo(200);
+        String walkInId = walkIn.call("POST", root, Map.of("scheduleId", schedule.id(), "source", "WALK_IN", "idempotencyKey", identifier())).body().path("id").asText();
+        assertThat(walkIn.call("POST", root + "/" + walkInId + "/simulate-payment", null).status()).isEqualTo(200);
+        assertThat(walkIn.call("POST", root + "/" + walkInId + "/check-in", null).status()).isEqualTo(200);
+        clock.now = clock.now.plusMillis(1);
+        String laterId = laterWalkIn.call("POST", root, Map.of("scheduleId", schedule.id(), "source", "WALK_IN", "idempotencyKey", identifier())).body().path("id").asText();
+        assertThat(laterWalkIn.call("POST", root + "/" + laterId + "/simulate-payment", null).status()).isEqualTo(200);
+        assertThat(laterWalkIn.call("POST", root + "/" + laterId + "/check-in", null).status()).isEqualTo(200);
+        clock.now = clock.now.plusMillis(1);
+        assertThat(advance.call("POST", root + "/" + advanceId + "/check-in", null).status()).isEqualTo(200);
+        var entries = doctor.call("GET", "/api/v1/doctor/reception", null).body();
+        assertThat(entries.findValuesAsText("appointmentId")).containsExactly(advanceId, walkInId, laterId, restoredId);
+        assertThat(doctor.call("POST", queue + restoredId + "/call", null).body().path("error").path("code").asText()).isEqualTo("QUEUE_ORDER");
+        assertThat(doctor.call("POST", queue + advanceId + "/call", null).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", queue + advanceId + "/miss", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.endsAt());
+        assertThat(advance.call("POST", root + "/" + advanceId + "/restore-queue", null).body().path("error").path("code").asText()).isEqualTo("SESSION_ENDED");
+        var order = advance.call("GET", root, null).body().get(0);
+        assertThat(order.path("endsAt").asLong()).isEqualTo(schedule.endsAt());
+        assertThat(order.path("refund").isNull()).isTrue();
+        assertThat(order.path("payment").path("state").asText()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test void unattendedPatientCannotUseRestorationToBypassCheckInCutoff() throws Exception {
+        var schedule = published("ONLINE", "PM", 1); var patient = patient();
+        String root = "/api/v1/patient/appointments";
+        String id = patient.call("POST", root, command(schedule, identifier())).body().path("id").asText();
+        assertThat(patient.call("POST", root + "/" + id + "/simulate-payment", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.endsAt() - Duration.ofMinutes(15).toMillis());
+        reception.markNoShows();
+        var summary = patient.call("GET", root, null).body().get(0).path("reception");
+        assertThat(summary.path("state").asText()).isEqualTo("MISSED");
+        assertThat(summary.path("calledAt").isNull()).isTrue();
+        assertThat(patient.call("POST", root + "/" + id + "/restore-queue", null).body().path("error").path("code").asText()).isEqualTo("RESTORE_NOT_ALLOWED");
+    }
+
     @Test void confirmedAppointmentChecksInAndDoctorCompletesEncounter() throws Exception {
         var schedule = published("ONLINE", "AM", 1); var patient = patient();
         var created = patient.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
@@ -500,6 +571,8 @@ class BookingHttpTest extends HttpFixture {
         assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
         var queue = doctor.call("GET", "/api/v1/doctor/reception", null);
         assertThat(queue.body()).hasSize(1);
+        // A checked-in patient still receives care when the doctor is delayed past closing.
+        clock.now = Instant.ofEpochMilli(schedule.endsAt() + 1);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/call", null).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/start", null).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + created.body().path("id").asText() + "/complete", null).status()).isEqualTo(200);
@@ -523,6 +596,9 @@ class BookingHttpTest extends HttpFixture {
         assertThat(restored.body().path("state").asText()).isEqualTo("WAITING");
         assertThat(restored.body().path("queueGroup").asInt()).isEqualTo(3);
         assertThat(restored.body().path("restorationCount").asInt()).isEqualTo(1);
+        assertThat(patient.call("POST", path + "/restore-queue", null).body()).isEqualTo(restored.body());
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/call", null).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/miss", null).status()).isEqualTo(200);
         assertThat(patient.call("POST", path + "/restore-queue", null).status()).isEqualTo(409);
     }
 }

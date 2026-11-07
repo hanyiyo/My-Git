@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 
 const password = 'fictional-browser-password'
 let accessToken = ''
+test.beforeEach(() => { accessToken = '' })
 async function csrf(page: Page) {
   const response = await page.request.get('/api/v1/auth/csrf')
   return (await response.json()).token as string
@@ -69,4 +70,40 @@ test('患者订单页展示待支付订单并完成模拟支付与取消退款',
   await expect(order).toContainText('退款处理中')
   await expect(order).toContainText('退款原因：患者取消')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+})
+
+test('门诊结束后过号订单禁止恢复排队并说明不退款', async ({ page }) => {
+  const patientIdentifier = `ended-patient-${crypto.randomUUID()}`
+  await register(page, patientIdentifier, 'PATIENT')
+  await login(page, patientIdentifier, password)
+  const now = Date.now()
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({ json: [{
+    id: 'ended-appointment', doctorName: '虚构医生', departmentName: '演示科室', clinicDate: '2026-11-07',
+    session: 'AM', serviceMode: 'OFFLINE', feeMinor: 2000, holdExpiresAt: now - 10000,
+    startsAt: now - 10000, endsAt: now - 1, serverNow: now, state: 'CONFIRMED', credential: 'EXAMPLE',
+    payment: null, refund: null, reception: { state: 'MISSED', queueGroup: 1, calledAt: now - 4000, checkedInAt: now - 5000, restorationCount: 0 }
+  }] }))
+  await page.clock.setFixedTime(new Date(now - 86400000))
+  await page.goto('/patient/orders')
+  await expect(page.getByRole('button', { name: '恢复排队', exact: true })).toBeDisabled()
+  await expect(page.getByText('本次门诊时段已经结束，无法恢复排队；此情况不退款。')).toBeVisible()
+})
+
+test('签到按钮按服务器窗口开放，不受患者设备时间影响', async ({ page }) => {
+  const patientIdentifier = `window-patient-${crypto.randomUUID()}`
+  await register(page, patientIdentifier, 'PATIENT')
+  await login(page, patientIdentifier, password)
+  const now = Date.now()
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({ json:
+    [0, 86400000].map((offset, index) => ({
+      id: `window-${index}`, doctorName: '虚构医生', departmentName: '演示科室', clinicDate: '2026-11-07',
+      session: 'AM', serviceMode: 'OFFLINE', feeMinor: 2000, holdExpiresAt: now - 1,
+      startsAt: now + offset, endsAt: now + offset + 14400000, serverNow: now, state: 'CONFIRMED',
+      credential: 'EXAMPLE', payment: null, refund: null, reception: null
+    }))
+  }))
+  await page.clock.setFixedTime(new Date(now + 172800000))
+  await page.goto('/patient/orders')
+  await expect(page.locator('[data-appointment-id="window-0"]').getByRole('button', { name: '签到', exact: true })).toBeEnabled()
+  await expect(page.locator('[data-appointment-id="window-1"]').getByRole('button', { name: '签到', exact: true })).toBeDisabled()
 })
