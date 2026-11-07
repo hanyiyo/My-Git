@@ -5,6 +5,10 @@ import cn.medical.billing.BillingService;
 import cn.medical.identity.ApiFailure;
 import java.time.Clock;
 import java.util.UUID;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +56,23 @@ public class BookingService {
         return expireIfDue(booking.own(id, patient));
     }
     public record PaymentReceipt(BookingMapper.Appointment appointment, BillingService.Payment payment) {}
+    public record OrderView(String id, String doctorName, String departmentName, java.time.LocalDate clinicDate,
+        String session, String serviceMode, long feeMinor, long holdExpiresAt, String state, String credential,
+        String cancellationReason, BillingService.Payment payment, BillingService.Refund refund) {}
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public List<OrderView> orders(String patient) {
+        Map<String, CatalogService.ScheduleView> schedules = catalog.schedules(true, null, null, null, null).stream()
+            .collect(Collectors.toMap(CatalogService.ScheduleView::id, Function.identity()));
+        return booking.list(patient).stream().map(this::expireIfDue).map(appointment -> {
+            var schedule = schedules.get(appointment.scheduleId());
+            var financial = billing.financialStatus(appointment.id());
+            return new OrderView(appointment.id(), schedule == null ? appointment.doctorId() : schedule.doctorName(),
+                schedule == null ? appointment.departmentId() : schedule.departmentName(), appointment.clinicDate(),
+                appointment.session(), appointment.serviceMode(), appointment.feeMinor(), appointment.holdExpiresAt(),
+                appointment.state(), appointment.credential(), appointment.cancellationReason(), financial.payment(), financial.refund());
+        }).toList();
+    }
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentReceipt simulatePayment(String patient, String id) {
         var appointment = booking.own(id, patient);

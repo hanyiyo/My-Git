@@ -1,17 +1,17 @@
 # #4 MVP-03 预约登记与模拟支付
 
-状态：实现中，尚未验收。依据 GitHub #4、mvp-spec、ADR-0011/0012/0013。
+状态：本地实现与门禁已通过，待双轴审查、远程 CI 和 GitHub 验收。依据 GitHub #4、mvp-spec、ADR-0011/0012/0013。
 
 测试 seam 已在规格 Testing Decisions 授权：真实 Spring HTTP + MySQL/Redis；可控 Clock/支付适配器；真实浏览器（含手机视口）。不通过查询业务表验证结果。
 
 | 验收规则 | 公共 seam / 用例 | 结果与限制 |
 | --- | --- | --- |
-| 患者选择线上/线下、医生、日期、上午/下午排班后登记 | `BookingHttpTest.patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot`：HTTP 发布排班、创建登记、重新查询订单与可用号源；现场登记边界用例 | HTTP 登记和快照已通过；支付和前端未实现 |
+| 患者选择线上/线下、医生、日期、上午/下午排班后登记 | `BookingHttpTest.patientCreatesPendingPaymentAppointmentAndClaimsPublishedSlot`：HTTP 发布排班、创建登记、重新查询订单与可用号源；现场登记边界用例 | HTTP 登记和快照已通过；订单页面展示相同快照 |
 | 同一患者同日期半天跨医生/模式仅一条有效登记；号源不超卖 | `sixPatientsCompetingForOneSlotCreateExactlyOneHold`、`onePatientCompetingAcrossDoctorsAndModesHoldsOnlyOneHalfDayRegistration`；真实 HTTP 并发、患者半天 guard | 已通过六人竞争一个号源、同一患者跨六位医生/两种模式仅一条登记成功；其余409 |
 | 截止=min(提交+10分钟,结束−15分钟)，提前预约开诊截止，现场挂号签到截止 | `offlineWalkInUsesCurrentSessionAndEarlierOfTenMinutesOrCheckInCutoff`、精确到期复用用例；可控 Clock + HTTP | 已验证10分钟、17:35/17:40均在17:45截止、开诊起现场可登记、线上/未来/已过时段拒绝、开诊停止提前预约、签到截止右端排除；锁等待专项仍需最终审查确认 |
-| 模拟支付幂等、金额快照、预约凭证 | `simulatedPaymentConfirmsSnapshotAndCredentialOnceAndRetainsSlotAfterHoldDeadline`；HTTP 重复付款及归属限制 | 本地模拟付款、2000分订单快照、唯一凭证和持续占号已通过；迟到付款退款及支付并发仍待完成 |
-| 取消/停诊/迟到付款退款可追踪、幂等，失败可恢复 | HTTP 取消、停诊应用接口、支付适配器失败/重启；旧订单付款不释放新订单占用 | 患者取消、唯一全额退款意向和重复取消/付款已验证；停诊、迟到付款与退款执行/恢复待完成 |
-| 患者订单 API/UI、权限及手机兼容 | 订单归属/RBAC HTTP；真实浏览器完整路径和手机视口 | 待实现/验证 |
+| 模拟支付幂等、金额快照、预约凭证 | `simulatedPaymentConfirmsSnapshotAndCredentialOnceAndRetainsSlotAfterHoldDeadline`；HTTP 重复付款及归属限制 | 本地模拟付款、2000分订单快照、唯一凭证、持续占号、迟到付款事实与支付并发均已通过 |
+| 取消/停诊/迟到付款退款可追踪、幂等，失败可恢复 | HTTP 取消、退款执行/恢复和迟到付款用例；旧订单付款不释放新订单占用 | 患者取消、唯一全额退款意向、迟到付款退款、持久租约重试/恢复和三次失败上限均已通过；完整停诊审批链属于 #8 |
+| 患者订单 API/UI、权限及手机兼容 | `orders.spec.ts`：真实浏览器加载待支付订单、模拟支付、取消退款及手机视口；订单归属/RBAC HTTP | 订单列表 API、患者订单页、状态/凭证/退款展示、动作权限和手机无横向滚动均已通过 |
 
 完成后运行完整 `scripts/verify.ps1`，记录结果；双轴代码审查与远端 CI 通过前不声称完成验收。
 
@@ -57,4 +57,10 @@
 
 测试配置关闭自动扫描以保持 HTTP 断言确定，运行环境默认启用同一处理入口的后台扫描。完整 `npm test` 退出0：31条 Java 测试（0失败/错误/跳过）、8条浏览器流程、文档检查和 Vue 类型检查/构建全部通过。期间发现测试服务清理只结束启动句柄而遗留 `mysqld` 子进程，新增按本次生成目录匹配的子进程清理和运行目录回收，并用运行时检查锁定该约束。
 
-恢复用例先发现中断 seam 未真正留下处理中租约；修复后 `crashAfterClaim` 只提交领取状态并返回202，不调用 provider，31秒后普通处理接管过期租约并以同一退款幂等键成功。首次失败与恢复成功各调用一次 provider，旧订单仍为 `CANCELLED`。完整 `npm test` 再次退出0：32条 Java 测试（0失败/错误/跳过）、8条浏览器流程、文档检查和 Vue 类型检查/构建全部通过。订单 UI、停诊和远程验收仍待完成。
+恢复用例先发现中断 seam 未真正留下处理中租约；修复后 `crashAfterClaim` 只提交领取状态并返回202，不调用 provider，31秒后普通处理接管过期租约并以同一退款幂等键成功。首次失败与恢复成功各调用一次 provider，旧订单仍为 `CANCELLED`。当时完整 `npm test` 退出0：32条 Java 测试（0失败/错误/跳过）、8条浏览器流程、文档检查和 Vue 类型检查/构建全部通过；订单 UI 随后在下一切片补齐。
+
+## 订单 API 与 UI 切片
+
+订单页面验收先因测试把 `PUT /admin/catalog/doctors/{id}` 错调为 POST 而失败；修正测试调用后，后端新增 `GET /api/v1/patient/appointments`，按患者归属返回预约快照、医生/科室名称、付款与退款事实。Vue 新增 `/patient/orders` 页面及工作台入口，支持待支付订单的模拟支付、已确认订单取消，并展示预约凭证和退款状态；操作继续调用既有患者归属检查。真实浏览器 `orders.spec.ts` 覆盖待支付→已确认→已取消/退款处理中和手机无横向滚动。
+
+最新本地完整门禁 `npm test` 退出0：文档/架构检查、Vue 类型检查与构建、32条 Java HTTP/恢复测试、1条真实浏览器验收均通过（0失败、0错误、0跳过）。订单切片已提交，仍需双轴审查、推送后远程 CI 和 GitHub #4 验收评论；完整停诊审批链按规格留给 #8。

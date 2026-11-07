@@ -1,6 +1,7 @@
 package cn.medical.booking;
 
 import java.time.LocalDate;
+import java.util.List;
 import org.apache.ibatis.annotations.*;
 
 @Mapper
@@ -26,6 +27,8 @@ public interface BookingMapper {
     Appointment byKey(@Param("patient") String patient, @Param("key") String key);
     @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential, cancellation_reason, cancelled_at FROM appointment WHERE id=#{id} AND patient_id=#{patient}")
     Appointment own(@Param("id") String id, @Param("patient") String patient);
+    @Select("SELECT id, patient_id, schedule_id, slot_id, doctor_id, department_id, clinic_date, clinic_session AS session, service_mode, source, starts_at, ends_at, fee_minor, created_at, hold_expires_at, state, idempotency_key, credential, cancellation_reason, cancelled_at FROM appointment WHERE patient_id=#{patient} ORDER BY created_at DESC, id DESC")
+    List<Appointment> list(@Param("patient") String patient);
     @Update("UPDATE appointment SET state='CONFIRMED', credential=#{credential} WHERE id=#{id} AND state='PENDING_PAYMENT' AND hold_expires_at > #{now}")
     int confirm(@Param("id") String id, @Param("credential") String credential, @Param("now") long now);
     @Update("UPDATE appointment SET state='CANCELLED', cancellation_reason=#{reason}, cancelled_at=#{now} WHERE id=#{id} AND state IN ('PENDING_PAYMENT', 'CONFIRMED')")
