@@ -1,6 +1,7 @@
 package cn.medical.reception;
 
 import cn.medical.identity.ApiFailure;
+import cn.medical.delivery.DeliveryService;
 import java.time.Clock;
 import java.time.LocalDate;
 import org.springframework.dao.DuplicateKeyException;
@@ -12,8 +13,10 @@ public class ReceptionService {
     public record Summary(String state, int queueGroup, long queuedAt, long checkedInAt, int restorationCount,
         Long calledAt, Long startedAt, Long missedAt, Long completedAt) {}
     private final ReceptionMapper reception;
+    private final DeliveryService delivery;
     private final Clock clock;
-    public ReceptionService(ReceptionMapper reception, Clock clock) { this.reception = reception; this.clock = clock; }
+    public ReceptionService(ReceptionMapper reception, Clock clock) { this(reception, null, clock); }
+    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock) { this.reception = reception; this.delivery = delivery; this.clock = clock; }
 
     @Transactional
     public Summary checkIn(String patient, String id) {
@@ -26,6 +29,7 @@ public class ReceptionService {
         int group = appointment.source().equals("WALK_IN") ? 2 : 1;
         try { reception.insertQueue(id, appointment.scheduleId(), appointment.doctorId(), patient, group, now, now); }
         catch (DuplicateKeyException ignored) {}
+        if (delivery != null) delivery.publish(patient, "CHECK_IN", id, "签到成功，已进入候诊队列", "check-in:" + id);
         return summary(reception.queue(id));
     }
 
@@ -65,7 +69,9 @@ public class ReceptionService {
         long now = clock.millis();
         if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt()) throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         if (reception.call(id, now) != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前不在等待叫号状态");
-        return reception.queue(id);
+        var result = reception.queue(id);
+        if (delivery != null) delivery.publish(result.patientId(), "CALLED", id, "医生已叫号", "called:" + id + ":" + result.calledAt());
+        return result;
     }
 
     @Transactional

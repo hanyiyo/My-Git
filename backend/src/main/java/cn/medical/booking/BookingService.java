@@ -4,6 +4,7 @@ import cn.medical.catalog.CatalogService;
 import cn.medical.billing.BillingService;
 import cn.medical.identity.ApiFailure;
 import cn.medical.reception.ReceptionService;
+import cn.medical.delivery.DeliveryService;
 import java.time.Clock;
 import java.util.UUID;
 import java.util.List;
@@ -19,9 +20,10 @@ public class BookingService {
     private final CatalogService catalog;
     private final BillingService billing;
     private final ReceptionService reception;
+    private final DeliveryService delivery;
     private final Clock clock;
-    public BookingService(BookingMapper booking, CatalogService catalog, BillingService billing, ReceptionService reception, Clock clock) {
-        this.booking = booking; this.catalog = catalog; this.billing = billing; this.reception = reception; this.clock = clock;
+    public BookingService(BookingMapper booking, CatalogService catalog, BillingService billing, ReceptionService reception, DeliveryService delivery, Clock clock) {
+        this.booking = booking; this.catalog = catalog; this.billing = billing; this.reception = reception; this.delivery = delivery; this.clock = clock;
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public BookingMapper.Appointment create(String patient, String schedule, String source, String key) {
@@ -95,6 +97,7 @@ public class BookingService {
         }
         var payment = billing.recordSimulatedSuccess(id, appointment.feeMinor(), paidAt);
         if (!outcome.confirmed()) billing.requestFullRefund(id, "LATE_PAYMENT", paidAt);
+        if (outcome.confirmed()) delivery.publish(patient, "APPOINTMENT_CONFIRMED", id, "预约已确认", "appointment-confirmed:" + id);
         return new PaymentReceipt(booking.own(id, patient), payment);
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -114,6 +117,7 @@ public class BookingService {
             billing.requestFullRefund(id, "PATIENT_CANCELLATION", now);
         }
         booking.releaseGuard(appointment);
+        delivery.publish(patient, "APPOINTMENT_CANCELLED", id, "预约已取消", "appointment-cancelled:" + id + ":" + appointment.cancellationReason());
         return booking.own(id, patient);
     }
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -132,6 +136,7 @@ public class BookingService {
         booking.cancel(appointment.id(), reason, now);
         if (billing.payment(appointment.id()) != null) billing.requestFullRefund(appointment.id(), reason, now);
         booking.releaseGuard(appointment);
+        delivery.publish(appointment.patientId(), "APPOINTMENT_CANCELLED", appointment.id(), "预约因医院流程已取消：" + reason, "appointment-cancelled:" + appointment.id() + ":" + reason);
     }
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     public void transferDoctor(String appointmentId, String doctorId) {

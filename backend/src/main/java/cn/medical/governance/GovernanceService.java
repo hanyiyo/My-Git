@@ -3,6 +3,7 @@ package cn.medical.governance;
 import cn.medical.booking.BookingMapper;
 import cn.medical.booking.BookingService;
 import cn.medical.identity.ApiFailure;
+import cn.medical.delivery.DeliveryService;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
@@ -21,8 +22,10 @@ public class GovernanceService {
     private final BookingMapper booking;
     private final BookingService bookings;
     private final Clock clock;
-    public GovernanceService(GovernanceMapper governance, BookingMapper booking, BookingService bookings, Clock clock) {
-        this.governance = governance; this.booking = booking; this.bookings = bookings; this.clock = clock;
+    private final DeliveryService delivery;
+    public GovernanceService(GovernanceMapper governance, BookingMapper booking, BookingService bookings, Clock clock) { this(governance, booking, bookings, null, clock); }
+    public GovernanceService(GovernanceMapper governance, BookingMapper booking, BookingService bookings, DeliveryService delivery, Clock clock) {
+        this.governance = governance; this.booking = booking; this.bookings = bookings; this.delivery = delivery; this.clock = clock;
     }
 
     @Transactional
@@ -152,7 +155,10 @@ public class GovernanceService {
         long deadline = Math.min(clock.millis() + Duration.ofHours(2).toMillis(), schedule.startsAt() - Duration.ofHours(2).toMillis());
         for (var appointment : booking.activeForSchedule(request.scheduleId())) {
             if (appointment.state().equals("PENDING_PAYMENT")) bookings.cancelForGovernance(appointment, "CLINIC_SUSPENSION", clock.millis());
-            else governance.insertChoice(new GovernanceMapper.Choice(UUID.randomUUID().toString(), request.id(), appointment.id(), appointment.patientId(), appointment.doctorId(), request.substituteDoctorId(), "PENDING", deadline, null, null));
+            else {
+                governance.insertChoice(new GovernanceMapper.Choice(UUID.randomUUID().toString(), request.id(), appointment.id(), appointment.patientId(), appointment.doctorId(), request.substituteDoctorId(), "PENDING", deadline, null, null));
+                if (delivery != null) delivery.publish(appointment.patientId(), "SUBSTITUTION_PENDING", appointment.id(), "请在截止时间前确认替诊", "substitution-pending:" + appointment.id());
+            }
         }
         governance.updateScheduleState(request.scheduleId(), "SUSPENSION_PENDING"); governance.updateRequest(request.id(), "APPROVED_SUBSTITUTE", request.substituteDoctorId(), clock.millis());
         audit(actor, "SUBSTITUTION_REVIEWED", "SCHEDULE", request.scheduleId(), reason);
