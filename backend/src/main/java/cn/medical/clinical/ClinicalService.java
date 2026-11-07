@@ -43,7 +43,7 @@ public class ClinicalService {
     @Transactional
     public ClinicalView doctorView(String doctor, String id) {
         requireDoctor(doctor, id);
-        return view(id);
+        return view(id, true);
     }
 
     @Transactional
@@ -115,13 +115,25 @@ public class ClinicalService {
         var attachment = clinical.attachment(attachmentId);
         if (attachment == null) throw new ApiFailure(404, "NOT_FOUND", "医疗附件不存在");
         if (role.equals("PATIENT")) requirePatient(actor, attachment.appointmentId()); else requireDoctor(actor, attachment.appointmentId());
+        if (role.equals("DOCTOR")) {
+            var material = clinical.material(attachment.materialId());
+            if (material == null || !material.shared()) throw new ApiFailure(403, "SHARING_REVOKED", "患者已撤回该材料共享授权");
+        }
         try { return new Download(new ByteArrayResource(Files.readAllBytes(safePath(attachment.storageKey()))), attachment.mediaType(), attachment.originalName()); }
         catch (IOException error) { throw new ApiFailure(404, "NOT_FOUND", "医疗附件不可用"); }
     }
 
-    private ClinicalView view(String id) {
-        var materials = clinical.materials(id).stream().map(material -> new MaterialView(material.id(), material.versionNo(), material.symptomText(), material.shared(), material.createdAt(), clinical.attachments(material.id()).stream().map(a -> new AttachmentView(a.id(), a.originalName(), a.mediaType(), a.sizeBytes(), a.createdAt())).toList())).toList();
+    private ClinicalView view(String id) { return view(id, false); }
+    private ClinicalView view(String id, boolean doctor) {
+        var materials = clinical.materials(id).stream().filter(material -> !doctor || material.shared()).map(material -> new MaterialView(material.id(), material.versionNo(), material.symptomText(), material.shared(), material.createdAt(), clinical.attachments(material.id()).stream().map(a -> new AttachmentView(a.id(), a.originalName(), a.mediaType(), a.sizeBytes(), a.createdAt())).toList())).toList();
         return new ClinicalView(clinical.consultation(id), materials, clinical.messages(id), clinical.latestResult(id), clinical.corrections(id));
+    }
+
+    @Transactional
+    public ClinicalView revokeSharing(String patient, String id) {
+        requirePatient(patient, id);
+        clinical.revokeSharing(id);
+        return view(id);
     }
     private ClinicalMapper.Appointment requirePatient(String patient, String id) {
         var appointment = clinical.appointment(id);

@@ -30,6 +30,10 @@ public interface ClinicalMapper {
     void insertMaterial(Material material);
     @Select("SELECT id, appointment_id, version_no, symptom_text, shared, created_at FROM material_revision WHERE appointment_id=#{id} ORDER BY version_no DESC")
     List<Material> materials(@Param("id") String id);
+    @Select("SELECT id, appointment_id, version_no, symptom_text, shared, created_at FROM material_revision WHERE id=#{id}")
+    Material material(@Param("id") String id);
+    @Update("UPDATE material_revision SET shared=FALSE WHERE appointment_id=#{appointmentId} AND shared=TRUE")
+    int revokeSharing(@Param("appointmentId") String appointmentId);
     @Insert("INSERT INTO medical_attachment (id, material_id, appointment_id, original_name, media_type, size_bytes, storage_key, created_at) VALUES (#{id}, #{materialId}, #{appointmentId}, #{originalName}, #{mediaType}, #{sizeBytes}, #{storageKey}, #{createdAt})")
     void insertAttachment(Attachment attachment);
     @Select("SELECT id, material_id, appointment_id, original_name, media_type, size_bytes, storage_key, created_at FROM medical_attachment WHERE material_id=#{id} ORDER BY created_at, id")

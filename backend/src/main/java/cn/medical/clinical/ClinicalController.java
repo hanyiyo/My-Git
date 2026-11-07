@@ -28,6 +28,8 @@ public class ClinicalController {
     ClinicalService.ClinicalView patientMessage(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody MessageInput input) { return clinical.message(auth.getName(), id, "PATIENT", input.body()); }
     @GetMapping("/patient/clinical/attachments/{id}")
     ResponseEntity<ByteArrayResource> patientAttachment(JwtAuthenticationToken auth, @PathVariable String id) { return attachment(clinical.download(auth.getName(), "PATIENT", id)); }
+    @PostMapping("/patient/appointments/{id}/clinical/sharing/revoke")
+    ClinicalService.ClinicalView revokeSharing(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.revokeSharing(auth.getName(), id); }
 
     @GetMapping("/doctor/clinical/{id}")
     ClinicalService.ClinicalView doctorView(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.doctorView(auth.getName(), id); }
