@@ -15,9 +15,11 @@ import PatientClinicalView from './views/PatientClinicalView.vue'
 import DoctorClinicalView from './views/DoctorClinicalView.vue'
 import BusinessAssistantView from './views/BusinessAssistantView.vue'
 import PatientSubstitutionView from './views/PatientSubstitutionView.vue'
+import LoginRegisterPrototypeView from './views/LoginRegisterPrototypeView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
+  { path: '/prototype/auth', component: LoginRegisterPrototypeView },
   { path: '/assistant/business', component: BusinessAssistantView },
   { path: '/admin/governance', component: AdminGovernanceView, meta: { role: 'ADMIN' } },
   { path: '/doctor/governance', component: DoctorGovernanceView, meta: { role: 'DOCTOR' } },

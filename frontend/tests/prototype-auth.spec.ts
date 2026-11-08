@@ -1,0 +1,20 @@
+import { test, expect } from '@playwright/test'
+
+test('prototype switches roles and simulates registration then login', async ({ page }) => {
+  await page.goto('/prototype/auth')
+  await expect(page.getByRole('heading', { name: '一个入口，三种工作方式。' })).toBeVisible()
+  await page.getByRole('tab', { name: /医生端/ }).click()
+  await expect(page.getByText('STEP 02 · 医生端')).toBeVisible()
+  await page.getByRole('tab', { name: '注册' }).click()
+  await page.getByLabel('账号').fill('doctor-prototype')
+  await page.getByLabel('显示名称').fill('林医生')
+  await page.getByPlaceholder('至少 8 位').fill('prototype-password')
+  await page.getByLabel('确认密码').fill('prototype-password')
+  await page.getByRole('button', { name: '创建演示账户' }).click()
+  await expect(page.getByRole('status')).toContainText('注册成功')
+  await page.getByPlaceholder('输入演示密码').fill('prototype-password')
+  await page.getByRole('button', { name: '进入演示工作台' }).click()
+  await expect(page.getByRole('heading', { name: '医生端工作台已打开' })).toBeVisible()
+  await page.getByRole('button', { name: '退出体验' }).click()
+  await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
+})
