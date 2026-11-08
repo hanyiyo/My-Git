@@ -81,7 +81,8 @@ for (const variant of ['A', 'B', 'C']) {
 
 test('prototype variants preserve form/session state, URL and keyboard editing', async ({ page }) => {
   await page.route('**/api/**', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }))
-  await page.goto('/prototype/auth?variant=A&keep=1')
+  await page.goto('/prototype/auth?keep=1')
+  await expect(page.getByRole('button', { name: '方案 A：深蓝分栏' })).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('tab', { name: /医生端/ }).click()
   await page.getByRole('tab', { name: /^注册/ }).click()
   await page.getByLabel('账号', { exact: true }).fill('shared-state')
@@ -112,5 +113,5 @@ test('prototype variants preserve form/session state, URL and keyboard editing',
   await expect(page.getByRole('button', { name: '方案 C：服务工作台' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByLabel('账号', { exact: true })).toHaveValue('')
   await page.goto('/prototype/auth?variant=invalid')
-  await expect(page.getByRole('button', { name: '方案 A：温暖分栏' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: '方案 A：深蓝分栏' })).toHaveAttribute('aria-pressed', 'true')
 })
