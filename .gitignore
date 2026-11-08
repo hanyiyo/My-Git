@@ -5,5 +5,7 @@
 frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
+frontend/playwright-results.json
 .env
 *.log
+backend/data/

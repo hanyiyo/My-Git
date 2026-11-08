@@ -21,7 +21,7 @@ public class SecurityConfiguration {
             .requestCache(cache -> cache.disable())
             .headers(headers -> headers.cacheControl(cache -> {}))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/v1/auth/**", "/api/v1/health").permitAll()
+                .requestMatchers("/api/v1/auth/**", "/api/v1/health", "/api/v1/assistant/business").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/v1/doctor/**").hasRole("DOCTOR")
                 .requestMatchers("/api/v1/patient/**").hasRole("PATIENT")

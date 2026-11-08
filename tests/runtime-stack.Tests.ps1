@@ -16,4 +16,6 @@ foreach ($file in $source) {
     if ($body -match 'MemoryRedis|exposeCaptchaCode') { throw "Test adapter leaked into shipped runtime: $($file.FullName)" }
 }
 if (-not (Test-Path "$root/.github/workflows/verify.yml")) { throw 'CI verification is required.' }
+$testServices = Get-Content "$root/scripts/test-services.ps1" -Raw
+if ($testServices -notmatch 'Get-CimInstance Win32_Process' -or $testServices -notmatch 'Remove-Item -LiteralPath \$Services\.Root') { throw 'Isolated test services must clean child processes and their generated data directory.' }
 Write-Output 'Approved runtime and authentication storage checks passed.'

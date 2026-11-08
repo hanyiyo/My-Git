@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.*;
 
 @Mapper
 public interface AccountMapper {
+    @Select("SELECT a.id FROM account a JOIN account_role r ON r.account_id=a.id WHERE a.enabled=TRUE AND r.role='ADMIN'") List<String> administrators();
     record Account(String id, String identifier, String passwordHash, boolean enabled) {}
     record RefreshSession(String id, String accountId, String tokenHash, long expiresAt, boolean revoked) {}
 
@@ -23,6 +24,12 @@ public interface AccountMapper {
     void insertDoctor(String id);
     @Select("SELECT credential_status FROM doctor_profile WHERE account_id = #{id}")
     String credentialStatus(String id);
+    @Select("SELECT a.id, a.identifier, d.display_name, d.title, d.biography, d.credential_status, a.enabled FROM doctor_profile d JOIN account a ON a.id=d.account_id ORDER BY a.id")
+    List<IdentityService.Doctor> doctors();
+    @Select("SELECT a.id, a.identifier, d.display_name, d.title, d.biography, d.credential_status, a.enabled FROM doctor_profile d JOIN account a ON a.id=d.account_id WHERE a.id=#{id} FOR UPDATE")
+    IdentityService.Doctor lockDoctor(String id);
+    @Update("UPDATE doctor_profile SET display_name=#{displayName}, title=#{title}, biography=#{biography}, credential_status=#{credentialStatus} WHERE account_id=#{id}")
+    void updateDoctor(IdentityService.Doctor doctor);
     @Insert("INSERT INTO refresh_session (id, account_id, token_hash, expires_at, revoked) VALUES (#{id}, #{accountId}, #{tokenHash}, #{expiresAt}, FALSE)")
     void insertSession(RefreshSession session);
     @Select("SELECT id, account_id, token_hash, expires_at, revoked FROM refresh_session WHERE token_hash = #{hash} FOR UPDATE")
