@@ -10,8 +10,8 @@ const refreshing = ref(false)
 async function refresh() {
   if (refreshing.value) return
   refreshing.value = true; challengeId.value = ''; image.value = ''; captcha.value = ''
-  try { const challenge = await api<{ challengeId: string; image: string }>('/auth/captcha'); challengeId.value = challenge.challengeId; image.value = challenge.image; captcha.value = '' }
-  catch (error) { image.value = ''; message.value = error instanceof Error ? error.message : '验证码暂不可用' }
+  try { const challenge = await api<{ challengeId: string; image: string }>('/auth/captcha'); challengeId.value = challenge.challengeId; image.value = challenge.image; captcha.value = ''; return true }
+  catch (error) { image.value = ''; message.value = error instanceof Error ? error.message : '验证码暂不可用'; return false }
   finally { refreshing.value = false }
 }
 async function submit() {
@@ -20,7 +20,9 @@ async function submit() {
   try {
     if (register.value) {
       await api('/auth/register', 'POST', { identifier: identifier.value, password: password.value, role: role.value })
-      register.value = false; message.value = '注册成功，请输入图形验证码后登录'; await refresh()
+      register.value = false
+      const ready = await refresh()
+      if (ready) message.value = '注册成功，请输入图形验证码后登录'
     } else {
       await session.login(identifier.value, password.value, challengeId.value, captcha.value)
       await router.push('/' + session.account!.roles[0]!.toLowerCase())
