@@ -10,6 +10,7 @@ async function register(page: Page, role: 'PATIENT' | 'DOCTOR') {
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
   await expect(page.getByAltText('图形验证码')).toBeVisible()
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeEnabled()
   return name
 }
 async function login(page: Page, name: string, pass = password) {
@@ -69,6 +70,32 @@ test('登录服务暂不可用时保留账号，刷新后可重试登录', async
   await expect(page).toHaveURL(/\/patient$/)
 })
 
+test('错误后的验证码仍在刷新时暂停输入和再次刷新，返回新挑战后能登录', async ({ page }) => {
+  const name = await register(page, 'DOCTOR')
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeEnabled()
+  let release!: () => void
+  let fetched!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const received = new Promise<void>(resolve => { fetched = resolve })
+  await page.route('**/api/v1/auth/captcha', async route => {
+    const response = await route.fetch()
+    fetched()
+    await held
+    await route.fulfill({ response })
+  }, { times: 1 })
+  await page.getByLabel('图形验证码', { exact: true }).fill('WRNG')
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await received
+  try {
+    await expect(page.getByLabel('图形验证码', { exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: '刷新中…' })).toBeDisabled()
+    await expect(page.locator('button[type="submit"]')).toBeDisabled()
+  } finally { release() }
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeEnabled()
+  await login(page, name)
+  await expect(page).toHaveURL(/\/doctor$/)
+})
+
 test('迟到的验证码图片不能恢复旧挑战，失败后可获取新码登录', async ({ page }) => {
   const name = await register(page, 'PATIENT')
   let release!: () => void
@@ -83,9 +110,8 @@ test('迟到的验证码图片不能恢复旧挑战，失败后可获取新码�
   }, { times: 1 })
   await page.getByRole('button', { name: '换一张' }).click()
   await received
-  const newer = page.waitForResponse('**/api/v1/auth/captcha')
-  await page.getByRole('button', { name: '换一张' }).click()
-  await newer
+  // Another tab can issue a newer challenge even while this page disables refresh.
+  expect((await page.request.get('/api/v1/auth/captcha')).ok()).toBeTruthy()
   const older = page.waitForResponse('**/api/v1/auth/captcha')
   release()
   await older

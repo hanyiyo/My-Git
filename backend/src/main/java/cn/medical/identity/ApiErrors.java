@@ -19,8 +19,10 @@ public class ApiErrors {
     }
     @ExceptionHandler(ApiFailure.class)
     ResponseEntity<?> failure(ApiFailure failure) { return ResponseEntity.status(failure.status).body(body(failure.code, failure.getMessage())); }
-    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
-    ResponseEntity<?> input(Exception error) { return ResponseEntity.badRequest().body(body("INVALID_INPUT", "请检查账号、密码和验证码输入")); }
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    ResponseEntity<?> uploadLimit(Exception error) { return ResponseEntity.status(413).body(body("ATTACHMENT_TOO_LARGE", "每份医疗附件不能超过10MB")); }
+    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class, org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
+    ResponseEntity<?> input(Exception error) { return ResponseEntity.badRequest().body(body("INVALID_INPUT", "请检查输入字段、格式和允许范围")); }
     @ExceptionHandler(RedisConnectionFailureException.class)
     ResponseEntity<?> redis(Exception error) { return ResponseEntity.status(503).body(body("CAPTCHA_UNAVAILABLE", "验证码服务暂不可用，请稍后重试")); }
     @ExceptionHandler(DataAccessException.class)
