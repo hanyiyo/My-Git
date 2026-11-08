@@ -9,6 +9,7 @@ async function register(page: Page, role: 'PATIENT' | 'DOCTOR') {
   await page.getByLabel('注册身份').selectOption(role)
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
+  await expect(page.getByAltText('图形验证码')).toBeVisible()
   return name
 }
 async function login(page: Page, name: string, pass = password) {
