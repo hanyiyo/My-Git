@@ -1,1 +1,1 @@
-{"name":"medical-mvp","private":true,"scripts":{"test":"pwsh -NoProfile -File scripts/verify.ps1","start":"pwsh -NoProfile -File scripts/start-backend.ps1","dev:frontend":"npm --prefix frontend run dev"}}
+{"name":"medical-mvp","private":true,"scripts":{"test":"pwsh -NoProfile -File scripts/verify.ps1","start":"pwsh -NoProfile -File scripts/start-backend.ps1","dev:frontend":"npm --prefix frontend run dev","dev:auth-prototype":"npm --prefix frontend run dev -- --port 5181 --strictPort"}}
