@@ -6,7 +6,8 @@ async function register(page: Page, role: 'PATIENT' | 'DOCTOR') {
   await page.getByRole('button', { name: '患者或医生注册' }).click()
   await page.getByLabel('账号', { exact: true }).fill(name)
   await page.getByLabel('密码', { exact: true }).fill(password)
-  await page.getByLabel('注册身份').selectOption(role)
+  await page.getByLabel('确认密码', { exact: true }).fill(password)
+  await page.getByRole('radio', { name: role === 'DOCTOR' ? /医生端/ : /患者端/ }).check()
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
   await expect(page.getByAltText('图形验证码')).toBeVisible()
@@ -49,10 +50,102 @@ test('管理员使用配置的引导账户登录并刷新会话', async ({ page 
   await page.reload(); await expect(page.getByRole('heading', { name: '管理员工作台' })).toBeVisible()
   await page.getByRole('button', { name: '退出登录' }).click(); await expect(page).toHaveURL(/\/login$/)
 })
-test('手机宽度下登录表单不产生横向滚动', async ({ page }) => {
+test('手机宽度下登录注册与管理员入口不产生横向滚动', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 375, height: 812 }); await page.goto('/login')
   await expect(page.getByAltText('图形验证码')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await page.screenshot({ path: testInfo.outputPath('auth-navy-mobile.png'), fullPage: true })
+  await page.getByRole('tab', { name: '注册', exact: true }).click()
+  await expect(page.getByLabel('确认密码', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await page.getByRole('radio', { name: /管理员端/ }).check()
+  await expect(page.getByLabel('图形验证码', { exact: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '注册', exact: true })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+})
+
+test('深蓝左右布局支持密码显隐，管理员入口只有登录，患者医生可切换注册', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto('/login')
+  await expect(page.getByAltText('图形验证码')).toBeVisible()
+  const identity = await page.getByRole('group', { name: '选择你的身份' }).boundingBox()
+  const form = await page.locator('#account-form').boundingBox()
+  expect(identity).not.toBeNull(); expect(form).not.toBeNull()
+  expect(identity!.x + identity!.width).toBeLessThan(form!.x)
+  await expect(page.getByText(/演示填充|原型切换|模拟验证码/)).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('auth-navy-desktop.png'), fullPage: true })
+  await page.getByRole('tab', { name: '登录', exact: true }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: '注册', exact: true })).toBeFocused()
+  await expect(page.getByLabel('确认密码', { exact: true })).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(page.getByLabel('账号', { exact: true })).toBeFocused()
+  await page.getByRole('tab', { name: '注册', exact: true }).press('Home')
+  await expect(page.getByRole('tab', { name: '登录', exact: true })).toBeFocused()
+  await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByRole('button', { name: '显示密码' }).click()
+  await expect(page.getByLabel('密码', { exact: true })).toHaveAttribute('type', 'text')
+  await page.getByRole('button', { name: '隐藏密码' }).click()
+  await expect(page.getByLabel('密码', { exact: true })).toHaveAttribute('type', 'password')
+  await page.getByRole('tab', { name: '注册', exact: true }).click()
+  await page.getByRole('radio', { name: /管理员端/ }).check()
+  await expect(page.getByRole('tab', { name: '登录', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByText('管理员账号只能由管理员在后台创建。')).toBeVisible()
+  await expect(page.getByLabel('图形验证码', { exact: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '注册', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '患者或医生注册' })).toHaveCount(0)
+  await expect(page.getByLabel('确认密码', { exact: true })).toHaveCount(0)
+  await page.getByRole('tab', { name: '登录', exact: true }).press('End')
+  await expect(page.getByRole('tab', { name: '登录', exact: true })).toBeFocused()
+  await page.getByRole('radio', { name: /医生端/ }).check()
+  await page.getByRole('tab', { name: '注册', exact: true }).click()
+  await expect(page.getByText('医生注册后需通过资质审核。')).toBeVisible()
+  await page.getByRole('radio', { name: /患者端/ }).check()
+  await expect(page.getByLabel('确认密码', { exact: true })).toBeVisible()
+  await expect(page.getByText('医生注册后需通过资质审核。')).toHaveCount(0)
+})
+
+test('注册密码不一致时保留输入且不发送注册请求', async ({ page }) => {
+  let requests = 0
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/v1/auth/register')) requests++
+  })
+  await page.goto('/login')
+  await page.getByRole('tab', { name: '注册', exact: true }).click()
+  await page.getByLabel('账号', { exact: true }).fill('fictional-password-mismatch')
+  await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByLabel('确认密码', { exact: true }).fill('another-fictional-password')
+  await page.getByRole('button', { name: '注册', exact: true }).click()
+  await expect(page.getByRole('status')).toHaveText('两次输入的密码不一致')
+  await expect(page.getByLabel('账号', { exact: true })).toHaveValue('fictional-password-mismatch')
+  await expect(page.getByLabel('密码', { exact: true })).toHaveValue(password)
+  expect(requests).toBe(0)
+})
+
+test('首次验证码尚未返回时注册仍等待挑战，并显示成功后可登录', async ({ page }) => {
+  let release!: () => void
+  let fetched!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const received = new Promise<void>(resolve => { fetched = resolve })
+  await page.route('**/api/v1/auth/captcha', async route => {
+    const response = await route.fetch()
+    fetched(); await held; await route.fulfill({ response })
+  }, { times: 1 })
+  await page.goto('/login'); await received
+  const name = `browser-${crypto.randomUUID()}`
+  try {
+    await page.getByRole('tab', { name: '注册', exact: true }).click()
+    await page.getByLabel('账号', { exact: true }).fill(name)
+    await page.getByLabel('密码', { exact: true }).fill(password)
+    await page.getByLabel('确认密码', { exact: true }).fill(password)
+    const registered = page.waitForResponse('**/api/v1/auth/register')
+    await page.getByRole('button', { name: '注册', exact: true }).click()
+    expect((await registered).status()).toBe(201)
+    await expect(page.getByRole('tab', { name: '登录', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('button[type="submit"]')).toBeDisabled()
+  } finally { release() }
+  await expect(page.getByRole('status')).toContainText('注册成功')
+  await login(page, name)
+  await expect(page).toHaveURL(/\/patient$/)
 })
 
 test('登录服务暂不可用时保留账号，刷新后可重试登录', async ({ page }) => {

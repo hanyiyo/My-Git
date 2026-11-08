@@ -6,7 +6,8 @@ async function registerDoctor(page: Page, name: string) {
   await page.getByRole('button', { name: '患者或医生注册' }).click()
   await page.getByLabel('账号', { exact: true }).fill(name)
   await page.getByLabel('密码', { exact: true }).fill(password)
-  await page.getByLabel('注册身份').selectOption('DOCTOR')
+  await page.getByLabel('确认密码', { exact: true }).fill(password)
+  await page.getByRole('radio', { name: /医生端/ }).check()
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
 }
@@ -71,6 +72,7 @@ test('管理员维护目录并发布排班，患者查询有效资源，医生�
   const patient = `patient-${crypto.randomUUID()}`
   await page.getByLabel('账号', { exact: true }).fill(patient)
   await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByLabel('确认密码', { exact: true }).fill(password)
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
   await login(page, patient)
