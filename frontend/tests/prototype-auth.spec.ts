@@ -21,6 +21,10 @@ for (const variant of ['A', 'B', 'C']) {
     for (const role of ['患者端', '医生端', '管理员端']) {
       await page.getByRole('tab', { name: new RegExp(role) }).click()
       await expect(page.getByRole('tab', { name: new RegExp(role) })).toHaveAttribute('aria-selected', 'true')
+      if (role === '管理员端') {
+        await expect(page.getByRole('tab', { name: /^注册/ })).toHaveCount(0)
+        await expect(page.getByText('管理员账号只能由管理员在后台创建。')).toBeVisible()
+      }
       await page.getByRole('button', { name: '填入演示账号' }).click()
       await page.getByRole('button', { name: '显示密码', exact: true }).click()
       await expect(page.getByLabel('密码', { exact: true })).toHaveAttribute('type', 'text')
@@ -35,6 +39,13 @@ for (const variant of ['A', 'B', 'C']) {
       await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
     }
 
+    await page.getByRole('tab', { name: /医生端/ }).click()
+    await page.getByRole('tab', { name: /^注册/ }).click()
+    await page.getByRole('tab', { name: /管理员端/ }).click()
+    await expect(page.getByRole('tab', { name: /^注册/ })).toHaveCount(0)
+    await expect(page.getByLabel('确认密码', { exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '创建演示账户', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
     await page.getByRole('tab', { name: /医生端/ }).click()
     await page.getByLabel('账号', { exact: true }).fill('')
     await page.getByRole('button', { name: '进入演示工作台' }).click()
@@ -67,12 +78,15 @@ for (const variant of ['A', 'B', 'C']) {
     await expect(page.getByLabel('账号', { exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.getByRole('tab', { name: /管理员端/ }).click()
+    await expect(page.getByRole('tab', { name: /^注册/ })).toHaveCount(0)
+    await expect(page.getByText('管理员账号只能由管理员在后台创建。')).toBeVisible()
     await page.getByRole('button', { name: '填入演示账号' }).click()
     await page.getByRole('button', { name: '换一张验证码' }).click()
     await page.screenshot({ path: testInfo.outputPath(`variant-${variant}-mobile.png`), fullPage: true })
     await page.getByRole('button', { name: '进入演示工作台' }).click()
     await expect(page.getByRole('heading', { name: '管理员端工作台已打开' })).toBeVisible()
     await page.getByRole('button', { name: '退出体验' }).click()
+    await page.getByRole('tab', { name: /患者端/ }).click()
     await page.getByRole('tab', { name: /^注册/ }).click()
     await expect(page.getByLabel('确认密码', { exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)

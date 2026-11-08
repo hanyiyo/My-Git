@@ -54,9 +54,11 @@ function chooseRole(next: Role) {
   role.value = next
   status.value = ''
   submitted.value = false
+  if (next === 'ADMIN') switchMode('login')
 }
 
 function switchMode(next: Mode) {
+  if (next === 'register' && role.value === 'ADMIN') return
   mode.value = next
   status.value = ''
   submitted.value = false
@@ -127,12 +129,13 @@ const previewState = computed(() => `${selectedRole.value.label} · ${mode.value
       <form v-else class="auth-panel" :class="{ 'is-register': mode === 'register' }" @submit.prevent="submit">
         <div class="auth-tabs" role="tablist" aria-label="登录或注册">
           <button type="button" :class="{ active: mode === 'login' }" role="tab" :aria-selected="mode === 'login'" @click="switchMode('login')">登录<span class="tab-description">已有演示账户</span></button>
-          <button type="button" :class="{ active: mode === 'register' }" role="tab" :aria-selected="mode === 'register'" @click="switchMode('register')">注册<span class="tab-description">创建新的账户</span></button>
+          <button v-if="role !== 'ADMIN'" type="button" :class="{ active: mode === 'register' }" role="tab" :aria-selected="mode === 'register'" @click="switchMode('register')">注册<span class="tab-description">创建新的账户</span></button>
         </div>
         <div class="form-heading">
           <span class="section-kicker">STEP 02 · {{ selectedRole.label }}</span>
           <h3>{{ mode === 'login' ? '欢迎回来' : '创建演示账户' }}</h3>
           <p>{{ mode === 'login' ? '登录你的账户，继续今天的健康服务。' : '填写账户信息，开启你的专属服务空间。' }}</p>
+          <p v-if="role === 'ADMIN'" class="admin-account-note">管理员账号只能由管理员在后台创建。</p>
           <button class="demo-link" type="button" @click="fillDemo">填入演示账号 <span aria-hidden="true">↗</span></button>
         </div>
         <p v-if="status" role="status" class="status-message" :class="{ positive: registered || submitted }">{{ status }}</p>
@@ -190,6 +193,7 @@ const previewState = computed(() => `${selectedRole.value.label} · ${mode.value
 .variant-a .ghost-button{background:#edf3fc;color:#264e7f}
 .variant-a .prototype-caption{color:#8493a8}
 .variant-a button:focus-visible,.variant-a input:focus-visible{outline-color:#7499d0}
+.form-heading .admin-account-note{margin-top:13px;padding:10px 12px;background:#f0f4fa;border-left:3px solid #7895bb;border-radius:4px;color:#536f91;font-size:11px;line-height:1.8}
 /* B puts mode selection in two explicit entry cards; the captcha image leads its row. */
 .variant-b{--ink:#3b4436}.variant-b .role-options{gap:0}.variant-b .role-option{padding:19px 2px;border:0;border-bottom:1px solid #d9dbcc;border-radius:0;background:none;color:#8a9179;gap:16px}.variant-b .role-option.active{color:#3c5032;border-bottom:1px solid #a1b18c;background:none}.variant-b .role-number{display:block;font-size:10px;align-self:flex-start;padding-top:2px;opacity:.6}.variant-b .role-avatar{display:none}.variant-b .role-text strong{font-size:16px;font-weight:500}.variant-b .role-text small{font-size:10px;margin-top:1px}.variant-b .role-check{font-size:24px;color:#a1ab8a}.variant-b .active .role-check{color:#547043}.variant-b .auth-tabs{background:none;gap:11px;padding:0;border-radius:0;margin-bottom:26px}.variant-b .auth-tabs>button{border:1px solid #e2e3d8;text-align:left;padding:12px 16px;border-radius:3px;background:#fff;font-size:14px;color:#8f9687}.variant-b .auth-tabs>button.active{border-color:#758564;background:#f6f7f0;box-shadow:none;color:#455d34}.variant-b .tab-description{display:block;font-size:11px;line-height:1.6;color:#9aa18f;font-weight:400;margin-top:5px}.variant-b .form-heading h3{font-size:25px;font-weight:500}.variant-b .form-heading{margin-bottom:20px}.variant-b .form-heading>.section-kicker{display:none}.variant-b .auth-panel input{border-radius:3px;background:#fff;border-color:#dddfd3}.variant-b .auth-panel label{font-weight:450}.variant-b .primary-action{border-radius:3px;background:#536542}.variant-b .demo-link{color:#7b865e}.variant-b .captcha-line{grid-template-columns:140px minmax(0,1fr)}.variant-b .challenge-button{grid-row:1;grid-column:1;gap:4px}.variant-b .challenge-button img{width:100px}.variant-b #prototype-captcha{grid-column:2;grid-row:1}.variant-b .captcha-panel{border-top:1px solid #edeee6;padding-top:18px}.variant-b .captcha-head>span{background:#f1f2e8}.variant-b .success-panel{min-height:470px}.variant-b .section-kicker{color:#8d977d}
 /* C separates credentials from the captcha; registration uses a two-column field grid. */
