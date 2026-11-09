@@ -6,6 +6,7 @@ import cn.medical.booking.BookingService;
 import cn.medical.catalog.CatalogMapper;
 import cn.medical.catalog.CatalogService;
 import cn.medical.clinical.ClinicalService;
+import cn.medical.clinical.ClinicalAttachmentValidator;
 import cn.medical.identity.ApiFailure;
 import cn.medical.governance.AuditService;
 import cn.medical.governance.ReviewPolicyService;
@@ -14,6 +15,7 @@ import java.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -33,6 +35,8 @@ public class AiService {
         String errorCode, int versionNo, boolean stale, Analysis analysis, List<DoctorRecommendation> recommendations,
         String materialId, int materialVersion, String consentId, String modelVersion, String promptVersion) {}
     public record BusinessAnswer(String mode, String answer, List<String> sources) {}
+    public record TriageAnswer(String mode, String answer, String departmentHint, boolean imageReceived, List<String> sources) {}
+    public record ConversationSummary(Analysis analysis, int messageCount, String provider) {}
     public record ConsentInput(boolean accepted, String provider, String purpose, String scope, String symptomText) {}
     public record AnalyzeInput(String consentId, String symptomText, String idempotencyKey) {}
     private record Prepared(AiMapper.Task task, boolean created) {}
@@ -233,9 +237,9 @@ public class AiService {
         if (question == null || question.isBlank() || question.length() > 500) throw new ApiFailure(400, "INVALID_INPUT", "咨询内容不能为空且不超过500字");
         String q = question.trim().toLowerCase();
         if (q.matches("(?s).*(胸痛|呼吸困难|意识不清|自伤|大出血).*"))
-            return new BusinessAnswer("PRECONSULTATION_REQUIRED", "出现高风险信号，请立即联系急救或人工医疗服务。医疗文本分析需要另行确认预问诊授权。", List.of());
+            return new BusinessAnswer("TRIAGE_ASSISTANCE", "出现高风险信号，请立即联系急救或人工医疗服务。导诊助手不能提供诊断或处方。", List.of());
         if (q.matches("(?s).*(症状|报告|检查结果|诊断|处方|用药|疼|痛|发热|发烧|咳嗽|乏力|恶心|头晕|我最近|我感觉).*"))
-            return new BusinessAnswer("PRECONSULTATION_REQUIRED", "个人症状和报告需进入预问诊并确认本次文本授权，也可直接自行挂号或联系医生。", List.of());
+            return new BusinessAnswer("TRIAGE_ASSISTANCE", "我可以根据文字协助查找科室，但不能提供诊断或处方；你也可以直接自行挂号或联系医生。", List.of());
         if (q.matches("(?s).*(最好|排名|最厉害).*"))
             return new BusinessAnswer("RESTRICTED", "无法提供医生主观排名，请按真实科室和有效排班选择服务。", List.of());
         var hospital = catalog.hospital();
@@ -246,6 +250,28 @@ public class AiService {
         for (var department : catalog.departments(false)) if (q.contains(department.name().toLowerCase()))
             return new BusinessAnswer("LOCAL_FACTS", department.name() + "：" + department.description(), List.of("department:" + department.id()));
         throw new ApiFailure(422, "BUSINESS_TOPIC_UNSUPPORTED", "我只能回答医院地址、服务流程和科室职责等院内业务信息");
+    }
+
+    @Transactional(readOnly = true)
+    public TriageAnswer triage(String question, MultipartFile image) {
+        validateText(question);
+        boolean imageReceived = image != null && !image.isEmpty();
+        if (imageReceived) ClinicalAttachmentValidator.validate(image);
+        var analysis = provider.analyze(question, catalog.departments(false).stream().map(CatalogMapper.Department::name).toList());
+        return new TriageAnswer("TRIAGE_ASSISTANCE", analysis.safetyNotice() + " " + analysis.summary(),
+            analysis.departmentHint(), imageReceived, List.of("configured-departments"));
+    }
+
+    @Transactional(readOnly = true)
+    public ConversationSummary summarizeConversation(String doctor, String id) {
+        var view = clinical.doctorView(doctor, id);
+        if (view.materials().stream().noneMatch(ClinicalService.MaterialView::shared))
+            throw new ApiFailure(403, "SHARING_REQUIRED", "患者尚未授权共享医疗材料");
+        var text = view.messages().stream().map(message -> message.authorRole() + "：" + message.body()).reduce("", (a,b) -> a + "\n" + b);
+        if (text.isBlank()) throw new ApiFailure(409, "NO_MESSAGES", "暂无可摘要的医患图文");
+        var analysis = provider.analyze(text, catalog.departments(false).stream().map(CatalogMapper.Department::name).toList());
+        audit.record(doctor, "DOCTOR_CONVERSATION_SUMMARIZED", "APPOINTMENT", id, "根据已授权医患图文生成医生可见摘要");
+        return new ConversationSummary(analysis, view.messages().size(), provider.name());
     }
 
     private ResultView resultView(AiMapper.Task task, ClinicalService.ClinicalView view) {

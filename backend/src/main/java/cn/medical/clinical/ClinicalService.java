@@ -6,6 +6,7 @@ import cn.medical.reception.ReceptionService;
 import cn.medical.governance.ReviewPolicyService;
 import cn.medical.governance.AuditService;
 import cn.medical.delivery.DeliveryService;
+import cn.medical.pharmacy.PharmacyService;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -36,13 +37,15 @@ public class ClinicalService {
     private final ReviewPolicyService policy;
     private final AuditService audit;
     private final DeliveryService delivery;
+    private final PharmacyService pharmacy;
 
     public ClinicalService(ClinicalMapper clinical, ReceptionService reception, BookingService booking, Clock clock,
-        ClinicalFileStore files, ReviewPolicyService policy, AuditService audit, DeliveryService delivery) {
+        ClinicalFileStore files, ReviewPolicyService policy, AuditService audit, DeliveryService delivery, PharmacyService pharmacy) {
         this.clinical = clinical; this.reception = reception; this.booking = booking; this.clock = clock;
         this.files = files;
         this.policy = policy; this.audit = audit;
         this.delivery = delivery;
+        this.pharmacy = pharmacy;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -105,7 +108,11 @@ public class ClinicalService {
         booking.lockCareScope(id);
         var appointment = role.equals("PATIENT") ? requirePatient(actor, id) : requireDoctor(actor, id);
         var queue = reception.queueForAppointment(id);
-        if (!appointment.state().equals("CONFIRMED") || queue == null || !queue.state().equals("IN_CONSULTATION")) throw new ApiFailure(409, "CONSULTATION_NOT_OPEN", "叫号并开始接诊后才能发送图文消息");
+        if (!appointment.state().equals("CONFIRMED") || queue == null
+            || (role.equals("PATIENT") && !Set.of("WAITING", "CALLED", "IN_CONSULTATION").contains(queue.state()))
+            || (role.equals("DOCTOR") && !queue.state().equals("IN_CONSULTATION")))
+            throw new ApiFailure(409, "CONSULTATION_NOT_OPEN", role.equals("PATIENT")
+                ? "签到后即可留言，医生叫号后才能正式接诊" : "叫号并开始接诊后才能回复图文消息");
         if (body == null || body.isBlank() || body.length() > 10000) throw new ApiFailure(400, "INVALID_INPUT", "消息不能为空且不能超过10000字");
         ensureConsultation(id, clock.millis());
         String messageId=UUID.randomUUID().toString();
@@ -116,11 +123,17 @@ public class ClinicalService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ClinicalView submitResult(String doctor, String id, String body) {
+        return submitResult(doctor, id, body, List.of());
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ClinicalView submitResult(String doctor, String id, String body, List<PharmacyService.PrescriptionLineInput> prescriptions) {
         booking.lockCareScope(id);
         var appointment = requireDoctor(doctor, id);
         var queue = reception.queueForAppointment(id);
         if (queue == null || !queue.state().equals("IN_CONSULTATION")) throw new ApiFailure(409, "ENCOUNTER_NOT_OPEN", "只有接诊中的预约可以提交结果");
         if (body == null || body.isBlank() || body.length() > 20000) throw new ApiFailure(400, "INVALID_INPUT", "问诊结果不能为空且不能超过20000字");
+        pharmacy.reservePrescription(doctor, id, prescriptions);
         long now = clock.millis(); ensureConsultation(id, now);
         String type = appointment.serviceMode().equals("ONLINE") ? "ONLINE_CHAT" : "OFFLINE_RESULT";
         clinical.insertResult(new ClinicalMapper.Result(UUID.randomUUID().toString(), id, clinical.nextResultVersion(id) + 1, doctor, type, body.trim(), now));

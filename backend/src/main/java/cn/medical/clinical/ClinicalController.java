@@ -8,6 +8,7 @@ import org.springframework.http.*;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import cn.medical.pharmacy.PharmacyService;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -15,7 +16,7 @@ public class ClinicalController {
     private final ClinicalService clinical;
     public ClinicalController(ClinicalService clinical) { this.clinical = clinical; }
     public record MessageInput(@NotBlank @Size(max=10000) String body) {}
-    public record ResultInput(@NotBlank @Size(max=20000) String body) {}
+    public record ResultInput(@NotBlank @Size(max=20000) String body, List<PharmacyService.PrescriptionLineInput> prescriptions) {}
     public record CorrectionInput(@NotBlank @Size(max=500) String reason, @NotBlank @Size(max=20000) String body) {}
 
     @GetMapping("/patient/appointments/{id}/clinical")
@@ -36,7 +37,7 @@ public class ClinicalController {
     @PostMapping("/doctor/clinical/{id}/messages")
     ClinicalService.ClinicalView doctorMessage(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody MessageInput input) { return clinical.message(auth.getName(), id, "DOCTOR", input.body()); }
     @PostMapping("/doctor/clinical/{id}/result")
-    ClinicalService.ClinicalView result(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody ResultInput input) { return clinical.submitResult(auth.getName(), id, input.body()); }
+    ClinicalService.ClinicalView result(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody ResultInput input) { return clinical.submitResult(auth.getName(), id, input.body(), input.prescriptions() == null ? List.of() : input.prescriptions()); }
     @PostMapping("/doctor/clinical/{id}/corrections")
     ClinicalService.ClinicalView correction(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody CorrectionInput input) { return clinical.correction(auth.getName(), id, input.reason(), input.body()); }
     @GetMapping("/doctor/clinical/attachments/{id}")

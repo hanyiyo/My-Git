@@ -5,6 +5,7 @@ import jakarta.validation.constraints.*;
 import java.util.List;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -58,6 +59,14 @@ public class AiController {
     List<AiService.ResultView> doctorResults(JwtAuthenticationToken auth, @PathVariable String id) {
         return ai.doctorResults(auth.getName(), id);
     }
+    @PostMapping("/doctor/clinical/{id}/ai/summarize")
+    AiService.ConversationSummary summarize(JwtAuthenticationToken auth, @PathVariable String id) {
+        return ai.summarizeConversation(auth.getName(), id);
+    }
     @GetMapping("/assistant/business")
     AiService.BusinessAnswer business(@RequestParam String question) { return ai.business(question); }
+    @PostMapping(value="/assistant/triage", consumes="multipart/form-data")
+    AiService.TriageAnswer triage(@RequestParam String question, @RequestPart(name="image", required=false) MultipartFile image) {
+        return ai.triage(question, image);
+    }
 }

@@ -1,5 +1,7 @@
 # 智能医疗问诊预约系统架构草案
 
+> R3修订：本文件为历史MVP基线；与[三端交互与业务修订规格](three-end-requirements.md)冲突处，以新规格及[ADR-0015](../adr/0015-three-end-requirements.md)为准。实现状态见验收记录，历史访谈保留。
+
 状态：待用户整体确认。业务依据为 Q1–Q66 及后续 R1/R2（Redis、登录图形验证码）修订；本文将已确认规则整理为可实现的模块、数据和流程方案，表结构、枚举及技术默认值属于本次提案。当前不编写业务代码。
 
 阅读入口：[当前 MVP](current-mvp.md)、[接诊规则](reception-rules.md)、[技术基础](technical-foundation.md)、[术语表](../../GLOSSARY.md)。冲突时以较后轮次的用户确认规则为准，早期 ADR 的替代说明应一并阅读。

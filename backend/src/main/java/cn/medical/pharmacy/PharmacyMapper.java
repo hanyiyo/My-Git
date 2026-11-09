@@ -22,6 +22,7 @@ public interface PharmacyMapper {
  @Select("SELECT id,order_id,medicine_id,medicine_name,medicine_spec,fee_minor,quantity FROM pharmacy_order_line WHERE order_id=#{orderId} ORDER BY id") List<Line> lines(String orderId);
  @Select("SELECT COALESCE(SUM(l.quantity),0) FROM pharmacy_order_line l JOIN pharmacy_order o ON o.id=l.order_id WHERE l.medicine_id=#{id} AND o.state='PENDING_PAYMENT'") int held(String id);
  @Select("SELECT COUNT(*) FROM pharmacy_order_line WHERE medicine_id=#{id}") int history(String id);
+ @Select("SELECT DISTINCT o.id,o.appointment_id,o.patient_id,o.doctor_id,o.state,o.total_minor,o.expires_at,o.medicine_payment_hours,o.created_at,o.paid_at FROM pharmacy_order o JOIN pharmacy_order_line l ON l.order_id=o.id WHERE l.medicine_id=#{id} ORDER BY o.created_at DESC") List<Order> ordersForMedicine(String id);
  @Update("UPDATE pharmacy_order SET state='PAID',paid_at=#{at} WHERE id=#{id} AND state='PENDING_PAYMENT' AND expires_at>#{at}") int markPaid(@Param("id") String id,@Param("at") long at);
  @Update("UPDATE pharmacy_order SET state='EXPIRED' WHERE id=#{id} AND state='PENDING_PAYMENT' AND expires_at<=#{at}") int expire(@Param("id") String id,@Param("at") long at);
  @Update("UPDATE pharmacy_medicine SET stock=stock+#{quantity},updated_at=#{at} WHERE id=#{id}") int releaseStock(@Param("id") String id,@Param("quantity") int quantity,@Param("at") long at);

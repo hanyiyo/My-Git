@@ -1,5 +1,7 @@
 # 排班、接诊与异常处理规则
 
+> R3修订：本文件为历史MVP基线；与[三端交互与业务修订规格](three-end-requirements.md)冲突处，以新规格及[ADR-0015](../adr/0015-three-end-requirements.md)为准。实现状态见验收记录，历史访谈保留。
+
 Q37–Q66 已确认。Q44、Q49–Q51 按用户修订；Q40 重复回答按同一次确认处理。范围入口见 [当前 MVP](current-mvp.md)，状态边界见 [ADR-0012](../adr/0012-separate-booking-payment-and-encounter.md)。
 
 ## Q37：排班互斥与现场号源

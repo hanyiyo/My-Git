@@ -168,11 +168,11 @@ class BookingHttpTest extends HttpFixture {
         assertThat(repeated.body()).isEqualTo(created.body());
         var changed = patient.call("POST", "/api/v1/patient/appointments", command(second, key));
         assertThat(changed.status()).isEqualTo(409);
-        assertThat(changed.body().path("error").path("code").asText()).isEqualTo("IDEMPOTENCY_CONFLICT");
+        assertThat(changed.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_SOURCE_CONFLICT");
         var changedSource = patient.call("POST", "/api/v1/patient/appointments",
             Map.of("scheduleId", first.id(), "source", "WALK_IN", "idempotencyKey", key));
         assertThat(changedSource.status()).isEqualTo(409);
-        assertThat(changedSource.body().path("error").path("code").asText()).isEqualTo("IDEMPOTENCY_CONFLICT");
+        assertThat(changedSource.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_SOURCE_CONFLICT");
         var available = patient.call("GET", "/api/v1/catalog/schedules?doctorId=" + first.doctorId(), null);
         assertThat(available.body().get(0).path("availableSlots").asInt()).isEqualTo(1);
     }
@@ -206,7 +206,7 @@ class BookingHttpTest extends HttpFixture {
         clock.now = Instant.ofEpochMilli(offline.startsAt());
         var advance = rejected.call("POST", "/api/v1/patient/appointments", command(offline, identifier()));
         assertThat(advance.status()).isEqualTo(409);
-        assertThat(advance.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_CLOSED");
+        assertThat(advance.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_SOURCE_CONFLICT");
         var opening = atOpening.call("POST", "/api/v1/patient/appointments",
             Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier()));
         assertThat(opening.status()).isEqualTo(201);
@@ -542,6 +542,7 @@ class BookingHttpTest extends HttpFixture {
         var doctor = new Browser(port); assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
         String queue = "/api/v1/doctor/reception/";
         assertThat(doctor.call("POST", queue + restoredId + "/call", null).status()).isEqualTo(200);
+        clock.now = clock.now.plus(Duration.ofMinutes(5));
         assertThat(doctor.call("POST", queue + restoredId + "/miss", null).status()).isEqualTo(200);
         assertThat(restored.call("POST", root + "/" + restoredId + "/restore-queue", null).status()).isEqualTo(200);
         String walkInId = walkIn.call("POST", root, Map.of("scheduleId", schedule.id(), "source", "WALK_IN", "idempotencyKey", identifier())).body().path("id").asText();
@@ -557,6 +558,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(entries.findValuesAsText("appointmentId")).containsExactly(advanceId, walkInId, laterId, restoredId);
         assertThat(doctor.call("POST", queue + restoredId + "/call", null).body().path("error").path("code").asText()).isEqualTo("QUEUE_ORDER");
         assertThat(doctor.call("POST", queue + advanceId + "/call", null).status()).isEqualTo(200);
+        clock.now = clock.now.plus(Duration.ofMinutes(5));
         assertThat(doctor.call("POST", queue + advanceId + "/miss", null).status()).isEqualTo(200);
         clock.now = Instant.ofEpochMilli(schedule.endsAt());
         assertThat(advance.call("POST", root + "/" + advanceId + "/restore-queue", null).body().path("error").path("code").asText()).isEqualTo("SESSION_ENDED");
@@ -602,7 +604,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(patient.call("GET", "/api/v1/patient/appointments", null).body().get(0).path("reception").path("state").asText()).isEqualTo("COMPLETED");
     }
 
-    @Test void missedPatientCanRestoreQueueOnlyOnceAsThirdGroup() throws Exception {
+    @Test void missedPatientCanRestoreQueueOnlyOnceToOriginalGroup() throws Exception {
         var schedule = published("ONLINE", "AM", 1); var patient = patient();
         var created = patient.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));
         String id = created.body().path("id").asText(); String path = "/api/v1/patient/appointments/" + id;
@@ -612,15 +614,17 @@ class BookingHttpTest extends HttpFixture {
         clock.now = Instant.ofEpochMilli(schedule.startsAt());
         var doctor = new Browser(port); assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/call", null).status()).isEqualTo(200);
+        clock.now = clock.now.plus(Duration.ofMinutes(5));
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/miss", null).status()).isEqualTo(200);
         clock.now = Instant.ofEpochMilli(schedule.startsAt());
         var restored = patient.call("POST", path + "/restore-queue", null);
         assertThat(restored.status()).isEqualTo(200);
         assertThat(restored.body().path("state").asText()).isEqualTo("WAITING");
-        assertThat(restored.body().path("queueGroup").asInt()).isEqualTo(3);
+        assertThat(restored.body().path("queueGroup").asInt()).isEqualTo(1);
         assertThat(restored.body().path("restorationCount").asInt()).isEqualTo(1);
         assertThat(patient.call("POST", path + "/restore-queue", null).body()).isEqualTo(restored.body());
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/call", null).status()).isEqualTo(200);
+        clock.now = clock.now.plus(Duration.ofMinutes(5));
         assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + id + "/miss", null).status()).isEqualTo(200);
         assertThat(patient.call("POST", path + "/restore-queue", null).status()).isEqualTo(409);
     }

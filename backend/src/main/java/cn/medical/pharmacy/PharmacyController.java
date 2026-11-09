@@ -9,7 +9,9 @@ import org.springframework.web.bind.annotation.*;
  private final PharmacyService service; public PharmacyController(PharmacyService service){this.service=service;}
  public record MedicineInput(@NotBlank String name,@NotBlank String spec,@Min(0) long feeMinor,@Min(0) int stock,@Min(0) int threshold,boolean active){}
  public record PrescriptionInput(@NotEmpty List<Line> lines){} public record Line(@NotBlank String medicineId,@Min(1) int quantity){}
- @GetMapping("/admin/pharmacy/medicines") List<PharmacyMapper.Medicine> medicines(){return service.listMedicines();}`r`n @GetMapping("/doctor/pharmacy/medicines") List<PharmacyMapper.Medicine> doctorMedicines(){return service.listMedicines().stream().filter(PharmacyMapper.Medicine::active).toList();}
+ @GetMapping("/admin/pharmacy/medicines") List<PharmacyMapper.Medicine> medicines(){return service.listMedicines();}
+ @GetMapping("/doctor/pharmacy/medicines") List<PharmacyMapper.Medicine> doctorMedicines(){return service.listMedicines().stream().filter(PharmacyMapper.Medicine::active).toList();}
+ @GetMapping("/admin/pharmacy/medicines/{id}/history") List<PharmacyService.OrderView> history(@PathVariable String id){return service.medicineHistory(id);}
  @PostMapping("/admin/pharmacy/medicines") @ResponseStatus(HttpStatus.CREATED) PharmacyMapper.Medicine create(@Valid @RequestBody MedicineInput i){return service.saveMedicine(null,i.name(),i.spec(),i.feeMinor(),i.stock(),i.threshold(),i.active());}
  @PutMapping("/admin/pharmacy/medicines/{id}") PharmacyMapper.Medicine update(@PathVariable String id,@Valid @RequestBody MedicineInput i){return service.saveMedicine(id,i.name(),i.spec(),i.feeMinor(),i.stock(),i.threshold(),i.active());}
  @DeleteMapping("/admin/pharmacy/medicines/{id}") void delete(@PathVariable String id){service.deleteMedicine(id);}

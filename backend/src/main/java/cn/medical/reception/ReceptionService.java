@@ -8,6 +8,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import cn.medical.settings.RulesService;
 
 @Service
 public class ReceptionService {
@@ -17,16 +18,17 @@ public class ReceptionService {
     private final DeliveryService delivery;
     private final Clock clock;
     private final ReceptionResponseObserver responseObserver;
-    public ReceptionService(ReceptionMapper reception, Clock clock) { this(reception, null, clock, reception::hasPatientReplyAfter); }
+    private final RulesService rules;
+    public ReceptionService(ReceptionMapper reception, Clock clock) { this(reception, null, clock, reception::hasPatientReplyAfter, null); }
     @Autowired
-    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock) { this(reception, delivery, clock, reception::hasPatientReplyAfter); }
-    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock, ReceptionResponseObserver responseObserver) { this.reception = reception; this.delivery = delivery; this.clock = clock; this.responseObserver = responseObserver; }
+    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock, RulesService rules) { this(reception, delivery, clock, reception::hasPatientReplyAfter, rules); }
+    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock, ReceptionResponseObserver responseObserver) { this(reception, delivery, clock, responseObserver, null); }
+    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock, ReceptionResponseObserver responseObserver, RulesService rules) { this.reception = reception; this.delivery = delivery; this.clock = clock; this.responseObserver = responseObserver; this.rules = rules; }
 
     @Transactional
     public Summary checkIn(String patient, String id) {
         var appointment = requirePatientAppointment(patient, id);
         if (!appointment.state().equals("CONFIRMED")) throw new ApiFailure(409, "CHECK_IN_NOT_ALLOWED", "只有已确认预约可以签到");
-        if (reception.substitutionPending(id)) throw new ApiFailure(409, "SUBSTITUTION_PENDING", "请先接受替诊安排");
         long now = clock.millis();
         ensureCheckInWindow(appointment, now);
         var current = reception.lockedQueue(id);
@@ -117,7 +119,8 @@ public class ReceptionService {
         long now = clock.millis();
         if (action.equals("start") && entry.state().equals("IN_CONSULTATION")) return entry;
         if (action.equals("miss") && appointment != null && appointment.serviceMode().equals("ONLINE")) {
-            if (entry.calledAt() == null || now < entry.calledAt() + 5 * 60_000L || responseObserver.hasPatientReplyAfter(id, entry.calledAt()))
+            long wait = rules == null ? 5 : rules.current().missedWaitMinutes();
+            if (entry.calledAt() == null || now < entry.calledAt() + wait * 60_000L || responseObserver.hasPatientReplyAfter(id, entry.calledAt()))
                 throw new ApiFailure(409, "CALL_WAITING", "线上叫号需等待5分钟且患者未回复后才能过号");
         }
         if (appointment == null || now < appointment.startsAt())
@@ -147,7 +150,9 @@ public class ReceptionService {
         return entry;
     }
     private void ensureCheckInWindow(ReceptionMapper.Appointment appointment, long now) {
-        if (now < appointment.startsAt() - 30 * 60_000L || now >= appointment.endsAt() - 15 * 60_000L)
+        long before = rules == null ? 30 : rules.current().checkInBeforeMinutes();
+        long cutoff = rules == null ? 15 : rules.current().checkInCutoffMinutes();
+        if (now < appointment.startsAt() - before * 60_000L || now >= appointment.endsAt() - cutoff * 60_000L)
             throw new ApiFailure(409, "CHECK_IN_CLOSED", "当前不在签到时间窗口内");
     }
     private void ensureReceptionWindow(ReceptionMapper.Appointment appointment, long now) {

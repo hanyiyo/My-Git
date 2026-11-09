@@ -3,6 +3,7 @@ package cn.medical.pharmacy;
 import cn.medical.booking.BookingService;
 import cn.medical.identity.ApiFailure;
 import cn.medical.reception.ReceptionService;
+import cn.medical.settings.RulesService;
 import java.time.Clock;
 import java.util.*;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,10 +16,10 @@ public class PharmacyService {
  public record MedicineView(PharmacyMapper.Medicine medicine) {}
  public record LineView(String medicineId,String name,String spec,long feeMinor,int quantity) {}
  public record OrderView(String id,String appointmentId,String patientId,String doctorId,String state,long totalMinor,long expiresAt,int medicinePaymentHours,long createdAt,Long paidAt,List<LineView> lines) {}
- private final PharmacyMapper pharmacy; private final BookingService booking; private final ReceptionService reception; private final Clock clock;
- @Value("${medical.medicine-payment-hours:24}") private int configuredHours;
- public PharmacyService(PharmacyMapper pharmacy,BookingService booking,ReceptionService reception,Clock clock){this.pharmacy=pharmacy;this.booking=booking;this.reception=reception;this.clock=clock;}
+  private final PharmacyMapper pharmacy; private final BookingService booking; private final ReceptionService reception; private final Clock clock; private final RulesService rules;
+  public PharmacyService(PharmacyMapper pharmacy,BookingService booking,ReceptionService reception,Clock clock,RulesService rules){this.pharmacy=pharmacy;this.booking=booking;this.reception=reception;this.clock=clock;this.rules=rules;}
  @Transactional(readOnly=true) public List<PharmacyMapper.Medicine> listMedicines(){return pharmacy.medicines();}
+  @Transactional(readOnly=true) public List<OrderView> medicineHistory(String medicineId){ if(pharmacy.medicine(medicineId)==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在"); return pharmacy.ordersForMedicine(medicineId).stream().map(this::view).toList(); }
  @Transactional public PharmacyMapper.Medicine saveMedicine(String id,String name,String spec,long feeMinor,int stock,int threshold,boolean active){
    if(name==null||name.isBlank()||spec==null||spec.isBlank()||feeMinor<0||stock<0||threshold<0) throw new ApiFailure(400,"INVALID_INPUT","药品字段无效");
    long now=clock.millis(); var m=new PharmacyMapper.Medicine(id==null||id.isBlank()?UUID.randomUUID().toString():id,name.trim(),spec.trim(),feeMinor,stock,threshold,active,now,now);
@@ -33,8 +34,8 @@ public class PharmacyService {
    var existing=pharmacy.orderForAppointment(appointmentId); if(existing!=null) throw new ApiFailure(409,"PRESCRIPTION_EXISTS","本次问诊已经开具处方");
    var clean=new ArrayList<PrescriptionLineInput>(); for(var in:inputs){if(in==null||in.quantity()<=0) throw new ApiFailure(400,"INVALID_INPUT","药品数量必须为正数"); clean.add(in);}
    clean.sort(Comparator.comparing(PrescriptionLineInput::medicineId)); var lines=new ArrayList<PharmacyMapper.Line>(); long total=0;
-   for(var in:clean){var m=pharmacy.lockMedicine(in.medicineId()); if(m==null||!m.active()) throw new ApiFailure(409,"MEDICINE_UNAVAILABLE","药品不可用"); if(m.stock()<in.quantity()) throw new ApiFailure(409,"INSUFFICIENT_STOCK","药品库存不足"); if(pharmacy.consumeStock(m.id(),in.quantity(),clock.millis())!=1) throw new ApiFailure(409,"INSUFFICIENT_STOCK","药品库存不足"); total=Math.addExact(total,Math.multiplyExact(m.feeMinor(),in.quantity())); lines.add(new PharmacyMapper.Line("", "",m.id(),m.name(),m.spec(),m.feeMinor(),in.quantity())); }
-   int hours=Math.max(1,configuredHours); long now=clock.millis(); var order=new PharmacyMapper.Order(UUID.randomUUID().toString(),appointmentId,scope.patientId(),doctor,"PENDING_PAYMENT",total,now+hours*3600000L,hours,now,null); pharmacy.insertOrder(order); lines=lines.stream().map(l->new PharmacyMapper.Line(l.id(),order.id(),l.medicineId(),l.medicineName(),l.medicineSpec(),l.feeMinor(),l.quantity())).toList(); pharmacy.insertLines(lines); return view(order);
+    for(var in:clean){var m=pharmacy.lockMedicine(in.medicineId()); if(m==null||!m.active()) throw new ApiFailure(409,"MEDICINE_UNAVAILABLE","药品不可用"); if(m.stock()<in.quantity()) throw new ApiFailure(409,"INSUFFICIENT_STOCK","药品库存不足"); if(pharmacy.consumeStock(m.id(),in.quantity(),clock.millis())!=1) throw new ApiFailure(409,"INSUFFICIENT_STOCK","药品库存不足"); total=Math.addExact(total,Math.multiplyExact(m.feeMinor(),in.quantity())); lines.add(new PharmacyMapper.Line(0L, "",m.id(),m.name(),m.spec(),m.feeMinor(),in.quantity())); }
+    int hours=Math.max(1,rules.current().medicinePaymentHours()); long now=clock.millis(); var order=new PharmacyMapper.Order(UUID.randomUUID().toString(),appointmentId,scope.patientId(),doctor,"PENDING_PAYMENT",total,now+hours*3600000L,hours,now,null); pharmacy.insertOrder(order); var orderLines=lines.stream().map(l->new PharmacyMapper.Line(l.id(),order.id(),l.medicineId(),l.medicineName(),l.medicineSpec(),l.feeMinor(),l.quantity())).toList(); pharmacy.insertLines(orderLines); return view(order);
  }
  @Transactional(readOnly=true) public OrderView doctorPrescription(String doctor,String appointmentId){booking.lockCareScope(appointmentId);var scope=booking.careScope(appointmentId);if(scope==null||!scope.doctorId().equals(doctor))throw new ApiFailure(404,"NOT_FOUND","问诊不存在");var o=pharmacy.orderForAppointment(appointmentId);return o==null?null:view(o);}
  @Transactional public List<OrderView> patientOrders(String patient){return pharmacy.ordersForPatient(patient).stream().map(this::view).toList();}

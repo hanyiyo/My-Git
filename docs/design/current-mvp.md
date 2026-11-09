@@ -1,5 +1,7 @@
 # 当前 MVP 范围
 
+> R3修订：本文件为历史MVP基线；与[三端交互与业务修订规格](three-end-requirements.md)冲突处，以新规格及[ADR-0015](../adr/0015-three-end-requirements.md)为准。实现状态见验收记录，历史访谈保留。
+
 业务访谈 Q1–Q66 已确认，当前范围采用 Q31 起的后续修订；医生和患者固定上午/下午，默认 08:00–12:00、14:00–18:00，签到为开始前 30 分钟至结束前 15 分钟（不含截止时刻）。历史见 [MVP 决策](mvp-decisions.md)，完整目标见 [产品目标](product-vision.md)，行为见 [接诊规则](reception-rules.md)，技术汇总见 [架构草案](architecture.md)。整体架构待用户确认，不实现业务代码。
 
 ## 首版覆盖
