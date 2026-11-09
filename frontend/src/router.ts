@@ -16,6 +16,7 @@ import DoctorClinicalView from './views/DoctorClinicalView.vue'
 import BusinessAssistantView from './views/BusinessAssistantView.vue'
 import PatientSubstitutionView from './views/PatientSubstitutionView.vue'
 import LoginRegisterPrototypeView from './views/LoginRegisterPrototypeView.vue'
+import AdminPharmacyView from './views/AdminPharmacyView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
@@ -26,6 +27,8 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/admin/ai', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/admin/medical', component: AdminMedicalView, meta: { role: 'ADMIN' } },
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
+  { path: '/admin/pharmacy', component: AdminPharmacyView, meta: { role: 'ADMIN' } },
+  { path: '/admin/settings', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/patient/preconsultation', component: PatientPreconsultationView, meta: { role: 'PATIENT' } },
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders', component: PatientOrdersView, meta: { role: 'PATIENT' } },
@@ -35,6 +38,8 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/doctor/reception', component: DoctorReceptionView, meta: { role: 'DOCTOR' } },
   { path: '/doctor/clinical/:id', component: DoctorClinicalView, meta: { role: 'DOCTOR' } },
   ...['patient', 'doctor', 'admin'].map(role => ({ path: '/' + role, component: HomeView, meta: { role: role.toUpperCase() } }))
+  ,{ path: '/notifications', component: HomeView, meta: { role: 'PATIENT' } }
+  ,{ path: '/profile', component: HomeView, meta: { role: 'PATIENT' } }
 ] })
 router.beforeEach(async to => {
   const session = useSession(); await session.restore()
