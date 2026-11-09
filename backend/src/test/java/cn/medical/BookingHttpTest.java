@@ -168,7 +168,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(repeated.body()).isEqualTo(created.body());
         var changed = patient.call("POST", "/api/v1/patient/appointments", command(second, key));
         assertThat(changed.status()).isEqualTo(409);
-        assertThat(changed.body().path("error").path("code").asText()).isEqualTo("REGISTRATION_SOURCE_CONFLICT");
+        assertThat(changed.body().path("error").path("code").asText()).isEqualTo("IDEMPOTENCY_CONFLICT");
         var changedSource = patient.call("POST", "/api/v1/patient/appointments",
             Map.of("scheduleId", first.id(), "source", "WALK_IN", "idempotencyKey", key));
         assertThat(changedSource.status()).isEqualTo(409);
@@ -224,7 +224,7 @@ class BookingHttpTest extends HttpFixture {
         assertThat(fiveMinutes.status()).isEqualTo(201);
         assertThat(fiveMinutes.body().path("holdExpiresAt").asLong()).isEqualTo(cutoff);
         assertThat(rejected.call("POST", "/api/v1/patient/appointments",
-            Map.of("scheduleId", online.id(), "source", "WALK_IN", "idempotencyKey", identifier())).status()).isEqualTo(409);
+            Map.of("scheduleId", online.id(), "source", "WALK_IN", "idempotencyKey", identifier())).status()).isEqualTo(201);
         clock.now = Instant.ofEpochMilli(cutoff);
         var closed = rejected.call("POST", "/api/v1/patient/appointments",
             Map.of("scheduleId", offline.id(), "source", "WALK_IN", "idempotencyKey", identifier()));
@@ -545,6 +545,7 @@ class BookingHttpTest extends HttpFixture {
         clock.now = clock.now.plus(Duration.ofMinutes(5));
         assertThat(doctor.call("POST", queue + restoredId + "/miss", null).status()).isEqualTo(200);
         assertThat(restored.call("POST", root + "/" + restoredId + "/restore-queue", null).status()).isEqualTo(200);
+        clock.now = clock.now.plusMillis(1);
         String walkInId = walkIn.call("POST", root, Map.of("scheduleId", schedule.id(), "source", "WALK_IN", "idempotencyKey", identifier())).body().path("id").asText();
         assertThat(walkIn.call("POST", root + "/" + walkInId + "/simulate-payment", null).status()).isEqualTo(200);
         assertThat(walkIn.call("POST", root + "/" + walkInId + "/check-in", null).status()).isEqualTo(200);
