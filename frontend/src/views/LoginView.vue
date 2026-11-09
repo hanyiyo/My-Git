@@ -21,8 +21,8 @@ async function submit() {
     if (register.value) {
       await api('/auth/register', 'POST', { identifier: identifier.value, password: password.value, role: role.value })
       register.value = false
-      const ready = await refresh()
-      if (ready) message.value = '注册成功，请输入图形验证码后登录'
+      await refresh()
+      message.value = '注册成功，请输入图形验证码后登录'
     } else {
       await session.login(identifier.value, password.value, challengeId.value, captcha.value)
       await router.push('/' + session.account!.roles[0]!.toLowerCase())

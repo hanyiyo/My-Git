@@ -47,7 +47,7 @@ public interface GovernanceMapper {
     @Update("UPDATE suspension_request SET state=#{state}, substitute_doctor_id=#{substituteDoctorId}, updated_at=#{now} WHERE id=#{id}")
     int updateRequest(@Param("id") String id, @Param("state") String state, @Param("substituteDoctorId") String substituteDoctorId, @Param("now") long now);
 
-    @Insert("INSERT INTO substitution_choice (id, request_id, appointment_id, patient_id, original_doctor_id, substitute_doctor_id, state, deadline_at) VALUES (#{id}, #{requestId}, #{appointmentId}, #{patientId}, #{originalDoctorId}, #{substituteDoctorId}, 'PENDING', #{deadlineAt})")
+    @Insert("INSERT INTO substitution_choice (id, request_id, appointment_id, patient_id, original_doctor_id, substitute_doctor_id, state, deadline_at, responded_at, reason) VALUES (#{id}, #{requestId}, #{appointmentId}, #{patientId}, #{originalDoctorId}, #{substituteDoctorId}, #{state}, #{deadlineAt}, #{respondedAt}, #{reason})")
     void insertChoice(Choice choice);
     @Select("SELECT id, request_id, appointment_id, patient_id, original_doctor_id, substitute_doctor_id, state, deadline_at, responded_at, reason FROM substitution_choice WHERE id=#{id} AND patient_id=#{patientId} FOR UPDATE")
     Choice patientChoice(@Param("id") String id, @Param("patientId") String patientId);

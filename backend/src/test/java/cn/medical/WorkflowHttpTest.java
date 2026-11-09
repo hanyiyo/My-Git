@@ -361,7 +361,7 @@ class WorkflowHttpTest extends HttpFixture {
         var address = admin().call("GET", "/api/v1/assistant/business?question=" + java.net.URLEncoder.encode("医院地址在哪里", StandardCharsets.UTF_8), null).body();
         assertThat(address.path("answer").asText()).contains(hospital.path("address").asText());
         var symptom = admin().call("GET", "/api/v1/assistant/business?question=" + java.net.URLEncoder.encode("我胸痛，医院地址在哪", StandardCharsets.UTF_8), null).body();
-        assertThat(symptom.path("mode").asText()).isEqualTo("PRECONSULTATION_REQUIRED"); assertThat(symptom.path("answer").asText()).contains("急救");
+        assertThat(symptom.path("mode").asText()).isEqualTo("TRIAGE_ASSISTANCE"); assertThat(symptom.path("answer").asText()).contains("急救");
     }
     String submitSuspension(Scenario s) throws Exception {
         var reply = s.doctor().browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "虚构停诊理由"));
@@ -399,26 +399,18 @@ class WorkflowHttpTest extends HttpFixture {
         var stopped=deliveryMapper.byDedupe("clinic-suspended:"+id+":"+s.appointmentId());assertThat(stopped).isNotNull();assertThat(stopped.eventType()).isEqualTo("CLINIC_SUSPENDED");
         assertThat(deliveryMapper.byDedupe("appointment-cancelled:"+s.appointmentId()+":CLINIC_SUSPENSION")).isNotNull();
     }
-    @Test void substitutionRequiresPatientChoiceRetainsSlotAndRevokesOriginalDoctor() throws Exception {
+    @Test void substitutionApprovalMigratesOrderAndPatientMayCancelFromOrders() throws Exception {
         var s = scenario("ONLINE"); var head = doctor(s.departmentId()); var substitute = doctor(s.departmentId());
         assertThat(materials(s.patient().browser(), s.appointmentId(), true, "替诊共享材料").status()).isEqualTo(200);
         approveSubstitution(s, head, substitute);
         assertThat(s.patient().browser().call("GET","/api/v1/notifications/unread",null).body().asInt()).isGreaterThanOrEqualTo(2);
-        deliveryService.retry();assertThat(s.patient().browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTION_PENDING");
+        deliveryService.retry();assertThat(s.patient().browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTION_MIGRATED");
         assertThat(substitute.browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTE_INVITED");
-        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "禁止叠加变更")).status()).isEqualTo(409);
         var ordersBefore = s.patient().browser().call("GET", "/api/v1/patient/appointments", null).body().get(0);
-        assertThat(ordersBefore.path("substitutionPending").asBoolean()).isTrue();
-        assertThat(ordersBefore.path("doctorName").asText()).isEqualTo("虚构工作流医生");
-        var choices = s.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body(); assertThat(choices).hasSize(1);
-        var choice = choices.get(0); assertThat(choice.path("deadlineAt").asLong()).isEqualTo(clock.millis() + Duration.ofHours(2).toMillis());
+        assertThat(ordersBefore.path("substitutionPending").asBoolean()).isFalse();
+        var choices = s.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body(); assertThat(choices).isEmpty();
         assertThat(s.patient().browser().call("GET", patientPath(s), null).body().path("state").asText()).isEqualTo("CONFIRMED");
-        assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(403);
-        assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
-        String path = "/api/v1/patient/substitution-choices/" + choice.path("id").asText();
-        assertThat(actor("PATIENT").browser().call("POST", path, Map.of("accepted", true, "reason", "越权")).status()).isEqualTo(404);
-        var accepted = s.patient().browser().call("POST", path, Map.of("accepted", true, "reason", "同意新医生")); assertThat(accepted.status()).isEqualTo(200);
-        assertThat(s.patient().browser().call("POST", path, Map.of("accepted", true, "reason", "重复同意")).body()).isEqualTo(accepted.body());
+        assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(200);
         assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
         assertThat(substitute.browser().call("GET", doctorPath(s), null).body().path("materials")).hasSize(1);
         var updated = admin().call("GET", "/api/v1/admin/catalog/schedules", null).body();
@@ -446,10 +438,9 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(other.doctor().browser().call("POST", "/api/v1/doctor/catalog/head/suspensions/" + own + "/review", Map.of("plan", "STOP", "reason", "自审禁止")).status()).isEqualTo(403);
         assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + own + "/review", Map.of("approve", true, "reason", "管理员回避审核")).status()).isEqualTo(200);
         var expiry = scenario("ONLINE"); var head2 = doctor(expiry.departmentId()); var substitute2 = doctor(expiry.departmentId()); approveSubstitution(expiry, head2, substitute2);
-        var choice = expiry.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body().get(0);
-        clock.now = Instant.ofEpochMilli(choice.path("deadlineAt").asLong());
-        var expired = expiry.patient().browser().call("POST", "/api/v1/patient/substitution-choices/" + choice.path("id").asText(), Map.of("accepted", true, "reason", "超时同意"));
-        assertThat(expired.body().path("state").asText()).isEqualTo("EXPIRED");
+        assertThat(expiry.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body()).isEmpty();
+        assertThat(expiry.patient().browser().call("GET", patientPath(expiry), null).body().path("state").asText()).isEqualTo("CONFIRMED");
+        assertThat(expiry.patient().browser().call("POST", patientPath(expiry) + "/cancel", null).status()).isEqualTo(200);
         assertThat(expiry.patient().browser().call("GET", patientPath(expiry), null).body().path("state").asText()).isEqualTo("CANCELLED");
     }
     @Test void emergencyStopCanBeAppliedWithoutAnOrdinaryRequestAndDoesNotRepeat() throws Exception {
@@ -714,15 +705,12 @@ class WorkflowHttpTest extends HttpFixture {
             first.get();
         } finally { release.countDown();org.mockito.Mockito.reset(sseTransport); }
     }
-    @Test void durableHoldAndSubstitutionTasksExpireOnceAndReminderHonorsWindow() throws Exception {
+    @Test void durableHoldExpiresOnceAndSubstitutionMigrationDoesNotCreatePatientCancellationTask() throws Exception {
         var s=scenario("ONLINE");var head=doctor(s.departmentId());var substitute=doctor(s.departmentId());assignHead(s,head);
         approveSubstitution(s,head,substitute);
-        var choice=s.patient().browser().call("GET","/api/v1/patient/substitution-choices",null).body().get(0);
-        clock.now=Instant.ofEpochMilli(choice.path("deadlineAt").asLong());
+         assertThat(s.patient().browser().call("GET","/api/v1/patient/substitution-choices",null).body()).isEmpty();
         assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
-        assertThat(s.patient().browser().call("GET",patientPath(s),null).body().path("state").asText()).isEqualTo("CANCELLED");
-        assertThat(s.patient().browser().call("GET",patientPath(s)+"/billing",null).body().path("refund").path("state").asText()).isEqualTo("REFUND_PENDING");
-        assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
+         assertThat(s.patient().browser().call("GET",patientPath(s),null).body().path("state").asText()).isEqualTo("CONFIRMED");
         clock.now=Instant.now();var pending=scenario("ONLINE");var other=actor("PATIENT");
         var hold=other.browser().call("POST","/api/v1/patient/appointments",Map.of("scheduleId",pending.schedule().path("id").asText(),"source","ADVANCE","idempotencyKey",identifier())).body();
         clock.now=Instant.ofEpochMilli(hold.path("holdExpiresAt").asLong());admin().call("POST","/api/v1/admin/test/runtime/scan",null);

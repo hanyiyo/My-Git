@@ -6,7 +6,6 @@ import AdminGovernanceView from './views/AdminGovernanceView.vue'
 import AdminAiView from './views/AdminAiView.vue'
 import AdminMedicalView from './views/AdminMedicalView.vue'
 import AdminCatalogView from './views/AdminCatalogView.vue'
-import PatientPreconsultationView from './views/PatientPreconsultationView.vue'
 import PatientCatalogView from './views/PatientCatalogView.vue'
 import DoctorCatalogView from './views/DoctorCatalogView.vue'
 import PatientOrdersView from './views/PatientOrdersView.vue'
@@ -29,7 +28,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
   { path: '/admin/pharmacy', component: AdminPharmacyView, meta: { role: 'ADMIN' } },
   { path: '/admin/settings', component: AdminAiView, meta: { role: 'ADMIN' } },
-  { path: '/patient/preconsultation', component: PatientPreconsultationView, meta: { role: 'PATIENT' } },
+  { path: '/patient/preconsultation', redirect: '/assistant/business', meta: { role: 'PATIENT' } },
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders', component: PatientOrdersView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders/:id/clinical', component: PatientClinicalView, meta: { role: 'PATIENT' } },

@@ -2,6 +2,8 @@
 
 依据 GitHub #7、mvp-spec、Q58/Q60/Q66、ADR-0002/0004/0008/0010/0013。此前批次绿灯未证明关键 AC，旧“已全部验收”推断撤回，以本轮证据为准。
 
+R3 修订后患者端 AI 入口仅提供导诊，不生成预约前病历；本页保留旧接口的兼容性测试，医生端摘要和授权边界继续适用。
+
 | AC | 公共接口/用例 | 观察结果 |
 | --- | --- | --- |
 | 普通业务助手只使用医院事实，症状先本地引导 | GET /assistant/business；WorkflowHttpTest.aiFailureRemainsVisibleWithBoundedMetadataAndBusinessSymptomsStayLocal | 医院地址匹配目录；胸痛混合地址查询转授权并显示急救指引，不先发外部分类；未知主题拒答 |

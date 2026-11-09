@@ -111,14 +111,15 @@ public class GovernanceService {
         } else {
             if (schedule.startsAt() - clock.millis() <= Duration.ofHours(2).toMillis()) throw new ApiFailure(409, "EMERGENCY_REQUIRED", "距离出诊不足2小时，请人工紧急处理");
             catalog.substituteSchedule(request.scheduleId(), request.substituteDoctorId());
-            long deadline = Math.min(clock.millis() + Duration.ofHours(2).toMillis(), schedule.startsAt() - Duration.ofHours(2).toMillis());
+            long migratedAt = clock.millis();
             for (var appointment : bookings.lockSchedulePatients(request.scheduleId())) {
                 if (!appointment.state().equals("CONFIRMED")) continue;
-                bookings.awaitSubstitution(appointment.id());
+                // Q4: approval migrates the confirmed order immediately. The patient
+                // is notified and can cancel from the normal order flow if desired.
+                bookings.transferDoctor(appointment.id(), request.substituteDoctorId());
                 String choiceId=UUID.randomUUID().toString();
-                governance.insertChoice(new GovernanceMapper.Choice(choiceId, id, appointment.id(), appointment.patientId(), appointment.doctorId(), request.substituteDoctorId(), "PENDING", deadline, null, null));
-                delivery.schedule("SUBSTITUTION_EXPIRY",choiceId,deadline);
-                notify(appointment.patientId(), "SUBSTITUTION_PENDING", appointment.id(), "请在截止时间前确认替诊；不响应将取消并退款", "substitution-pending:" + id + ":" + appointment.id());
+                governance.insertChoice(new GovernanceMapper.Choice(choiceId, id, appointment.id(), appointment.patientId(), appointment.doctorId(), request.substituteDoctorId(), "ACCEPTED", migratedAt, migratedAt, "系统审批通过后自动迁移；患者如需取消请在我的挂号中操作"));
+                notify(appointment.patientId(), "SUBSTITUTION_MIGRATED", appointment.id(), "替诊已审批通过，预约已自动转至替诊医生；如需取消请在我的挂号中操作", "substitution-migrated:" + id + ":" + appointment.id());
             }
             governance.updateRequest(id, "APPROVED_SUBSTITUTE", request.substituteDoctorId(), clock.millis());
             audit(admin, "SUBSTITUTION_REVIEWED", "SCHEDULE", request.scheduleId(), reason);
@@ -159,15 +160,7 @@ public class GovernanceService {
         if (!choice.state().equals("PENDING")) return choice(choice);
         if (!request.state().equals("APPROVED_SUBSTITUTE")) throw conflict();
         reason(reason);
-        if (choice.deadlineAt() <= clock.millis()) { expireChoice(choice); return choice(governance.patientChoice(id, patient)); }
-        if (accepted) {
-            var appointment = bookings.own(patient, choice.appointmentId());
-            if (!appointment.state().equals("CONFIRMED")) throw new ApiFailure(409, "APPOINTMENT_STATE_CONFLICT", "预约已失效，不能接受替诊");
-            bookings.transferDoctor(choice.appointmentId(), choice.substituteDoctorId());
-        } else bookings.cancelForGovernance(choice.appointmentId(), "SUBSTITUTE_REJECTED");
-        governance.updateChoice(id, accepted ? "ACCEPTED" : "REJECTED", clock.millis(), reason.trim());
-        audit(patient, accepted ? "SUBSTITUTE_CHOICE_ACCEPTED" : "SUBSTITUTE_CHOICE_REJECTED", "CHOICE", id, reason);
-        return choice(governance.patientChoice(id, patient));
+        throw new ApiFailure(409, "SUBSTITUTION_AUTO_MIGRATED", "替诊已自动迁移；如需取消请在我的挂号中主动取消");
     }
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public int expireChoices(String actor) {
@@ -182,9 +175,9 @@ public class GovernanceService {
         return count;
     }
     private void expireChoice(GovernanceMapper.Choice choice) {
-        bookings.cancelForGovernance(choice.appointmentId(), "SUBSTITUTE_TIMEOUT");
-        governance.updateChoice(choice.id(), "EXPIRED", clock.millis(), "患者未在期限内确认替诊");
-        audit(governance.request(choice.requestId()).requestedBy(), "SUBSTITUTE_CHOICE_EXPIRED", "CHOICE", choice.id(), "系统按截止时间自动执行；非患者主动操作");
+        governance.updateChoice(choice.id(), "EXPIRED", clock.millis(), "替诊已自动迁移，患者未主动取消不影响预约");
+        notify(choice.patientId(), "SUBSTITUTION_REMINDER", choice.appointmentId(), "替诊已自动迁移，预约仍然有效；如需取消请在我的挂号中主动取消", "substitution-reminder:" + choice.id());
+        audit(governance.request(choice.requestId()).requestedBy(), "SUBSTITUTE_CHOICE_EXPIRED", "CHOICE", choice.id(), "替诊自动迁移后不因未操作而取消预约");
     }
     public void expireChoiceTask(String id) {
         var initial=governance.choice(id);if(initial==null)return;

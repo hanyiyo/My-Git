@@ -4,13 +4,15 @@ import { useRoute } from 'vue-router'
 import { api, download } from '../api'
 import { useNotificationRefresh } from '../useNotificationRefresh'
 interface AiResult { taskId: string; state: string; provider: string; versionNo: number; stale: boolean; errorCode: string | null; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string } | null }
+interface ConversationSummary { analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string }; messageCount: number; provider: string }
 interface Clinical { consultation: { state: string } | null; materials: { id: string; versionNo: number; symptomText: string; attachments: { id: string; originalName: string }[] }[]; messages: { authorRole: string; body: string }[]; result: { body: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
-const route = useRoute(), id = String(route.params.id), clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([]), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), busy = ref(false)
+const route = useRoute(), id = String(route.params.id), clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([]), summary = ref<ConversationSummary | null>(null), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), busy = ref(false)
 const message = ref('')
 async function sendMessage() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/messages`, 'POST', { body: message.value }); message.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '消息发送失败' } finally { busy.value = false } }
 async function load() { clinical.value = null; aiResults.value = []; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}`); aiResults.value = await api<AiResult[]>(`/doctor/clinical/${id}/ai`) } catch (failure) { error.value = failure instanceof Error ? failure.message : '问诊记录加载失败' } }
 async function submitResult() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/result`, 'POST', { body: result.value }); result.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '结果提交失败' } finally { busy.value = false } }
 async function submitCorrection() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/corrections`, 'POST', { reason: reason.value, body: correction.value }); reason.value = ''; correction.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '更正提交失败' } finally { busy.value = false } }
+async function summarizeConversation() { busy.value = true; error.value = ''; try { summary.value = await api<ConversationSummary>(`/doctor/clinical/${id}/ai/summarize`, 'POST') } catch (failure) { error.value = failure instanceof Error ? failure.message : '图文摘要暂不可用' } finally { busy.value = false } }
 async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/doctor/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60_000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
 onMounted(load)
 useNotificationRefresh(load, id)
@@ -48,6 +50,10 @@ useNotificationRefresh(load, id)
         <template v-if="item.analysis"><p>{{ item.analysis.summary }}</p><p>持续时间：{{ item.analysis.duration }} · 建议科室：{{ item.analysis.departmentHint }}</p><p>追问：{{ item.analysis.followUpQuestions }}</p><p>风险提示：{{ item.analysis.riskAlert }}</p><p>{{ item.analysis.safetyNotice }}</p></template>
         <p v-else>AI 暂不可用（{{ item.errorCode }}），不影响医生继续接诊。</p>
       </article>
+    </section>
+    <section v-if="clinical?.consultation?.state !== 'CLOSED'">
+      <button type="button" class="secondary" :disabled="busy" @click="summarizeConversation">生成医患图文摘要</button>
+      <article v-if="summary" class="notice"><h3>AI 医患图文摘要（仅医生可见）</h3><p>{{ summary.analysis.summary }}</p><p>消息数：{{ summary.messageCount }} · Provider：{{ summary.provider }}</p><p>建议科室：{{ summary.analysis.departmentHint }} · 风险提示：{{ summary.analysis.riskAlert }}</p><p>{{ summary.analysis.safetyNotice }}</p></article>
     </section>
 
     <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="submitResult">
