@@ -556,7 +556,7 @@ class BookingHttpTest extends HttpFixture {
         clock.now = clock.now.plusMillis(1);
         assertThat(advance.call("POST", root + "/" + advanceId + "/check-in", null).status()).isEqualTo(200);
         var entries = doctor.call("GET", "/api/v1/doctor/reception", null).body();
-        assertThat(entries.findValuesAsText("appointmentId")).containsExactly(advanceId, walkInId, laterId, restoredId);
+        assertThat(entries.findValuesAsText("appointmentId")).containsExactly(advanceId, restoredId, walkInId, laterId);
         assertThat(doctor.call("POST", queue + restoredId + "/call", null).body().path("error").path("code").asText()).isEqualTo("QUEUE_ORDER");
         assertThat(doctor.call("POST", queue + advanceId + "/call", null).status()).isEqualTo(200);
         clock.now = clock.now.plus(Duration.ofMinutes(5));
