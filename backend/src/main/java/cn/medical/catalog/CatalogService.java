@@ -97,7 +97,7 @@ public class CatalogService {
     }
     private boolean registrationOpen(CatalogMapper.Schedule schedule, String source, long now) {
         return source.equals("ADVANCE") ? now < schedule.startsAt()
-            : schedule.serviceMode().equals("OFFLINE") && now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
+            : now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
     }
     public record Confirmation(boolean confirmed, long observedAt) {}
     @Transactional

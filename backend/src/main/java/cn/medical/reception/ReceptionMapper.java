@@ -31,17 +31,25 @@ public interface ReceptionMapper {
         @Param("patientId") String patientId, @Param("now") long now);
     @Select("SELECT q.id, q.appointment_id, q.schedule_id, q.doctor_id, q.patient_id, a.identifier AS patient_identifier, p.clinic_date, p.clinic_session AS session, p.service_mode, p.source, q.queue_group, q.queued_at, q.checked_in_at, q.restoration_count, q.state, q.called_at, q.started_at, q.missed_at, q.completed_at FROM reception_queue q JOIN account a ON a.id=q.patient_id JOIN appointment p ON p.id=q.appointment_id WHERE q.appointment_id=#{id}")
     QueueEntry queue(@Param("id") String id);
-    @Update("UPDATE reception_queue SET queue_group=3, queued_at=#{now}, restoration_count=1, state='WAITING', missed_at=NULL WHERE appointment_id=#{id} AND state='MISSED' AND restoration_count=0")
+    @Update("UPDATE reception_queue q JOIN appointment a ON a.id=q.appointment_id SET q.queue_group=IF(a.source='WALK_IN',2,1), q.queued_at=#{now}, q.restoration_count=1, q.state='WAITING', q.missed_at=NULL WHERE q.appointment_id=#{id} AND q.state='MISSED' AND q.restoration_count=0")
     int restore(@Param("id") String id, @Param("now") long now);
+    @Update("UPDATE appointment SET state='NO_SHOW' WHERE id=#{id} AND state='CONFIRMED'")
+    int markNoShow(@Param("id") String id);
+    @Update("UPDATE appointment SET state='VOID', cancellation_reason='MISSED_TWICE', cancelled_at=#{now} WHERE id=#{id} AND state='CONFIRMED'")
+    int voidAfterSecondMiss(@Param("id") String id, @Param("now") long now);
+    @Update("UPDATE patient_session_guard SET appointment_id=NULL WHERE appointment_id=#{id}")
+    int releaseSessionGuard(@Param("id") String id);
+    @Select("SELECT EXISTS(SELECT 1 FROM consultation_message WHERE appointment_id=#{id} AND author_role='PATIENT' AND created_at > #{calledAt})")
+    boolean hasPatientReplyAfter(@Param("id") String id, @Param("calledAt") long calledAt);
     @Select("<script>SELECT q.id, q.appointment_id, q.schedule_id, q.doctor_id, q.patient_id, a.identifier AS patient_identifier, p.clinic_date, p.clinic_session AS session, p.service_mode, p.source, q.queue_group, q.queued_at, q.checked_in_at, q.restoration_count, q.state, q.called_at, q.started_at, q.missed_at, q.completed_at FROM reception_queue q JOIN account a ON a.id=q.patient_id JOIN appointment p ON p.id=q.appointment_id WHERE q.doctor_id=#{doctor} <if test='scheduleId != null'>AND q.schedule_id=#{scheduleId}</if> <if test='date != null'>AND p.clinic_date=#{date}</if> ORDER BY p.starts_at, q.queue_group, q.queued_at, q.id</script>")
     List<QueueEntry> doctorQueue(@Param("doctor") String doctor, @Param("scheduleId") String scheduleId, @Param("date") LocalDate date);
     @Select("SELECT q.id, q.appointment_id, q.schedule_id, q.doctor_id, q.patient_id, a.identifier AS patient_identifier, p.clinic_date, p.clinic_session AS session, p.service_mode, p.source, q.queue_group, q.queued_at, q.checked_in_at, q.restoration_count, q.state, q.called_at, q.started_at, q.missed_at, q.completed_at FROM reception_queue q JOIN account a ON a.id=q.patient_id JOIN appointment p ON p.id=q.appointment_id WHERE q.schedule_id=#{schedule} AND q.state='WAITING' ORDER BY q.queue_group, q.queued_at, q.id LIMIT 1")
     QueueEntry nextWaiting(@Param("schedule") String schedule);
-    @Update("UPDATE reception_queue SET state='CALLED', called_at=#{now} WHERE appointment_id=#{id} AND state='WAITING'")
+    @Update("UPDATE reception_queue SET state='IN_CONSULTATION', called_at=#{now}, started_at=#{now} WHERE appointment_id=#{id} AND state='WAITING'")
     int call(@Param("id") String id, @Param("now") long now);
-    @Update("UPDATE reception_queue SET state='IN_CONSULTATION', started_at=#{now} WHERE appointment_id=#{id} AND state='CALLED'")
+    @Update("UPDATE reception_queue SET state='IN_CONSULTATION', started_at=COALESCE(started_at,#{now}) WHERE appointment_id=#{id} AND state IN ('CALLED','IN_CONSULTATION')")
     int start(@Param("id") String id, @Param("now") long now);
-    @Update("UPDATE reception_queue SET state='MISSED', missed_at=#{now} WHERE appointment_id=#{id} AND state='CALLED'")
+    @Update("UPDATE reception_queue SET state='MISSED', missed_at=#{now} WHERE appointment_id=#{id} AND state IN ('CALLED','IN_CONSULTATION')")
     int miss(@Param("id") String id, @Param("now") long now);
     @Update("UPDATE reception_queue SET state='COMPLETED', completed_at=#{now} WHERE appointment_id=#{id} AND state='IN_CONSULTATION'")
     int complete(@Param("id") String id, @Param("now") long now);

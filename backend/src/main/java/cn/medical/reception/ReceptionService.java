@@ -16,9 +16,11 @@ public class ReceptionService {
     private final ReceptionMapper reception;
     private final DeliveryService delivery;
     private final Clock clock;
-    public ReceptionService(ReceptionMapper reception, Clock clock) { this(reception, null, clock); }
+    private final ReceptionResponseObserver responseObserver;
+    public ReceptionService(ReceptionMapper reception, Clock clock) { this(reception, null, clock, reception::hasPatientReplyAfter); }
     @Autowired
-    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock) { this.reception = reception; this.delivery = delivery; this.clock = clock; }
+    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock) { this(reception, delivery, clock, reception::hasPatientReplyAfter); }
+    public ReceptionService(ReceptionMapper reception, DeliveryService delivery, Clock clock, ReceptionResponseObserver responseObserver) { this.reception = reception; this.delivery = delivery; this.clock = clock; this.responseObserver = responseObserver; }
 
     @Transactional
     public Summary checkIn(String patient, String id) {
@@ -72,6 +74,8 @@ public class ReceptionService {
         for (var appointment : reception.dueNoShows(now)) {
             try {
                 reception.insertNoShow(appointment.id(), appointment.scheduleId(), appointment.doctorId(), appointment.patientId(), now);
+                reception.markNoShow(appointment.id());
+                reception.releaseSessionGuard(appointment.id());
                 marked++;
             } catch (DuplicateKeyException ignored) { }
         }
@@ -111,6 +115,11 @@ public class ReceptionService {
         var entry = requireDoctorQueue(doctor, id);
         var appointment = reception.appointment(id);
         long now = clock.millis();
+        if (action.equals("start") && entry.state().equals("IN_CONSULTATION")) return entry;
+        if (action.equals("miss") && appointment != null && appointment.serviceMode().equals("ONLINE")) {
+            if (entry.calledAt() == null || now < entry.calledAt() + 5 * 60_000L || responseObserver.hasPatientReplyAfter(id, entry.calledAt()))
+                throw new ApiFailure(409, "CALL_WAITING", "线上叫号需等待5分钟且患者未回复后才能过号");
+        }
         if (appointment == null || now < appointment.startsAt())
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         int changed = switch (action) {
@@ -119,6 +128,10 @@ public class ReceptionService {
             default -> reception.complete(id, now);
         };
         if (changed != 1) throw new ApiFailure(409, "QUEUE_STATE_CONFLICT", "患者当前状态不允许执行该操作");
+        if (action.equals("miss") && entry.restorationCount() >= 1) {
+            reception.voidAfterSecondMiss(id, now);
+            reception.releaseSessionGuard(id);
+        }
         return reception.queue(id);
     }
 
