@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Three homepage layouts at /prototype/patient-home?variant=A|B|C, using fictional in-memory data.
 // The complete patient shell is previewed outside the shared authenticated multi-role HomeView.
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PrototypeSwitcher from '../components/PrototypeSwitcher.vue'
 import Icon from './patient-home-prototype/PrototypeIcon.vue'
@@ -19,6 +19,7 @@ const panel = ref<HomeAction | null>(null), panelDialog = ref<HTMLDialogElement>
 const orderFilter = ref('全部'), mode = ref('线下面诊'), department = ref('全科医学科'), registered = ref(false)
 const aiOpen = ref(false), question = ref(''), imageName = ref(''), consent = ref(false), answered = ref(false)
 const noticeRead = ref(false)
+let bannerTimer: number | undefined
 const nav: { action: HomeAction | 'home'; icon: string; name: string }[] = [
   { action: 'home', icon: 'home', name: '首页' }, { action: 'departments', icon: 'grid', name: '科室信息' },
   { action: 'doctors', icon: 'doctor', name: '医生团队' }, { action: 'registration', icon: 'calendar', name: '立即挂号' },
@@ -48,6 +49,10 @@ function chooseDepartment(name: string) { department.value = name; panel.value =
 function chooseImage(event: Event) { imageName.value = (event.target as HTMLInputElement).files?.[0]?.name ?? ''; consent.value = false; answered.value = false }
 function ask() { if (question.value.trim() && consent.value) answered.value = true }
 function recommend() { aiDialog.value?.close(); aiOpen.value = false; department.value = '全科医学科'; open('registration') }
+onMounted(() => {
+  bannerTimer = window.setInterval(() => { bannerIndex.value = (bannerIndex.value + 1) % 3 }, 6000)
+})
+onUnmounted(() => { if (bannerTimer) window.clearInterval(bannerTimer) })
 </script>
 
 <template>

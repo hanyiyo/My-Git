@@ -5,6 +5,7 @@ test('首页三个结构方案通过URL与键盘切换，侧栏可以收缩', as
   page.on('request', request => { if (request.url().includes('/api/')) apiRequests.push(request.url()) })
   await page.goto('/prototype/patient-home?variant=A')
   await expect(page.getByRole('heading', { name: '上午好，林同学。' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '让每一次就医，都更从容一点。' })).toBeVisible()
   await expect(page.getByRole('link', { name: '智能医疗问诊预约系统首页' })).toBeVisible()
   const topNav = page.getByRole('navigation', { name: '顶部快捷导航' })
   for (const label of ['医生团队', '科室信息', '立即挂号', '我的挂号', '站内通知']) await expect(topNav.getByRole('button', { name: label, exact: true })).toBeVisible()
