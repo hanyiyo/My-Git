@@ -16,6 +16,7 @@ import BusinessAssistantView from './views/BusinessAssistantView.vue'
 import PatientSubstitutionView from './views/PatientSubstitutionView.vue'
 import LoginRegisterPrototypeView from './views/LoginRegisterPrototypeView.vue'
 import AdminPharmacyView from './views/AdminPharmacyView.vue'
+import AdminAccountsView from './views/AdminAccountsView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
@@ -28,6 +29,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/admin/medical', component: AdminMedicalView, meta: { role: 'ADMIN' } },
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
   { path: '/admin/pharmacy', component: AdminPharmacyView, meta: { role: 'ADMIN' } },
+  { path: '/admin/accounts', component: AdminAccountsView, meta: { role: 'ADMIN' } },
   { path: '/admin/settings', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/patient/preconsultation', redirect: '/assistant/business', meta: { role: 'PATIENT' } },
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },

@@ -12,7 +12,8 @@ async function call(agent: Agent, path: string, method = 'GET', data?: unknown) 
 async function agent(browser: Browser, role: 'PATIENT' | 'DOCTOR' | 'ADMIN'): Promise<Agent> {
   const page = await browser.newPage({ baseURL: test.info().project.use.baseURL }), identifier = role === 'ADMIN' ? 'admin-foundation-test' : `workflow-${crypto.randomUUID()}`
   const result: Agent = { page, token: '', id: '', identifier }
-  if (role !== 'ADMIN') result.id = (await call(result, '/auth/register', 'POST', { identifier, password, role })).account.id as string
+  if (role !== 'ADMIN') result.id = (await call(result, '/auth/register', 'POST', { identifier, password, role,
+    ...(role === 'PATIENT' ? { displayName: '测试患者', phoneNumber: '13800138000', challengeId: (await call(result, '/auth/captcha')).challengeId, captcha: 'AB7K' } : {}) })).account.id as string
   const challenge = await call(result, '/auth/captcha')
   const tokens = await call(result, '/auth/login', 'POST', { identifier, password: role === 'ADMIN' ? 'fictional-test-administrator-password' : password, challengeId: challenge.challengeId, captcha: 'AB7K' })
   result.token = tokens.accessToken as string; result.id = tokens.account.id as string

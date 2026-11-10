@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, setAccessToken } from './api'
-export interface Profile { id: string; identifier: string; roles: string[]; enabled: boolean; credentialStatus: string | null }
+export interface Profile { id: string; identifier: string; roles: string[]; enabled: boolean; credentialStatus: string | null; displayName: string | null; phoneNumber: string | null }
 interface Tokens { accessToken: string; account: Profile }
 export const useSession = defineStore('session', {
   state: () => ({ account: null as Profile | null, restored: false }),

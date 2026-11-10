@@ -31,7 +31,15 @@ class HttpFixture {
             var response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
             return new Reply(response.statusCode(), response.body().isBlank() ? JSON.nullNode() : JSON.readTree(response.body()), response.headers());
         }
-        Reply register(String name, String role) throws Exception { return call("POST", "/api/v1/auth/register", Map.of("identifier", name, "password", PASSWORD, "role", role)); }
+        Reply register(String name, String role) throws Exception {
+            var payload = new HashMap<String, Object>();
+            payload.put("identifier", name); payload.put("password", PASSWORD); payload.put("role", role);
+            if (role.equals("PATIENT")) {
+                payload.put("displayName", "测试患者"); payload.put("phoneNumber", "13800138000");
+                var challenge = challenge(); payload.put("challengeId", challenge.path("challengeId").asText()); payload.put("captcha", "AB7K");
+            }
+            return call("POST", "/api/v1/auth/register", payload);
+        }
         JsonNode challenge() throws Exception { return call("GET", "/api/v1/auth/captcha", null).body(); }
         Reply login(String name, String password, String challenge, String answer) throws Exception {
             return call("POST", "/api/v1/auth/login", Map.of("identifier", name, "password", password, "challengeId", challenge, "captcha", answer));

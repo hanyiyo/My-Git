@@ -22,7 +22,8 @@ async function login(page: Page, identifier: string, pass: string) {
   accessToken = (await result.json()).accessToken as string
 }
 async function register(page: Page, identifier: string, role: string) {
-  const result = await post(page, '/auth/register', { identifier, password, role })
+  const result = await post(page, '/auth/register', { identifier, password, role,
+    ...(role === 'PATIENT' ? { displayName: '测试患者', phoneNumber: '13800138000', challengeId: (await page.request.get('/api/v1/auth/captcha').then(response => response.json())).challengeId, captcha: 'AB7K' } : {}) })
   expect(result.status()).toBe(201)
   return (await result.json()).account.id as string
 }

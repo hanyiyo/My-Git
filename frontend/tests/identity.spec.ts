@@ -4,9 +4,14 @@ async function register(page: Page, role: 'PATIENT' | 'DOCTOR') {
   const name = `browser-${crypto.randomUUID()}`
   await page.goto('/login')
   await page.getByRole('button', { name: '患者或医生注册' }).click()
+  if (role === 'PATIENT') {
+    await page.getByLabel('姓名', { exact: true }).fill('测试患者')
+    await page.getByLabel('手机号', { exact: true }).fill('13800138000')
+  }
   await page.getByLabel('账号', { exact: true }).fill(name)
   await page.getByLabel('密码', { exact: true }).fill(password)
   await page.getByLabel('注册身份').selectOption(role)
+  if (role === 'PATIENT') await page.getByLabel('图形验证码', { exact: true }).fill('AB7K')
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
   await expect(page.getByAltText('图形验证码')).toBeVisible()
@@ -24,11 +29,11 @@ test('患者完成注册、验证码登录、刷新恢复会话及退出，角�
   const name = await register(page, 'PATIENT')
   await login(page, name)
   await expect(page).toHaveURL(/\/patient$/)
-  await expect(page.getByText(`欢迎，${name}`)).toBeVisible()
+  await expect(page.getByText('欢迎，测试患者')).toBeVisible()
   const refresh = (await context.cookies()).find(cookie => cookie.name === 'MEDICAL_REFRESH')
   expect(refresh?.httpOnly).toBeTruthy(); expect(refresh?.sameSite).toBe('Strict')
   expect(await page.evaluate(() => [localStorage.getItem('accessToken'), sessionStorage.getItem('refreshToken')])).toEqual([null, null])
-  await page.reload(); await expect(page.getByText(`欢迎，${name}`)).toBeVisible()
+  await page.reload(); await expect(page.getByText('欢迎，测试患者')).toBeVisible()
   await page.goto('/admin'); await expect(page).toHaveURL(/\/patient$/)
   await page.getByRole('button', { name: '退出登录' }).click(); await expect(page).toHaveURL(/\/login$/)
   await page.goto('/patient'); await expect(page).toHaveURL(/\/login$/)

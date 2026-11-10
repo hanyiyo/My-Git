@@ -4,8 +4,11 @@ const password = 'fictional-browser-password'
 async function registerDoctor(page: Page, name: string) {
   await page.goto('/login')
   await page.getByRole('button', { name: '患者或医生注册' }).click()
+  await page.getByLabel('姓名', { exact: true }).fill('测试患者')
+  await page.getByLabel('手机号', { exact: true }).fill('13800138000')
   await page.getByLabel('账号', { exact: true }).fill(name)
   await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByLabel('图形验证码', { exact: true }).fill('AB7K')
   await page.getByLabel('注册身份').selectOption('DOCTOR')
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
@@ -69,8 +72,11 @@ test('管理员维护目录并发布排班，患者查询有效资源，医生�
   await logout(page)
   await page.getByRole('button', { name: '患者或医生注册' }).click()
   const patient = `patient-${crypto.randomUUID()}`
+  await page.getByLabel('姓名', { exact: true }).fill('测试患者')
+  await page.getByLabel('手机号', { exact: true }).fill('13800138000')
   await page.getByLabel('账号', { exact: true }).fill(patient)
   await page.getByLabel('密码', { exact: true }).fill(password)
+  await page.getByLabel('图形验证码', { exact: true }).fill('AB7K')
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
   await login(page, patient)

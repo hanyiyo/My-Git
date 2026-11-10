@@ -34,6 +34,8 @@ class IdentityHttpTest extends HttpFixture {
         assertThat(login.body().has("refreshToken")).isFalse();
         assertThat(login.headers().allValues("set-cookie")).anySatisfy(cookie -> assertThat(cookie).contains("MEDICAL_REFRESH=", "HttpOnly", "SameSite=Strict"));
         assertThat(browser.call("GET", "/api/v1/profile", null).body().path("identifier").asText()).isEqualTo(name);
+        assertThat(browser.call("GET", "/api/v1/profile", null).body().path("displayName").asText()).isEqualTo("测试患者");
+        assertThat(browser.call("GET", "/api/v1/profile", null).body().path("phoneNumber").asText()).isEqualTo("13800138000");
         var stolenRefresh = browser.copyCookies(port);
         var refreshed = browser.call("POST", "/api/v1/auth/refresh", Map.of());
         assertThat(refreshed.status()).isEqualTo(200);
@@ -43,6 +45,15 @@ class IdentityHttpTest extends HttpFixture {
         assertThat(browser.call("GET", "/api/v1/profile", null).status()).isEqualTo(401);
         browser.access = null;
         assertThat(browser.call("POST", "/api/v1/auth/refresh", Map.of()).status()).isEqualTo(401);
+    }
+
+    @Test void patientRegistrationRequiresProfileFieldsAndCaptcha() throws Exception {
+        var browser = new Browser(port); String name = identifier();
+        assertThat(browser.call("POST", "/api/v1/auth/register", Map.of("identifier", name, "password", PASSWORD, "role", "PATIENT")).status()).isEqualTo(400);
+        var challenge = browser.challenge();
+        assertThat(browser.call("POST", "/api/v1/auth/register", Map.of("identifier", name, "password", PASSWORD, "role", "PATIENT",
+                "displayName", "测试患者", "phoneNumber", "13800138000", "challengeId", challenge.path("challengeId").asText(), "captcha", "WRNG")).status()).isEqualTo(401);
+        assertThat(browser.register(name, "PATIENT").status()).isEqualTo(201);
     }
 
     @Test void wrongAnswerAndWrongPasswordBothConsumeChallenge() throws Exception {
@@ -113,6 +124,18 @@ class IdentityHttpTest extends HttpFixture {
         assertThat(account.call("GET", "/api/v1/profile", null).status()).isEqualTo(401);
         account.access = null;
         assertThat(account.call("POST", "/api/v1/auth/refresh", Map.of()).status()).isEqualTo(401);
+    }
+
+    @Test void administratorCanProvisionPatientProfile() throws Exception {
+        var admin = new Browser(port); assertThat(admin.login("admin-foundation-test", "fictional-test-administrator-password").status()).isEqualTo(200);
+        String name = identifier();
+        var created = admin.call("POST", "/api/v1/admin/accounts", Map.of("identifier", name, "password", PASSWORD, "role", "PATIENT",
+                "displayName", "管理员添加患者", "phoneNumber", "13900139000"));
+        assertThat(created.status()).isEqualTo(201);
+        var patient = new Browser(port); assertThat(patient.login(name, PASSWORD).status()).isEqualTo(200);
+        var profile = patient.call("GET", "/api/v1/profile", null).body();
+        assertThat(profile.path("displayName").asText()).isEqualTo("管理员添加患者");
+        assertThat(profile.path("phoneNumber").asText()).isEqualTo("13900139000");
     }
 
     @Test void repeatedLoginAttemptsAreRateLimitedByAccount() throws Exception {

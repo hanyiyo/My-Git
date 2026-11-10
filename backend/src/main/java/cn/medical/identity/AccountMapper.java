@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.*;
 public interface AccountMapper {
     @Select("SELECT a.id FROM account a JOIN account_role r ON r.account_id=a.id WHERE a.enabled=TRUE AND r.role='ADMIN'") List<String> administrators();
     record Account(String id, String identifier, String passwordHash, boolean enabled) {}
+    record PatientProfile(String displayName, String phoneNumber) {}
     record RefreshSession(String id, String accountId, String tokenHash, long expiresAt, boolean revoked) {}
 
     @Select("SELECT id, identifier, password_hash, enabled FROM account WHERE identifier = #{identifier}")
@@ -22,6 +23,10 @@ public interface AccountMapper {
     void insertRole(@Param("id") String id, @Param("role") String role);
     @Insert("INSERT INTO doctor_profile (account_id, credential_status) VALUES (#{id}, 'PENDING')")
     void insertDoctor(String id);
+    @Insert("INSERT INTO patient_profile (account_id, display_name, phone_number) VALUES (#{id}, #{displayName}, #{phoneNumber})")
+    void insertPatientProfile(@Param("id") String id, @Param("displayName") String displayName, @Param("phoneNumber") String phoneNumber);
+    @Select("SELECT display_name, phone_number FROM patient_profile WHERE account_id = #{id}")
+    PatientProfile patientProfile(String id);
     @Select("SELECT credential_status FROM doctor_profile WHERE account_id = #{id}")
     String credentialStatus(String id);
     @Select("SELECT a.id, a.identifier, d.display_name, d.title, d.biography, d.credential_status, a.enabled FROM doctor_profile d JOIN account a ON a.id=d.account_id ORDER BY a.id")
