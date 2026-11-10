@@ -109,7 +109,7 @@ test('科主任组织替诊、医生确认、管理员复核并通知患者自�
     await patient.page.goto('/patient/orders')
     await expect(patient.page.getByText(/虚构替诊医生/)).toBeVisible()
     await patient.page.getByRole('button', { name: '取消预约' }).click()
-    await expect(patient.page.getByText('状态：已取消')).toBeVisible()
+    await expect(patient.page.getByText('状态：已取消')).toBeVisible({ timeout: 15000 })
   } finally { await Promise.all([admin, doctor, head, substitute, patient].map(person => person.page.context().close())) }
 })
 

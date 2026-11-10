@@ -18,3 +18,16 @@ test('prototype switches roles and simulates registration then login', async ({ 
   await page.getByRole('button', { name: '退出体验' }).click()
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
 })
+
+test('patient prototype registration collects profile fields and captcha', async ({ page }) => {
+  await page.goto('/prototype/auth')
+  await page.getByRole('tab', { name: '注册' }).click()
+  await page.getByLabel('姓名').fill('林同学')
+  await page.getByLabel('手机号').fill('13800138000')
+  await page.getByLabel('账号').fill('patient-prototype')
+  await page.getByPlaceholder('至少 8 位').fill('prototype-password')
+  await page.getByLabel('确认密码').fill('prototype-password')
+  await page.getByLabel('图形验证码').fill('AB7K')
+  await page.getByRole('button', { name: '创建演示账户' }).click()
+  await expect(page.getByRole('status')).toContainText('注册成功')
+})
