@@ -116,6 +116,17 @@ test('科室目录 A/B/C 变体支持出诊方式、挂号预约和 URL 切换',
     await expect(page.locator('.ph-directory-breadcrumb')).toHaveCount(0)
     if (variant === 'A') await expect(page.getByText('不知道挂什么科？', { exact: true })).toHaveCount(0)
 
+    if (variant === 'A' || variant === 'B') {
+      const list = await page.locator(variant === 'A' ? '.ph-dept-a-sidebar' : '.ph-dept-b-list').boundingBox()
+      const detail = await page.locator(variant === 'A' ? '.ph-dept-a-main' : '.ph-dept-b-main').boundingBox()
+      expect(list).toBeTruthy()
+      expect(detail).toBeTruthy()
+      expect(Math.abs(detail!.y - list!.y)).toBeLessThan(2)
+      expect(detail!.x - (list!.x + list!.width)).toBeGreaterThanOrEqual(0)
+      expect(detail!.x - (list!.x + list!.width)).toBeLessThanOrEqual(24)
+      expect(detail!.width).toBeGreaterThan(500)
+    }
+
     const modeTabs = page.getByRole('tab')
     await expect(modeTabs).toHaveCount(2)
     await modeTabs.nth(1).click()
