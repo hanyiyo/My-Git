@@ -73,11 +73,30 @@ test('快捷入口携带就诊模式与挂号筛选，签到和两类缴费相�
     await page.keyboard.press('Escape')
   }
   await page.getByRole('button', { name: /科室信息 了解科室/ }).click()
-  await dialog.getByRole('button', { name: /口腔科/ }).click()
+  await expect(page).toHaveURL(/\/prototype\/patient-home\/departments/)
+  await page.getByRole('button', { name: /口腔科 口腔检查/ }).click()
+  await expect(page.getByRole('heading', { name: '口腔科' })).toBeVisible()
+  await page.getByTestId('department-page').getByRole('button', { name: '立即挂号', exact: true }).click()
   await expect(dialog.getByLabel('选择科室')).toHaveValue('口腔科')
   await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '返回患者首页' }).click()
   await page.getByRole('button', { name: /医生团队 查看医生/ }).click()
   await expect(dialog.getByText('许知遥')).toBeVisible()
+})
+
+test('科室信息从顶部导航跳转为独立目录页面', async ({ page }) => {
+  const apiRequests: string[] = []
+  page.on('request', request => { if (request.url().includes('/api/')) apiRequests.push(request.url()) })
+  await page.goto('/prototype/patient-home?variant=A')
+  await page.getByRole('navigation', { name: '顶部快捷导航' }).getByRole('button', { name: '科室信息', exact: true }).click()
+  await expect(page).toHaveURL(/\/prototype\/patient-home\/departments\?variant=A/)
+  await expect(page.getByTestId('department-page')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '科室信息' })).toBeVisible()
+  await page.getByRole('button', { name: /内科 呼吸消化/ }).click()
+  await expect(page.getByRole('heading', { name: '内科' })).toBeVisible()
+  await page.getByRole('button', { name: '返回患者首页' }).click()
+  await expect(page).toHaveURL(/\/prototype\/patient-home\?variant=A/)
+  expect(apiRequests).toEqual([])
 })
 
 test('AI抽屉要求本次授权，选图后重新授权，方向键不打断输入且不外发材料', async ({ page }) => {

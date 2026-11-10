@@ -21,7 +21,10 @@ import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
   { path: '/prototype/auth', component: LoginRegisterPrototypeView },
-  ...(import.meta.env.DEV ? [{ path: '/prototype/patient-home', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } }] : []),
+  ...(import.meta.env.DEV ? [
+    { path: '/prototype/patient-home', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
+    { path: '/prototype/patient-home/departments', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
+  ] : []),
   { path: '/assistant/business', component: BusinessAssistantView },
   { path: '/admin/governance', component: AdminGovernanceView, meta: { role: 'ADMIN' } },
   { path: '/doctor/governance', component: DoctorGovernanceView, meta: { role: 'DOCTOR' } },
