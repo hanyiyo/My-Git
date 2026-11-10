@@ -11,12 +11,15 @@ import java.util.List;
 @RequestMapping("/api/v1/patient/appointments")
 public class BookingController {
     private final BookingService booking;
-    public BookingController(BookingService booking) { this.booking = booking; }
+    private final java.time.Clock clock;
+    public BookingController(BookingService booking, java.time.Clock clock) { this.booking = booking; this.clock = clock; }
+    public record RegistrationHold(@com.fasterxml.jackson.annotation.JsonUnwrapped BookingMapper.Appointment appointment, long serverNow) {}
     public record CreateInput(@NotBlank @Size(max=36) String scheduleId, @NotBlank String source,
         @NotBlank @Size(max=80) String idempotencyKey) {}
     @GetMapping List<BookingService.OrderView> orders(JwtAuthenticationToken auth) { return booking.orders(auth.getName()); }
-    @PostMapping ResponseEntity<BookingMapper.Appointment> create(JwtAuthenticationToken auth, @Valid @RequestBody CreateInput input) {
-        return ResponseEntity.status(201).body(booking.create(auth.getName(), input.scheduleId(), input.source(), input.idempotencyKey()));
+    @PostMapping ResponseEntity<RegistrationHold> create(JwtAuthenticationToken auth, @Valid @RequestBody CreateInput input) {
+        var appointment = booking.create(auth.getName(), input.scheduleId(), input.source(), input.idempotencyKey());
+        return ResponseEntity.status(201).body(new RegistrationHold(appointment, clock.millis()));
     }
     @GetMapping("/{id}") BookingMapper.Appointment own(JwtAuthenticationToken auth, @PathVariable String id) {
         return booking.own(auth.getName(), id);

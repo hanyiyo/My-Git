@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { api } from '../api'
 import { useNotificationRefresh } from '../useNotificationRefresh'
 
@@ -12,7 +13,10 @@ interface Order {
   cancellationReason: string | null; cancelledAt: number | null; payment: Payment | null; refund: Refund | null; reception: Reception | null; substitutionPending: boolean
 }
 
-const orders = ref<Order[]>([]), error = ref(''), busy = ref(false)
+const orders = ref<Order[]>([]), error = ref(''), busy = ref(false), loading = ref(false)
+let loadVersion = 0
+const route = useRoute()
+const visibleOrders = computed(() => route.query.state === 'PENDING_PAYMENT' ? orders.value.filter(order => order.state === 'PENDING_PAYMENT') : orders.value)
 const now = ref(0)
 let serverNow = 0, receivedAt = performance.now()
 const timer = setInterval(() => { now.value = serverNow + performance.now() - receivedAt }, 1000)
@@ -35,33 +39,40 @@ function sessionLabel(value: string) { return value === 'AM' ? '上午' : '下�
 function modeLabel(value: string) { return value === 'ONLINE' ? '线上' : '线下' }
 function money(value: number) { return `¥${(value / 100).toFixed(2)}` }
 async function load() {
-  busy.value = true; error.value = ''
+  const version = ++loadVersion
+  loading.value = true; error.value = ''
   try {
-    orders.value = await api<Order[]>('/patient/appointments')
+    const result = await api<Order[]>('/patient/appointments')
+    if (version !== loadVersion) return
+    orders.value = result
     serverNow = orders.value[0]?.serverNow ?? 0; receivedAt = performance.now(); now.value = serverNow
   }
-  catch (failure) { error.value = failure instanceof Error ? failure.message : '订单加载失败，请重试' }
-  finally { busy.value = false }
+  catch (failure) { if (version === loadVersion) error.value = failure instanceof Error ? failure.message : '订单加载失败，请重试' }
+  finally { if (version === loadVersion) loading.value = false }
 }
 async function simulatePayment(order: Order) {
   busy.value = true; error.value = ''
   try { await api(`/patient/appointments/${order.id}/simulate-payment`, 'POST'); await load() }
-  catch (failure) { error.value = failure instanceof Error ? failure.message : '支付失败，请重试'; busy.value = false }
+  catch (failure) { error.value = failure instanceof Error ? failure.message : '支付失败，请重试' }
+  finally { busy.value = false }
 }
 async function cancel(order: Order) {
   busy.value = true; error.value = ''
   try { await api(`/patient/appointments/${order.id}/cancel`, 'POST'); await load() }
-  catch (failure) { error.value = failure instanceof Error ? failure.message : '取消失败，请重试'; busy.value = false }
+  catch (failure) { error.value = failure instanceof Error ? failure.message : '取消失败，请重试' }
+  finally { busy.value = false }
 }
 async function checkIn(order: Order) {
   busy.value = true; error.value = ''
   try { await api(`/patient/appointments/${order.id}/check-in`, 'POST'); await load() }
-  catch (failure) { error.value = failure instanceof Error ? failure.message : '签到失败，请重试'; busy.value = false }
+  catch (failure) { error.value = failure instanceof Error ? failure.message : '签到失败，请重试' }
+  finally { busy.value = false }
 }
 async function restoreQueue(order: Order) {
   busy.value = true; error.value = ''
   try { await api(`/patient/appointments/${order.id}/restore-queue`, 'POST'); await load() }
-  catch (failure) { error.value = failure instanceof Error ? failure.message : '恢复排队失败，请重试'; busy.value = false }
+  catch (failure) { error.value = failure instanceof Error ? failure.message : '恢复排队失败，请重试' }
+  finally { busy.value = false }
 }
 onMounted(load)
 useNotificationRefresh(load)
@@ -70,9 +81,9 @@ useNotificationRefresh(load)
   <RouterLink to="/patient">返回工作台</RouterLink>
   <section class="card catalog orders"><h2>我的预约订单</h2>
     <p v-if="error" role="alert" class="notice">{{ error }}</p>
-    <p v-if="busy && !orders.length" class="hint">订单加载中…</p>
-    <p v-if="!busy && !orders.length" class="hint">暂无预约订单。</p>
-    <ul class="resource-list"><li v-for="order in orders" :key="order.id" :data-appointment-id="order.id">
+    <p v-if="loading && !orders.length" class="hint">订单加载中…</p>
+    <p v-if="!loading && !orders.length" class="hint">暂无预约订单。</p>
+    <p v-if="route.query.state === 'PENDING_PAYMENT'">当前显示待付款挂号 · <RouterLink to="/patient/orders">查看全部挂号</RouterLink></p><p v-if="!busy && orders.length && !visibleOrders.length" class="hint">暂无待付款挂号。</p><ul class="resource-list"><li v-for="order in visibleOrders" :key="order.id" :data-appointment-id="order.id">
       <strong>{{ order.doctorName }} · {{ order.departmentName }}</strong>
       <p>{{ order.clinicDate }} {{ sessionLabel(order.session) }} · {{ modeLabel(order.serviceMode) }} · {{ money(order.feeMinor) }}</p>
       <p>预约登记编号：{{ order.id }}</p>

@@ -148,7 +148,7 @@ class CatalogHttpTest extends HttpFixture {
         assertThat(admin.call("PUT", "/api/v1/admin/catalog/doctors/" + doctor.id(), Map.of("displayName", "虚构周医生", "title", "主治医师", "biography", "", "departmentId", otherDepartment, "credentialStatus", "CERTIFIED")).status()).isEqualTo(409);
     }
 
-    @Test void onlineAdvanceAndOfflineWalkInCloseAtExactHospitalTimeBoundaries() throws Exception {
+    @Test void onlineAndOfflineWalkInCloseAtExactHospitalTimeBoundaries() throws Exception {
         var admin = admin(); String department = department(admin); var online = doctor(admin, department, "CERTIFIED"); var offline = doctor(admin, department, "CERTIFIED");
         var date = LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(2);
         var first = admin.call("POST", "/api/v1/admin/catalog/schedules", schedule(online.id(), department, date, "AM", "ONLINE", 2));
@@ -156,7 +156,12 @@ class CatalogHttpTest extends HttpFixture {
         assertThat(first.status()).isEqualTo(201); assertThat(second.status()).isEqualTo(201);
         clock.now = Instant.ofEpochMilli(first.body().path("startsAt").asLong());
         assertThat(admin.call("POST", "/api/v1/admin/catalog/schedules", schedule(offline.id(), department, date, "AM", "ONLINE", 2)).status()).isEqualTo(400);
-        assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id(), null).body().size()).isZero();
+        var onlineWalkIn = admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id(), null).body();
+        assertThat(onlineWalkIn.size()).isEqualTo(1);
+        assertThat(onlineWalkIn.get(0).path("walkInAvailable").asBoolean()).isTrue();
+        assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id() + "&session=PM", null).body().size()).isZero();
+        assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id() + "&session=AM", null).body().size()).isEqualTo(1);
+        assertThat(admin.call("GET", "/api/v1/catalog/schedules?session=EVENING", null).status()).isEqualTo(400);
         var walkIn = admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + offline.id(), null).body();
         assertThat(walkIn.size()).isEqualTo(1);
         assertThat(walkIn.get(0).path("walkInAvailable").asBoolean()).isTrue();

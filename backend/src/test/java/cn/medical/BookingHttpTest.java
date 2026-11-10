@@ -94,6 +94,11 @@ class BookingHttpTest extends HttpFixture {
     Map<String, String> command(Published schedule, String key) {
         return Map.of("scheduleId", schedule.id(), "source", "ADVANCE", "idempotencyKey", key);
     }
+    com.fasterxml.jackson.databind.JsonNode appointmentSnapshot(com.fasterxml.jackson.databind.JsonNode response) {
+        var snapshot = (com.fasterxml.jackson.databind.node.ObjectNode) response.deepCopy();
+        snapshot.remove("serverNow");
+        return snapshot;
+    }
     List<Reply> concurrently(List<Browser> browsers, List<Published> schedules) throws Exception {
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var ready = new CountDownLatch(browsers.size()); var start = new CountDownLatch(1);
@@ -119,6 +124,27 @@ class BookingHttpTest extends HttpFixture {
             .allSatisfy(reply -> assertThat(reply.body().path("error").path("code").asText()).isEqualTo("NO_SLOTS"));
         var publicSchedules = patients.get(0).call("GET", "/api/v1/catalog/schedules?doctorId=" + schedule.doctorId(), null);
         assertThat(publicSchedules.body().size()).isZero();
+    }
+    @Test void sameScheduleAllocatesDifferentSlotsAndReturnsServerTimeBeforeOpeningOnClinicDay() throws Exception {
+        var schedule = published("ONLINE", "AM", 2);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt() - 3_600_000);
+        var patients = List.of(patient(), patient(), patient());
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var tasks = patients.stream().map(patient -> executor.submit(() -> patient.call("POST", "/api/v1/patient/appointments",
+                Map.of("scheduleId", schedule.id(), "source", "WALK_IN", "idempotencyKey", identifier())))).toList();
+            var replies = new ArrayList<Reply>();
+            for (var task : tasks) replies.add(task.get(20, TimeUnit.SECONDS));
+            var holds = replies.stream().filter(reply -> reply.status() == 201).toList();
+            assertThat(holds).hasSize(2);
+            assertThat(holds.stream().map(reply -> reply.body().path("slotId").asText()).distinct().count()).isEqualTo(2);
+            assertThat(holds).allSatisfy(reply -> {
+                assertThat(reply.body().path("serverNow").asLong()).isEqualTo(clock.millis());
+                assertThat(reply.body().path("source").asText()).isEqualTo("WALK_IN");
+                assertThat(reply.body().path("holdExpiresAt").asLong()).isEqualTo(clock.millis() + 600_000);
+            });
+            assertThat(replies).filteredOn(reply -> reply.status() == 409).singleElement()
+                .satisfies(reply -> assertThat(reply.body().path("error").path("code").asText()).isEqualTo("NO_SLOTS"));
+        }
     }
     @Test void onePatientCompetingAcrossDoctorsAndModesHoldsOnlyOneHalfDayRegistration() throws Exception {
         var schedules = new ArrayList<Published>();
@@ -362,8 +388,8 @@ class BookingHttpTest extends HttpFixture {
         assertThat(refund.path("reason").asText()).isEqualTo("LATE_PAYMENT");
         assertThat(patientA.call("POST", originalPath + "/simulate-payment", null).body()).isEqualTo(late.body());
         assertThat(patientA.call("GET", originalPath + "/billing", null).body()).isEqualTo(financial.body());
-        assertThat(patientB.call("GET", "/api/v1/patient/appointments/" + reassigned.body().path("id").asText(), null).body()).isEqualTo(reassigned.body());
-        assertThat(patientA.call("GET", "/api/v1/patient/appointments/" + newOrder.body().path("id").asText(), null).body()).isEqualTo(newOrder.body());
+        assertThat(patientB.call("GET", "/api/v1/patient/appointments/" + reassigned.body().path("id").asText(), null).body()).isEqualTo(appointmentSnapshot(reassigned.body()));
+        assertThat(patientA.call("GET", "/api/v1/patient/appointments/" + newOrder.body().path("id").asText(), null).body()).isEqualTo(appointmentSnapshot(newOrder.body()));
         assertThat(patientA.call("GET", "/api/v1/catalog/schedules?doctorId=" + originalSchedule.doctorId(), null).body().size()).isZero();
         var conflict = patientA.call("POST", "/api/v1/patient/appointments", command(thirdSchedule, identifier()));
         assertThat(conflict.status()).isEqualTo(409);
@@ -504,9 +530,10 @@ class BookingHttpTest extends HttpFixture {
         assertThat(order.path("session").asText()).isEqualTo("AM");
         assertThat(order.path("feeMinor").asLong()).isEqualTo(2000);
         assertThat(order.path("holdExpiresAt").asLong()).isEqualTo(clock.millis() + 600_000);
+        assertThat(order.path("serverNow").asLong()).isEqualTo(clock.millis());
         var queried = patient.call("GET", "/api/v1/patient/appointments/" + order.path("id").asText(), null);
         assertThat(queried.status()).isEqualTo(200);
-        assertThat(queried.body()).isEqualTo(order);
+        assertThat(queried.body()).isEqualTo(appointmentSnapshot(order));
         var remaining = patient.call("GET", "/api/v1/catalog/schedules?doctorId=" + doctorId, null);
         assertThat(remaining.body().get(0).path("availableSlots").asInt()).isEqualTo(1);
     }

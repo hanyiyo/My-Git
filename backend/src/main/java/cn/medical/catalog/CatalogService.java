@@ -97,7 +97,8 @@ public class CatalogService {
     }
     private boolean registrationOpen(CatalogMapper.Schedule schedule, String source, long now) {
         return source.equals("ADVANCE") ? now < schedule.startsAt()
-            : now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
+            : schedule.clinicDate().equals(Instant.ofEpochMilli(now).atZone(HOSPITAL_ZONE).toLocalDate())
+                && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
     }
     public record Confirmation(boolean confirmed, long observedAt) {}
     @Transactional
@@ -168,7 +169,12 @@ public class CatalogService {
     }
     @Transactional(readOnly = true)
     public List<ScheduleView> schedules(boolean management, String doctorId, String departmentId, LocalDate date, String mode) {
+        return schedules(management, doctorId, departmentId, date, mode, null);
+    }
+    @Transactional(readOnly = true)
+    public List<ScheduleView> schedules(boolean management, String doctorId, String departmentId, LocalDate date, String mode, String session) {
         if (mode != null && !Set.of("ONLINE", "OFFLINE").contains(mode)) throw new ApiFailure(400, "INVALID_INPUT", "服务方式无效");
+        if (session != null && !Set.of("AM", "PM").contains(session)) throw new ApiFailure(400, "INVALID_INPUT", "门诊时段无效");
         var doctors = doctors(true, null).stream().collect(Collectors.toMap(DoctorView::id, Function.identity()));
         var departments = catalog.departments().stream().collect(Collectors.toMap(CatalogMapper.Department::id, Function.identity()));
         long now = clock.millis();
@@ -176,6 +182,7 @@ public class CatalogService {
             .filter(schedule -> doctorId == null || doctorId.equals(schedule.doctorId()))
             .filter(schedule -> departmentId == null || departmentId.equals(schedule.departmentId()))
             .filter(schedule -> date == null || date.equals(schedule.clinicDate()))
+            .filter(schedule -> session == null || session.equals(schedule.session()))
             .filter(schedule -> management || date != null || schedule.startsAt() < now + Duration.ofDays(7).toMillis())
             .filter(schedule -> mode == null || mode.equals(schedule.serviceMode()))
             .map(schedule -> scheduleView(schedule, doctors, departments, now))
@@ -196,7 +203,7 @@ public class CatalogService {
             && schedule.state().equals("PUBLISHED") && schedule.availableSlots() > 0;
         return new ScheduleView(schedule.id(), schedule.doctorId(), doctor == null ? "" : doctor.displayName(), schedule.departmentId(), department == null ? "" : department.name(),
             schedule.clinicDate(), schedule.session(), schedule.serviceMode(), schedule.startsAt(), schedule.endsAt(), schedule.zoneId(), schedule.capacity(), schedule.feeMinor(), schedule.state(), schedule.availableSlots(),
-            valid && now < schedule.startsAt(), valid && schedule.serviceMode().equals("OFFLINE") && now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis());
+            valid && registrationOpen(schedule, "ADVANCE", now), valid && registrationOpen(schedule, "WALK_IN", now));
     }
     @Transactional
     public ScheduleView publish(String doctorId, String departmentId, LocalDate date, String session, String mode, int capacity, long feeMinor) {
