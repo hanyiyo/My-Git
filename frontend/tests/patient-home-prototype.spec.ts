@@ -76,6 +76,7 @@ test('快捷入口携带就诊模式与挂号筛选，签到和两类缴费相�
   await expect(page).toHaveURL(/\/prototype\/patient-home\/departments/)
   await page.getByRole('button', { name: /口腔科 口腔检查/ }).click()
   await expect(page.getByRole('heading', { name: '口腔科' })).toBeVisible()
+  await page.getByRole('tab', { name: '线下', exact: true }).click()
   await page.getByTestId('department-page').getByRole('button', { name: '立即挂号', exact: true }).click()
   await expect(dialog.getByLabel('选择科室')).toHaveValue('口腔科')
   await page.keyboard.press('Escape')
@@ -97,6 +98,50 @@ test('科室信息从顶部导航跳转为独立目录页面', async ({ page }) 
   await page.getByRole('button', { name: '返回患者首页' }).click()
   await expect(page).toHaveURL(/\/prototype\/patient-home\?variant=A/)
   expect(apiRequests).toEqual([])
+})
+
+test('科室目录 A/B/C 变体支持出诊方式、挂号预约和 URL 切换', async ({ page }) => {
+  const apiRequests: string[] = []
+  page.on('request', request => { if (request.url().includes('/api/')) apiRequests.push(request.url()) })
+  const headings = {
+    A: '科室信息',
+    B: '找到今天适合你的门诊',
+    C: '全科医学科',
+  } as const
+  for (const variant of ['A', 'B', 'C'] as const) {
+    await page.goto(`/prototype/patient-home/departments?variant=${variant}`)
+    await expect(page.getByTestId('department-page')).toBeVisible()
+    await expect(page.getByRole('heading', { name: headings[variant] })).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`departments\\?variant=${variant}$`))
+
+    const modeTabs = page.getByRole('tab')
+    await expect(modeTabs).toHaveCount(2)
+    await modeTabs.nth(1).click()
+    await expect(page.getByRole('button', { name: '立即挂号', exact: true }).first()).toBeVisible()
+    await page.getByRole('button', { name: '立即挂号', exact: true }).last().click()
+    const registration = page.getByRole('dialog')
+    await expect(registration.getByLabel('选择科室')).toHaveValue('全科医学科')
+    await expect(registration.getByRole('heading', { name: /陈予安/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    await page.getByRole('button', { name: '预约', exact: true }).first().click()
+    await expect(page.getByRole('dialog').getByLabel('选择科室')).toHaveValue('全科医学科')
+    await expect(page.getByRole('dialog').getByRole('heading', { name: /林牧/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+  }
+  expect(apiRequests).toEqual([])
+})
+
+test('科室目录三个变体在手机端使用横向科室标签且不产生横向滚动', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  for (const variant of ['A', 'B', 'C']) {
+    await page.goto(`/prototype/patient-home/departments?variant=${variant}`)
+    await expect(page.getByTestId('department-page')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    const departmentNav = page.getByRole('navigation', { name: '科室横向导航' })
+    if (variant === 'C') await expect(departmentNav).toBeVisible()
+    await page.getByRole('button', { name: '下一个方案' }).click()
+  }
 })
 
 test('AI抽屉要求本次授权，选图后重新授权，方向键不打断输入且不外发材料', async ({ page }) => {
