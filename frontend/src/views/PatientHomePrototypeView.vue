@@ -17,7 +17,7 @@ const route = useRoute()
 const router = useRouter()
 const variants = [{ key: 'A', name: '清新服务台' }, { key: 'B', name: '就诊时间线' }, { key: 'C', name: '导诊探索' }]
 const directoryPage = computed(() => route.path === '/prototype/patient-home/departments')
-const departmentVariants = [{ key: 'A', name: '左侧科室导航' }, { key: 'B', name: '今日出诊看板' }, { key: 'C', name: '医生团队优先' }]
+const departmentVariants = [{ key: 'A', name: '左侧科室导航' }, { key: 'B', name: '今日出诊看板' }, { key: 'C', name: '医生列表优先' }]
 const variant = computed(() => { const options = directoryPage.value ? departmentVariants : variants; return options.some(item => item.key === route.query.variant) ? String(route.query.variant) : 'A' })
 const prototypeVariants = computed(() => directoryPage.value ? departmentVariants : variants)
 const sidebarCollapsed = ref(window.innerWidth < 760), bannerIndex = ref(0), checkedIn = ref(false), paid = ref(false), bookingPaid = ref(false)
@@ -28,16 +28,16 @@ const noticeRead = ref(false)
 let bannerTimer: number | undefined
 const nav: { action: HomeAction | 'home'; icon: string; name: string }[] = [
   { action: 'home', icon: 'home', name: '首页' }, { action: 'departments', icon: 'grid', name: '科室信息' },
-  { action: 'doctors', icon: 'doctor', name: '医生团队' }, { action: 'registration', icon: 'calendar', name: '立即挂号' },
+  { action: 'doctors', icon: 'doctor', name: '医生列表' }, { action: 'registration', icon: 'calendar', name: '立即挂号' },
   { action: 'orders', icon: 'file', name: '我的挂号' }, { action: 'notifications', icon: 'bell', name: '站内通知' },
   { action: 'profile', icon: 'user', name: '个人中心' },
 ]
 const topNav: { action: HomeAction | 'home'; name: string }[] = [
-  { action: 'home', name: '首页' }, { action: 'doctors', name: '医生团队' },
+  { action: 'home', name: '首页' }, { action: 'doctors', name: '医生列表' },
   { action: 'departments', name: '科室信息' }, { action: 'registration', name: '立即挂号' },
   { action: 'orders', name: '我的挂号' }, { action: 'notifications', name: '站内通知' },
 ]
-const panelTitles: Partial<Record<HomeAction, string>> = { registration: '挂号预览', orders: '我的挂号', departments: '科室信息', doctors: '医生团队', notifications: '站内通知', profile: '个人中心' }
+const panelTitles: Partial<Record<HomeAction, string>> = { registration: '挂号预览', orders: '我的挂号', departments: '科室信息', doctors: '医生列表', notifications: '站内通知', profile: '个人中心' }
 const panelTitle = computed(() => panel.value ? panelTitles[panel.value] ?? '服务预览' : '服务预览')
 const state = computed(() => `${sidebarCollapsed.value ? '侧栏收起' : '侧栏展开'} · 公告 ${bannerIndex.value + 1}/3 · ${checkedIn.value ? '候诊中' : '待签到'} · ${aiOpen.value ? '导诊打开' : panel.value ? panelTitle.value : '首页'} · 虚构数据`)
 function open(action: HomeAction) {

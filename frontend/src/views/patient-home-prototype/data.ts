@@ -6,7 +6,7 @@ export const services: { action: HomeAction; icon: string; title: string; detail
   { action: 'payment', icon: 'wallet', title: '缴费中心', detail: '挂号费、药费一处办理', color: 'orange' },
   { action: 'report', icon: 'file', title: '查看报告', detail: '查看已完成就诊与病历', color: 'blue' },
   { action: 'departments', icon: 'grid', title: '科室信息', detail: '了解科室，找到方向', color: 'teal' },
-  { action: 'doctors', icon: 'doctor', title: '医生团队', detail: '查看医生与出诊安排', color: 'purple' },
+  { action: 'doctors', icon: 'doctor', title: '医生列表', detail: '查看医生与出诊安排', color: 'purple' },
 ]
 export const departments = [
   { name: '全科医学科', icon: 'cross', detail: '常见不适 · 综合诊疗', count: 6 },
