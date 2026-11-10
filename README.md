@@ -18,6 +18,12 @@
 
 生产构建：`npm --prefix frontend run build`；后端 `mvn -f backend/pom.xml package`。用同源 HTTPS 反向代理托管 `frontend/dist/` 并代理 `/api/` 到 Spring Boot；Vue 路由需静态页回退。MySQL 数据目录须持久化，Redis 只保存可重建登录状态。测试固定验证码仅存在于测试类路径，不在生产包内。
 
+## 患者端首页原型
+
+执行 `npm run prototype:patient`，访问 `http://127.0.0.1:5175/prototype/patient-home?variant=A`。无需后端或登录，使用虚构、仅存于内存的演示资料。
+
+底部箭头或键盘左右键切换三种结构：A 清新服务台、B 就诊时间线、C 导诊探索；也可修改 URL 的 `variant` 参数。三版都采用可收缩左侧栏、左下挂号入口和右下 AI 导诊抽屉。快捷服务、公告、签到、模拟缴费与图片授权支持交互预览，不创建真实业务记录，不调用外部 AI。原型入口只在开发环境注册，不进入生产包。
+
 ## 完整验证
 
 ```powershell
