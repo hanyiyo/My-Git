@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Icon from './PrototypeIcon.vue'
+import PrototypeDatePicker from './PrototypeDatePicker.vue'
 import { departments } from './data'
+import { prototypeToday } from './prototype-date-options'
 
 type VisitMode = '线下面诊' | '线上问诊'
 interface RegistrationSlot {
@@ -25,7 +27,7 @@ const emit = defineEmits<{ back: []; orders: [] }>()
 const mode = ref<VisitMode>(props.initialMode)
 const department = ref(props.initialDepartment)
 const doctor = ref(props.initialDoctor)
-const date = ref('2026-11-10')
+const date = ref(prototypeToday)
 const search = ref('')
 const selectedId = ref('general-am')
 const submitted = ref(false)
@@ -37,11 +39,6 @@ const slots: RegistrationSlot[] = [
   { id: 'skin-pm', doctor: '周晚宁', title: '主治医师', department: '皮肤科', specialty: '皮肤问题 · 专业咨询', date: '2026-11-10', dateLabel: '今天 · 11月10日', time: '15:00–17:30', mode: '线上问诊', room: '线上图文诊室', slots: 7, fee: '¥16.00', tag: '线上问诊' },
 ]
 
-const dateOptions = [
-  { value: '2026-11-10', label: '今天', sub: '11/10' },
-  { value: '2026-11-11', label: '明天', sub: '11/11' },
-  { value: '2026-11-12', label: '周四', sub: '11/12' },
-]
 const filteredSlots = computed(() => slots.filter(item => {
   const query = search.value.trim()
   return (!query || `${item.doctor}${item.department}${item.specialty}`.includes(query))
@@ -68,7 +65,7 @@ function reset() {
   mode.value = props.initialMode
   department.value = props.initialDepartment || '全部科室'
   doctor.value = props.initialDoctor
-  date.value = '2026-11-10'
+  date.value = prototypeToday
   search.value = ''
   selectedId.value = 'general-am'
   submitted.value = false
@@ -98,7 +95,7 @@ function confirm() {
 
     <section class="ph-registration-toolbar" aria-label="挂号筛选">
       <div class="ph-registration-tabs" role="tablist" aria-label="就诊方式"><button type="button" role="tab" :aria-selected="mode === '线下面诊'" :class="{ active: mode === '线下面诊' }" @click="setMode('线下面诊')"><Icon name="hospital" /> 线下面诊</button><button type="button" role="tab" :aria-selected="mode === '线上问诊'" :class="{ active: mode === '线上问诊' }" @click="setMode('线上问诊')"><Icon name="chat" /> 线上问诊</button></div>
-      <label class="ph-registration-control">就诊日期<select v-model="date" aria-label="就诊日期"><option v-for="item in dateOptions" :key="item.value" :value="item.value">{{ item.label }} · {{ item.sub }}</option></select></label>
+      <PrototypeDatePicker v-model="date" label="就诊日期" />
       <label class="ph-registration-control">科室<select v-model="department" aria-label="挂号科室"><option v-for="item in departmentOptions" :key="item">{{ item }}</option></select></label><label class="ph-registration-control">医生<select v-model="doctor" aria-label="挂号医生"><option value="">全部医生</option><option v-for="item in doctorOptions.slice(1)" :key="item">{{ item }}</option></select></label>
       <label class="ph-registration-search"><Icon name="search" /><span class="sr-only">搜索医生</span><input v-model="search" aria-label="搜索医生" placeholder="搜索医生姓名或擅长方向" /></label>
       <button class="ph-reset-button" type="button" @click="reset"><Icon name="refresh" /> 重置</button>

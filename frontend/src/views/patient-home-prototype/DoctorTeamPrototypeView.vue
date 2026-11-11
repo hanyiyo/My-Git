@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Icon from './PrototypeIcon.vue'
+import PrototypeDatePicker from './PrototypeDatePicker.vue'
 import { departmentDoctors, departmentProfiles, type DepartmentMode, type PrototypeDepartmentDoctor } from './department-data'
+import { prototypeToday } from './prototype-date-options'
 
 type ServiceFilter = '全部' | DepartmentMode
 type SessionFilter = '全部' | '上午' | '下午'
@@ -22,7 +24,7 @@ interface DoctorRecord extends PrototypeDepartmentDoctor {
 }
 
 const emit = defineEmits<{ register: [doctor: string] }>()
-const today = '2026-11-10'
+const today = prototypeToday
 const name = ref('')
 const department = ref('全部科室')
 const service = ref<ServiceFilter>('全部')
@@ -46,7 +48,6 @@ function schedulesFor(doctor: PrototypeDepartmentDoctor, departmentName: string)
 }
 const doctors = computed<DoctorRecord[]>(() => Object.entries(departmentDoctors).flatMap(([departmentName, list]) => list.map(doctor => ({ ...doctor, department: departmentName, schedules: schedulesFor(doctor, departmentName) }))))
 const departmentOptions = computed(() => ['全部科室', ...Object.keys(departmentDoctors)])
-const dateOptions = [{ value: today, label: '今天 · 11/10' }, { value: '2026-11-11', label: '明天 · 11/11' }, { value: '2026-11-12', label: '周四 · 11/12' }]
 const sessionOptions: SessionFilter[] = ['全部', '上午', '下午']
 const serviceOptions: { value: ServiceFilter; label: string }[] = [{ value: '全部', label: '全部类型' }, { value: 'ONLINE', label: '线上问诊' }, { value: 'OFFLINE', label: '线下面诊' }]
 function matches(scheduleItem: TeamSchedule) {
@@ -84,10 +85,10 @@ function registerDoctor(doctor: DoctorRecord) {
   <section class="ph-doctor-team-page" data-testid="doctor-team-page" aria-labelledby="doctor-team-title">
     <header class="ph-doctor-team-heading"><div><span class="ph-eyebrow">MEDICAL TEAM · DOCTOR DIRECTORY</span><h1 id="doctor-team-title">医生列表</h1><p>了解医生擅长方向与出诊安排，选择适合你的服务方式。</p></div><div class="ph-doctor-team-summary"><strong>{{ doctors.length }}</strong><span>位医生</span><small>今日门诊服务开放中</small></div></header>
 
-    <section class="ph-doctor-query" aria-label="医生查询"><label class="ph-doctor-query-search"><Icon name="search" /><span class="sr-only">按姓名搜索</span><input v-model="name" aria-label="按姓名搜索" placeholder="搜索医生姓名、擅长方向" /></label><label>科室<select v-model="department" aria-label="医生科室"><option v-for="item in departmentOptions" :key="item">{{ item }}</option></select></label><label>出诊类型<select v-model="service" aria-label="出诊类型"><option v-for="item in serviceOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label>出诊日期<select v-model="date" aria-label="出诊日期"><option v-for="item in dateOptions" :key="item.value" :value="item.value">{{ item.label }}</option><option value="全部日期">全部日期</option></select></label><label>门诊时段<select v-model="session" aria-label="门诊时段"><option v-for="item in sessionOptions" :key="item">{{ item }}</option></select></label><button class="ph-reset-button" type="button" @click="reset"><Icon name="refresh" /> 重置</button></section>
+    <section class="ph-doctor-query" aria-label="医生查询"><label class="ph-doctor-query-search"><Icon name="search" /><span class="sr-only">按姓名搜索</span><input v-model="name" aria-label="按姓名搜索" placeholder="搜索医生姓名、擅长方向" /></label><label>科室<select v-model="department" aria-label="医生科室"><option v-for="item in departmentOptions" :key="item">{{ item }}</option></select></label><label>出诊类型<select v-model="service" aria-label="出诊类型"><option v-for="item in serviceOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><PrototypeDatePicker v-model="date" label="出诊日期" /><label>门诊时段<select v-model="session" aria-label="门诊时段"><option v-for="item in sessionOptions" :key="item">{{ item }}</option></select></label><button class="ph-reset-button" type="button" @click="reset"><Icon name="refresh" /> 重置</button></section>
 
     <div v-if="!hasCurrentSlots" class="ph-doctor-empty-notice" role="status"><Icon name="info" /><div><strong>当前条件暂无号源</strong><small>下面展示默认医生列表，你可以打开医生详情查看最近三次排班，或直接进入挂号页查询更远日期。</small></div></div>
-    <div class="ph-doctor-list-heading"><div><span class="ph-eyebrow">DOCTOR TEAM</span><h2>{{ hasCurrentSlots ? '可预约医生' : '默认医生列表' }}</h2></div><span>{{ visibleDoctors.length }} 位医生</span></div>
+    <div class="ph-doctor-list-heading"><div><span class="ph-eyebrow">DOCTOR TEAM</span><h2>{{ hasCurrentSlots ? '医生列表' : '默认医生列表' }}</h2></div><span>{{ visibleDoctors.length }} 位医生</span></div>
 
     <div class="ph-doctor-grid">
       <article v-for="doctor in visibleDoctors" :key="doctor.id" class="ph-doctor-card" @click="openDoctor(doctor)">
