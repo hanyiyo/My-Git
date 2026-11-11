@@ -45,12 +45,14 @@ const dateOptions = [
 const filteredSlots = computed(() => slots.filter(item => {
   const query = search.value.trim()
   return (!query || `${item.doctor}${item.department}${item.specialty}`.includes(query))
+    && (!doctor.value || item.doctor === doctor.value)
     && (!department.value || department.value === '全部科室' || item.department === department.value)
     && item.mode === mode.value
     && item.date === date.value
 }))
 const selected = computed(() => filteredSlots.value.find(item => item.id === selectedId.value) ?? filteredSlots.value[0] ?? slots[0])
 const departmentOptions = computed(() => ['全部科室', ...departments.map(item => item.name)])
+const doctorOptions = computed(() => ['全部医生', ...Array.from(new Set(slots.map(item => item.doctor)))])
 
 function choose(item: RegistrationSlot) {
   selectedId.value = item.id
@@ -97,7 +99,7 @@ function confirm() {
     <section class="ph-registration-toolbar" aria-label="挂号筛选">
       <div class="ph-registration-tabs" role="tablist" aria-label="就诊方式"><button type="button" role="tab" :aria-selected="mode === '线下面诊'" :class="{ active: mode === '线下面诊' }" @click="setMode('线下面诊')"><Icon name="hospital" /> 线下面诊</button><button type="button" role="tab" :aria-selected="mode === '线上问诊'" :class="{ active: mode === '线上问诊' }" @click="setMode('线上问诊')"><Icon name="chat" /> 线上问诊</button></div>
       <label class="ph-registration-control">就诊日期<select v-model="date" aria-label="就诊日期"><option v-for="item in dateOptions" :key="item.value" :value="item.value">{{ item.label }} · {{ item.sub }}</option></select></label>
-      <label class="ph-registration-control">科室<select v-model="department" aria-label="挂号科室"><option v-for="item in departmentOptions" :key="item">{{ item }}</option></select></label>
+      <label class="ph-registration-control">科室<select v-model="department" aria-label="挂号科室"><option v-for="item in departmentOptions" :key="item">{{ item }}</option></select></label><label class="ph-registration-control">医生<select v-model="doctor" aria-label="挂号医生"><option value="">全部医生</option><option v-for="item in doctorOptions.slice(1)" :key="item">{{ item }}</option></select></label>
       <label class="ph-registration-search"><Icon name="search" /><span class="sr-only">搜索医生</span><input v-model="search" aria-label="搜索医生" placeholder="搜索医生姓名或擅长方向" /></label>
       <button class="ph-reset-button" type="button" @click="reset"><Icon name="refresh" /> 重置</button>
     </section>

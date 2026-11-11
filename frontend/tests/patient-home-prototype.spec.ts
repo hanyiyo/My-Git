@@ -58,6 +58,32 @@ test('快捷入口进入 Web 端立即挂号工作台，保留我的挂号入口
   await expect(page.getByRole('dialog').getByRole('tab', { name: '全部', exact: true })).toBeVisible()
 })
 
+test('医生团队支持组合筛选、医生详情与只回填姓名的挂号跳转', async ({ page }) => {
+  await page.goto('/prototype/patient-home/departments?variant=A&view=doctors')
+  const team = page.getByTestId('doctor-team-page')
+  await expect(team.getByRole('heading', { name: '医生列表' })).toBeVisible()
+  await expect(team.getByLabel('按姓名搜索')).toBeVisible()
+  await expect(team.getByLabel('医生科室')).toBeVisible()
+  await expect(team.getByLabel('出诊类型')).toBeVisible()
+  await expect(team.getByLabel('出诊日期')).toBeVisible()
+  await expect(team.getByLabel('门诊时段')).toBeVisible()
+  await team.getByLabel('按姓名搜索').fill('陈予安')
+  await expect(team.locator('.ph-doctor-card')).toHaveCount(1)
+  await team.locator('.ph-doctor-card').click()
+  const detail = page.getByRole('dialog')
+  await expect(detail.getByRole('heading', { name: /陈予安/ })).toBeVisible()
+  await expect(detail.getByRole('heading', { name: '最近三次排班' })).toBeVisible()
+  await expect(detail.locator('.ph-doctor-schedule-row')).toHaveCount(3)
+  await detail.getByRole('button', { name: '立即挂号' }).click()
+  await expect(page).toHaveURL(/view=registration/)
+  await expect(page.getByTestId('registration-page').getByLabel('挂号医生')).toHaveValue('陈予安')
+  await page.goto('/prototype/patient-home/departments?variant=A&view=doctors')
+  await page.getByLabel('出诊日期').selectOption('2026-11-11')
+  await expect(team.getByRole('status')).toContainText('当前条件暂无号源')
+  await expect(page.getByRole('heading', { name: '默认医生列表' })).toBeVisible()
+  await page.screenshot({ path: '../.runtime/prototype-doctors-desktop.png', fullPage: true })
+})
+
 test('科室信息从顶部导航跳转为独立目录页面', async ({ page }) => {
   const apiRequests: string[] = []
   page.on('request', request => { if (request.url().includes('/api/')) apiRequests.push(request.url()) })
