@@ -29,6 +29,7 @@ const paths: Record<string, string> = {
   refresh: 'M20 11a8 8 0 1 0 1 4m-1-9v5h-5',
   info: 'M12 16v-4m0-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
   warning: 'M12 3 2.5 20h19L12 3Zm0 6v5m0 3h.01',
+  trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7',
 }
 </script>
 <template><svg class="ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name] ?? paths.cross" /></svg></template>

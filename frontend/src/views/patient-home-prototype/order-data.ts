@@ -33,6 +33,9 @@ export interface PrototypeOrder {
 
 export const prototypeOrders: PrototypeOrder[] = [
   {
+    id: 'suspended-booking', doctor: '郭妤', title: '主治医师', department: '内科', specialty: '内科常见病咨询', mode: '线下面诊', source: '预约挂号', status: 'CANCELLED', date: '2026-11-11', dateLabel: '明天 · 11月11日', time: '14:00–18:00', room: '门诊二楼 · 205 诊室', fee: '¥12.00', credential: 'GH20261111001', checkinWindow: '13:30–17:45', checkinOpen: false, reason: '医生停诊，挂号已自动取消；挂号费 ¥12.00 模拟退款处理中。',
+  },
+  {
     id: 'today-offline-pending', doctor: '陈予安', title: '主治医师', department: '全科医学科', specialty: '常见不适与健康咨询', mode: '线下面诊', source: '预约挂号', status: 'PENDING_VISIT', date: prototypeToday, dateLabel: '今天 · 11月10日', time: '14:00–18:00', room: '门诊一楼 · 103 诊室', fee: '¥12.00', credential: 'GH20261110001', checkinWindow: '13:30–17:45', checkinOpen: true,
   },
   {

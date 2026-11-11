@@ -1,6 +1,6 @@
 # 患者端站内通知原型设计
 
-状态：Q1–Q28 逐项决定已确认，等待用户确认本汇总后实施。本文只记录设计，页面尚未实现。关联总需求 #1；延续 [三端规格](three-end-requirements.md) 的双标签、个人业务通知和医院新闻边界。验收计划见 [通知原型验收记录](../acceptance/issue-1-patient-notifications-prototype.md)。
+状态：用户已确认并授权实施；原型已实现并通过完整验收。关联总需求 #1；延续 [三端规格](three-end-requirements.md) 的双标签、个人业务通知和医院新闻边界。验收证据见 [通知原型验收记录](../acceptance/issue-1-patient-notifications-prototype.md)。
 
 ## 范围与设计树
 
@@ -71,4 +71,8 @@ flowchart TD
 
 ## 实施验收边界
 
-页面实现前在 [验收记录](../acceptance/issue-1-patient-notifications-prototype.md) 中按公开交互补齐浏览器用例；所有项目目前均为待实现、待验证。完整门禁继续使用 `scripts/verify.ps1`，通过后按仓库要求创建对应提交。本设计阶段只更新文档、术语和文档检查，不将页面验收记为通过。
+公开浏览器用例位于 `frontend/tests/notifications-prototype.spec.ts`，按 [验收记录](../acceptance/issue-1-patient-notifications-prototype.md) 验证通知行为。原型在页面底部折叠的“原型演示”中提供首次失败、保留已有内容的刷新失败及重要提醒到期场景；`demo=error` 可直接演示首次加载失败。暂无通知和暂无未读分别通过清空及全部已读操作得到。
+
+订单状态与通知收件记录保存在同一患者原型壳层内，站内切页不重置；通知详情的“查看订单”带 `order` 参数，在相应订单状态标签下滚动定位并高亮目标卡片。订单签到或取消后再返回通知，提醒分组参考最新内存订单状态。刷新页面重置全部演示数据。
+
+完整门禁继续使用 `scripts/verify.ps1`，通过后按仓库要求创建对应提交；真实接口、持久化、管理员新闻发布和外部推送不在本轮范围。
