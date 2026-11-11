@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Three homepage layouts at /prototype/patient-home?variant=A|B|C, using fictional in-memory data.
 // The complete patient shell is previewed outside the shared authenticated multi-role HomeView.
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRouter } from 'vue-router'
 import PrototypeSwitcher from '../components/PrototypeSwitcher.vue'
@@ -12,6 +12,8 @@ import VariantC from './patient-home-prototype/VariantC.vue'
 import DepartmentDirectoryPrototypeView from './patient-home-prototype/DepartmentDirectoryPrototypeView.vue'
 import RegistrationPrototypeView from './patient-home-prototype/RegistrationPrototypeView.vue'
 import DoctorTeamPrototypeView from './patient-home-prototype/DoctorTeamPrototypeView.vue'
+import OrdersPrototypeView from './patient-home-prototype/OrdersPrototypeView.vue'
+import ConsultationPrototypeView from './patient-home-prototype/ConsultationPrototypeView.vue'
 import { departments, notices, type HomeAction } from './patient-home-prototype/data'
 import './patient-home-prototype/patient-home-prototype.css'
 
@@ -21,6 +23,9 @@ const variants = [{ key: 'A', name: '清新服务台' }, { key: 'B', name: '就�
 const directoryPage = computed(() => route.path === '/prototype/patient-home/departments')
 const registrationPage = computed(() => directoryPage.value && route.query.view === 'registration')
 const doctorsPage = computed(() => directoryPage.value && route.query.view === 'doctors')
+const ordersPage = computed(() => route.path === '/prototype/patient-home/orders')
+const consultationPage = computed(() => route.path === '/prototype/patient-home/consultation')
+const homePage = computed(() => route.path === '/prototype/patient-home')
 const departmentVariants = [{ key: 'A', name: '左侧科室导航' }, { key: 'B', name: '今日出诊看板' }, { key: 'C', name: '医生列表优先' }]
 const variant = computed(() => { const options = directoryPage.value ? departmentVariants : variants; return options.some(item => item.key === route.query.variant) ? String(route.query.variant) : 'A' })
 const prototypeVariants = computed(() => directoryPage.value ? departmentVariants : variants)
@@ -33,20 +38,22 @@ let bannerTimer: number | undefined
 const nav: { action: HomeAction | 'home'; icon: string; name: string }[] = [
   { action: 'home', icon: 'home', name: '首页' }, { action: 'departments', icon: 'grid', name: '科室信息' },
   { action: 'doctors', icon: 'doctor', name: '医生列表' }, { action: 'registration', icon: 'calendar', name: '立即挂号' },
-  { action: 'orders', icon: 'file', name: '我的挂号' }, { action: 'notifications', icon: 'bell', name: '站内通知' },
+  { action: 'orders', icon: 'file', name: '我的挂号' }, { action: 'consultation', icon: 'chat', name: '图文诊室' }, { action: 'notifications', icon: 'bell', name: '站内通知' },
   { action: 'profile', icon: 'user', name: '个人中心' },
 ]
 const topNav: { action: HomeAction | 'home'; name: string }[] = [
   { action: 'home', name: '首页' }, { action: 'doctors', name: '医生列表' },
   { action: 'departments', name: '科室信息' }, { action: 'registration', name: '立即挂号' },
-  { action: 'orders', name: '我的挂号' }, { action: 'notifications', name: '站内通知' },
+  { action: 'orders', name: '我的挂号' }, { action: 'consultation', name: '图文诊室' }, { action: 'notifications', name: '站内通知' },
 ]
-const panelTitles: Partial<Record<HomeAction, string>> = { registration: '挂号预览', orders: '我的挂号', departments: '科室信息', doctors: '医生列表', notifications: '站内通知', profile: '个人中心' }
+const panelTitles: Partial<Record<HomeAction, string>> = { registration: '挂号预览', orders: '我的挂号', departments: '科室信息', doctors: '医生列表', consultation: '图文诊室', notifications: '站内通知', profile: '个人中心' }
 const panelTitle = computed(() => panel.value ? panelTitles[panel.value] ?? '服务预览' : '服务预览')
 const state = computed(() => `${sidebarCollapsed.value ? '侧栏收起' : '侧栏展开'} · 公告 ${bannerIndex.value + 1}/3 · ${checkedIn.value ? '候诊中' : '待签到'} · ${aiOpen.value ? '导诊打开' : panel.value ? panelTitle.value : '首页'} · 虚构数据`)
 function open(action: HomeAction) {
   if (action === 'departments') { goToDepartments(); return }
   if (action === 'doctors') { goToDoctors(); return }
+  if (action === 'orders') { goToOrders('待就诊'); return }
+  if (action === 'consultation') { goToConsultation('ai'); return }
   if (action === 'registration' || action === 'online' || action === 'offline') {
     mode.value = action === 'online' ? '线上问诊' : '线下面诊'
     if (!directoryPage.value) department.value = '全部科室'
@@ -54,8 +61,8 @@ function open(action: HomeAction) {
     return
   }
   if (action === 'ai') { aiOpen.value = true; aiDialog.value?.showModal(); return }
-  if (['checkin', 'payment', 'report', 'orders'].includes(action)) {
-    orderFilter.value = action === 'checkin' ? '待就诊' : action === 'payment' ? '待付款' : action === 'report' ? '已完成' : '全部'; panel.value = 'orders'
+  if (['checkin', 'payment', 'report'].includes(action)) {
+    goToOrders(action === 'checkin' ? '待就诊' : action === 'payment' ? '待付款' : '已完成'); return
   } else panel.value = action
   panelDialog.value?.showModal()
 }
@@ -64,12 +71,39 @@ function goHome() { closePanel(); void router.push({ path: '/prototype/patient-h
 function goToDepartments() { closePanel(); void router.push({ path: '/prototype/patient-home/departments', query: { variant: variant.value } }) }
 function goToDoctors() { closePanel(); void router.push({ path: '/prototype/patient-home/departments', query: { variant: variant.value, view: 'doctors' } }) }
 function goToRegistration(doctor = '', resetFilters = true) { closePanel(); registrationDoctor.value = doctor; if (resetFilters) { mode.value = '线下面诊'; department.value = '全部科室' }; void router.push({ path: '/prototype/patient-home/departments', query: { variant: variant.value, view: 'registration' } }) }
+function goToOrders(status = '待就诊') { closePanel(); void router.push({ path: '/prototype/patient-home/orders', query: { status } }) }
+function goToConsultation(conversation = 'ai') { closePanel(); void router.push({ path: '/prototype/patient-home/consultation', query: { conversation } }) }
 function register() { registered.value = true; bookingPaid.value = false; panel.value = 'orders'; orderFilter.value = '待付款' }
 function chooseDepartment(name: string) { department.value = name; panel.value = 'registration' }
 function selectDepartment(name: string, doctor?: string) { department.value = name; if (doctor) registrationDoctor.value = doctor }
 function chooseImage(event: Event) { imageName.value = (event.target as HTMLInputElement).files?.[0]?.name ?? ''; consent.value = false; answered.value = false }
 function ask() { if (question.value.trim() && consent.value) answered.value = true }
 function recommend() { aiDialog.value?.close(); aiOpen.value = false; department.value = '全科医学科'; open('registration') }
+const temporaryTabs = ref<string[]>([])
+const tabDefinitions = computed(() => {
+  const currentConversation = String(route.query.conversation || 'ai')
+  const consultationLabel = currentConversation === 'today-online-waiting' ? '许知遥 · 图文诊室' : currentConversation === 'completed-consultation' ? '陈予安 · 图文诊室' : '图文诊室'
+  return [
+    { id: 'home', label: '首页', path: '/prototype/patient-home', query: { variant: 'A' }, fixed: true },
+    { id: 'registration', label: '立即挂号', path: '/prototype/patient-home/departments', query: { variant: variant.value, view: 'registration' }, fixed: false },
+    { id: 'departments', label: '科室信息', path: '/prototype/patient-home/departments', query: { variant: variant.value }, fixed: false },
+    { id: 'doctors', label: '医生列表', path: '/prototype/patient-home/departments', query: { variant: variant.value, view: 'doctors' }, fixed: false },
+    { id: 'orders', label: '我的挂号', path: '/prototype/patient-home/orders', query: { status: String(route.query.status || '待就诊') }, fixed: false },
+    { id: 'consultation', label: consultationLabel, path: '/prototype/patient-home/consultation', query: { conversation: currentConversation }, fixed: false },
+  ]
+})
+const currentTabId = computed(() => consultationPage.value ? 'consultation' : ordersPage.value ? 'orders' : registrationPage.value ? 'registration' : doctorsPage.value ? 'doctors' : directoryPage.value ? 'departments' : homePage.value ? 'home' : '')
+const visibleTabs = computed(() => {
+  const ids = new Set(['home', ...temporaryTabs.value, ...(currentTabId.value ? [currentTabId.value] : [])])
+  return tabDefinitions.value.filter(tab => ids.has(tab.id))
+})
+function openTab(tab: { path: string; query: Record<string, string | undefined> }) { void router.push({ path: tab.path, query: tab.query }) }
+function closeTab(id: string) {
+  if (id === 'home') return
+  temporaryTabs.value = temporaryTabs.value.filter(item => item !== id)
+  if (currentTabId.value === id) openTab(tabDefinitions.value.find(item => item.id === 'home')!)
+}
+watch(currentTabId, id => { if (id && id !== 'home' && !temporaryTabs.value.includes(id)) temporaryTabs.value.push(id) }, { immediate: true })
 onMounted(() => {
   bannerTimer = window.setInterval(() => { bannerIndex.value = (bannerIndex.value + 1) % 3 }, 6000)
 })
@@ -82,14 +116,17 @@ onUnmounted(() => { if (bannerTimer) window.clearInterval(bannerTimer) })
     <aside class="ph-sidebar" aria-label="患者端侧栏">
       <button class="ph-patient-card" aria-label="打开个人中心" @click="open('profile')"><span class="ph-patient-avatar">林</span><span><strong>林同学 <i class="ph-online-dot"></i></strong><small>愿你拥有健康的每一天</small></span><Icon name="chevron" /></button>
       <p class="ph-nav-caption">就医服务</p>
-      <nav aria-label="患者端导航"><button v-for="item in nav" :key="item.name" :class="{ active: (item.action === 'home' && !directoryPage) || (item.action === 'doctors' && doctorsPage) || (item.action === 'departments' && directoryPage && !doctorsPage && !registrationPage) || (item.action === 'registration' && registrationPage) }" :aria-label="item.name" :aria-current="((item.action === 'home' && !directoryPage) || (item.action === 'doctors' && doctorsPage) || (item.action === 'departments' && directoryPage && !doctorsPage && !registrationPage) || (item.action === 'registration' && registrationPage)) ? 'page' : undefined" :title="sidebarCollapsed ? item.name : undefined" @click="item.action === 'home' ? goHome() : open(item.action)"><Icon :name="item.icon" /><span>{{ item.name }}</span><b v-if="item.action === 'notifications' && !noticeRead" class="ph-nav-count">3</b></button></nav>
+      <nav aria-label="患者端导航"><button v-for="item in nav" :key="item.name" :class="{ active: (item.action === 'home' && homePage) || (item.action === 'doctors' && doctorsPage) || (item.action === 'departments' && directoryPage && !doctorsPage && !registrationPage) || (item.action === 'registration' && registrationPage) || (item.action === 'orders' && ordersPage) || (item.action === 'consultation' && consultationPage) }" :aria-label="item.name" :aria-current="((item.action === 'home' && homePage) || (item.action === 'doctors' && doctorsPage) || (item.action === 'departments' && directoryPage && !doctorsPage && !registrationPage) || (item.action === 'registration' && registrationPage) || (item.action === 'orders' && ordersPage) || (item.action === 'consultation' && consultationPage)) ? 'page' : undefined" :title="sidebarCollapsed ? item.name : undefined" @click="item.action === 'home' ? goHome() : open(item.action)"><Icon :name="item.icon" /><span>{{ item.name }}</span><b v-if="item.action === 'notifications' && !noticeRead" class="ph-nav-count">3</b></button></nav>
       <div class="ph-sidebar-bottom"><div class="ph-sidebar-help"><Icon name="heart" /><strong>健康有约，服务有温度</strong><small>线上线下，都在你身边</small></div><button class="ph-register-fixed" aria-label="快捷立即挂号" @click="open('registration')"><Icon name="calendar" /><span>立即挂号</span><Icon name="arrow" /></button><button class="ph-collapse-button" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" :aria-expanded="!sidebarCollapsed" @click="sidebarCollapsed = !sidebarCollapsed"><Icon name="menu" /><span>收起侧栏</span></button></div>
     </aside>
     <div class="ph-workspace">
-      <header class="ph-topbar"><div class="ph-topbar-left"><button class="ph-mobile-menu" aria-label="展开侧栏" @click="sidebarCollapsed = false"><Icon name="menu" /></button><a class="ph-topbar-brand" href="#" aria-label="智能医疗问诊预约系统首页" @click.prevent="goHome"><span class="ph-brand-symbol"><Icon name="cross" /></span><span><strong>智能医疗问诊预约系统</strong><small>SMART HEALTHCARE</small></span></a><nav class="ph-topnav" aria-label="顶部快捷导航"><button v-for="item in topNav" :key="item.name" :class="{ active: item.action === 'home' ? !directoryPage : item.action === 'doctors' ? doctorsPage : item.action === 'departments' ? directoryPage && !doctorsPage && !registrationPage : item.action === 'registration' ? registrationPage : false }" :aria-current="(item.action === 'home' ? !directoryPage : item.action === 'doctors' ? doctorsPage : item.action === 'departments' ? directoryPage && !doctorsPage && !registrationPage : item.action === 'registration' ? registrationPage : false) ? 'page' : undefined" @click="item.action === 'home' ? goHome() : open(item.action)">{{ item.name }}</button></nav></div><div class="ph-topbar-right"><span class="ph-hospital-status"><i></i> 门诊服务开放中</span><span class="ph-topbar-divider"></span><button aria-label="查看站内通知" class="ph-notification-button" @click="open('notifications')"><Icon name="bell" /><i v-if="!noticeRead"></i></button><button class="ph-topbar-user" @click="open('profile')"><span>林</span><strong>林同学</strong><Icon name="chevron" /></button></div></header>
+      <header class="ph-topbar"><div class="ph-topbar-left"><button class="ph-mobile-menu" aria-label="展开侧栏" @click="sidebarCollapsed = false"><Icon name="menu" /></button><a class="ph-topbar-brand" href="#" aria-label="智能医疗问诊预约系统首页" @click.prevent="goHome"><span class="ph-brand-symbol"><Icon name="cross" /></span><span><strong>智能医疗问诊预约系统</strong><small>SMART HEALTHCARE</small></span></a><nav class="ph-topnav" aria-label="顶部快捷导航"><button v-for="item in topNav" :key="item.name" :class="{ active: item.action === 'home' ? homePage : item.action === 'doctors' ? doctorsPage : item.action === 'departments' ? directoryPage && !doctorsPage && !registrationPage : item.action === 'registration' ? registrationPage : item.action === 'orders' ? ordersPage : item.action === 'consultation' ? consultationPage : false }" :aria-current="(item.action === 'home' ? homePage : item.action === 'doctors' ? doctorsPage : item.action === 'departments' ? directoryPage && !doctorsPage && !registrationPage : item.action === 'registration' ? registrationPage : item.action === 'orders' ? ordersPage : item.action === 'consultation' ? consultationPage : false) ? 'page' : undefined" @click="item.action === 'home' ? goHome() : open(item.action)">{{ item.name }}</button></nav></div><div class="ph-topbar-right"><span class="ph-hospital-status"><i></i> 门诊服务开放中</span><span class="ph-topbar-divider"></span><button aria-label="查看站内通知" class="ph-notification-button" @click="open('notifications')"><Icon name="bell" /><i v-if="!noticeRead"></i></button><button class="ph-topbar-user" @click="open('profile')"><span>林</span><strong>林同学</strong><Icon name="chevron" /></button></div></header>
+      <nav class="ph-workspace-tabs" aria-label="临时工作区标签"><button v-for="tab in visibleTabs" :key="tab.id" type="button" :class="{ active: tab.id === currentTabId }" @click="openTab(tab)"><Icon :name="tab.id === 'home' ? 'home' : tab.id === 'orders' ? 'file' : tab.id === 'registration' ? 'calendar' : tab.id === 'departments' ? 'grid' : tab.id === 'doctors' ? 'doctor' : 'chat'" /><span>{{ tab.label }}</span><i v-if="!tab.fixed" class="ph-workspace-tab-close" role="button" :aria-label="`关闭${tab.label}`" @click.stop="closeTab(tab.id)">×</i></button></nav>
       <div class="ph-page-content" role="main" aria-label="患者端首页原型">
-        <DoctorTeamPrototypeView v-if="doctorsPage" @register="goToRegistration" />
-        <RegistrationPrototypeView v-else-if="registrationPage" :initial-mode="mode" :initial-department="department" :initial-doctor="registrationDoctor" @back="goToDepartments" @orders="open('orders')" />
+        <OrdersPrototypeView v-if="ordersPage" :initial-status="String(route.query.status || '待就诊')" @consultation="goToConsultation" />
+        <ConsultationPrototypeView v-else-if="consultationPage" :initial-conversation="String(route.query.conversation || 'ai')" />
+        <DoctorTeamPrototypeView v-else-if="doctorsPage" @register="goToRegistration" />
+        <RegistrationPrototypeView v-else-if="registrationPage" :initial-mode="mode" :initial-department="department" :initial-doctor="registrationDoctor" @back="goToDepartments" @orders="goToOrders('待付款')" />
         <DepartmentDirectoryPrototypeView v-else-if="directoryPage" :variant="variant" @action="open" @back="goHome" @select="selectDepartment" />
         <template v-else><VariantA v-if="variant === 'A'" :banner-index="bannerIndex" :checked-in="checkedIn" @action="open" @banner="bannerIndex = $event" /><VariantB v-else-if="variant === 'B'" :checked-in="checkedIn" @action="open" /><VariantC v-else @action="open" /><section class="ph-process-strip" aria-labelledby="patient-process-title"><div class="ph-process-heading"><span class="ph-eyebrow">YOUR CARE, STEP BY STEP</span><h2 id="patient-process-title">就诊流程，一看就懂</h2><p>从选择服务到完成就诊，每一步都有清晰提示。</p></div><ol class="ph-process-steps"><li><span>01</span><strong>选择服务</strong><small>科室、医生与就诊方式</small></li><li><span>02</span><strong>提交挂号</strong><small>选择日期、时段与号源</small></li><li><span>03</span><strong>完成支付</strong><small>挂号费确认预约凭证</small></li><li><span>04</span><strong>签到候诊</strong><small>在窗口内签到进入队列</small></li><li><span>05</span><strong>完成就诊</strong><small>查看病历，按需缴药费</small></li></ol></section><footer class="ph-footer"><span>智能医疗问诊预约系统 · 每一次关怀，都值得认真对待</span><span>隐私保护 <b>·</b> 服务指南 <b>·</b> 联系我们</span></footer></template>
       </div>

@@ -1,4 +1,4 @@
-export type HomeAction = 'online' | 'offline' | 'checkin' | 'payment' | 'report' | 'departments' | 'doctors' | 'registration' | 'orders' | 'notifications' | 'profile' | 'ai'
+export type HomeAction = 'online' | 'offline' | 'checkin' | 'payment' | 'report' | 'departments' | 'doctors' | 'registration' | 'orders' | 'consultation' | 'notifications' | 'profile' | 'ai'
 export const services: { action: HomeAction; icon: string; title: string; detail: string; color: string }[] = [
   { action: 'online', icon: 'chat', title: '线上问诊预约', detail: '预约医生，图文沟通', color: 'blue' },
   { action: 'offline', icon: 'hospital', title: '线下门诊挂号', detail: '选择时段，便捷到院', color: 'teal' },

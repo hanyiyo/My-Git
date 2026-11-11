@@ -8,13 +8,15 @@ const props = withDefaults(defineProps<{
   label: string
   minDate?: string
   maxDate?: string
+  allowAll?: boolean
 }>(), {
   minDate: prototypeToday,
   maxDate: prototypeDateEnd,
+  allowAll: false,
 })
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const open = ref(false)
-const cursor = ref(parsePrototypeDate(props.modelValue || props.minDate))
+const cursor = ref(parsePrototypeDate(props.modelValue && props.modelValue !== 'ALL' ? props.modelValue : props.minDate))
 
 const monthTitle = computed(() => `${cursor.value.getFullYear()}年${cursor.value.getMonth() + 1}月`)
 const firstDay = computed(() => new Date(cursor.value.getFullYear(), cursor.value.getMonth(), 1))
@@ -27,7 +29,8 @@ const calendarDays = computed(() => {
   })]
 })
 const selectedOption = computed(() => {
-  const date = parsePrototypeDate(props.modelValue)
+  if (props.modelValue === 'ALL') return '全部日期'
+  const date = parsePrototypeDate(props.modelValue || props.minDate)
   const day = date.getDate()
   const month = date.getMonth() + 1
   const isToday = props.modelValue === props.minDate
@@ -54,8 +57,13 @@ function select(value: string) {
   emit('update:modelValue', value)
   open.value = false
 }
+function selectAll() {
+  if (!props.allowAll) return
+  emit('update:modelValue', 'ALL')
+  open.value = false
+}
 function toggle() {
-  if (!open.value) cursor.value = parsePrototypeDate(props.modelValue || props.minDate)
+  if (!open.value) cursor.value = parsePrototypeDate(props.modelValue && props.modelValue !== 'ALL' ? props.modelValue : props.minDate)
   open.value = !open.value
 }
 function closeOnEscape() {
@@ -81,6 +89,7 @@ watch(() => props.modelValue, value => {
           <button v-if="day" type="button" :disabled="isDisabled(day.value)" :aria-label="day.value" :aria-selected="isSelected(day.value)" :class="{ selected: isSelected(day.value), disabled: isDisabled(day.value) }" @click="select(day.value)">{{ day.day }}</button>
         </span>
       </div>
+      <button v-if="props.allowAll" class="ph-date-picker-all" type="button" :aria-pressed="props.modelValue === 'ALL'" @click="selectAll">全部日期</button>
     </div>
   </div>
 </template>
