@@ -1,3 +1,19 @@
+.ph-profile-page{max-width:1100px;margin:0 auto}
+.ph-profile-page-heading{padding:5px 0 25px}
+.ph-profile-page-heading h1{color:#315d81;margin:7px 0}
+.ph-profile-page-heading p{font-size:12px;color:#86a0b3}
+.ph-profile-page-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:22px;align-items:start}
+.ph-profile-card{min-width:0;padding:25px;background:#fff;border:1px solid var(--ph-border);border-radius:16px;box-shadow:0 5px 24px #315d8105}
+.ph-profile-card-title{color:#456b80;margin-bottom:15px!important}
+.ph-profile-page .ph-profile-overview{padding:0}
+.ph-profile-page .ph-profile-facts{grid-template-columns:1fr;margin-top:22px}
+.ph-profile-page .ph-profile-facts>div{display:flex;align-items:center;justify-content:space-between;padding:16px}
+.ph-profile-page .ph-profile-facts dd{margin:0}
+.ph-profile-page .ph-inline-message{margin-top:18px}
+.ph-profile-page .ph-profile-boundary{justify-content:center;margin-top:22px!important}
+@media(max-width:1000px){.ph-profile-page-grid{grid-template-columns:1fr;gap:16px}}
+@media(max-width:759px){.ph-profile-page-heading{padding:2px 0 20px}.ph-profile-page-heading h1{font-size:26px}.ph-profile-card{padding:20px 16px}.ph-profile-page .ph-profile-boundary{justify-content:flex-start}}
+
 .ph-profile-overview{padding:4px 0 19px}
 .ph-profile-identity{display:flex;align-items:center;gap:13px;padding:3px 0 20px;border-bottom:1px solid var(--ph-border)}
 .ph-profile-identity h3{font-size:19px}

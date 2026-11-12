@@ -27,6 +27,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
     { path: '/prototype/patient-home/orders', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
     { path: '/prototype/patient-home/consultation', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
     { path: '/prototype/patient-home/notifications', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
+    { path: '/prototype/patient-home/profile', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
   ] : []),
   { path: '/assistant/business', component: BusinessAssistantView },
   { path: '/admin/governance', component: AdminGovernanceView, meta: { role: 'ADMIN' } },

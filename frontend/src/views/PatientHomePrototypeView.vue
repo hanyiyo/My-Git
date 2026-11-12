@@ -84,6 +84,7 @@ const doctorsPage = computed(() => directoryPage.value && route.query.view === '
 const ordersPage = computed(() => route.path === '/prototype/patient-home/orders')
 const consultationPage = computed(() => route.path === '/prototype/patient-home/consultation')
 const notificationsPage = computed(() => route.path === '/prototype/patient-home/notifications')
+const profilePage = computed(() => route.path === '/prototype/patient-home/profile')
 const homePage = computed(() => route.path === '/prototype/patient-home')
 const departmentVariants = [{ key: 'A', name: '左侧科室导航' }, { key: 'B', name: '今日出诊看板' }, { key: 'C', name: '医生列表优先' }]
 const variant = computed(() => { const options = directoryPage.value ? departmentVariants : variants; return options.some(item => item.key === route.query.variant) ? String(route.query.variant) : 'A' })
@@ -103,7 +104,6 @@ const profileError = ref(''), profileNotice = ref(''), passwordError = ref('')
 const oldPassword = ref(''), newPassword = ref(''), confirmNewPassword = ref('')
 const systemNotifications = ref(true), appointmentReminders = ref(true)
 const profileConfirmDialog = ref<HTMLDialogElement>(), profileConfirmKind = ref<ProfileConfirmKind>('logout')
-const discardDestination = ref<'close' | 'overview'>('close')
 const selectedAgreement = ref<'隐私协议' | '用户协议'>('隐私协议')
 const profileConfirmTitle = computed(() => profileConfirmKind.value === 'logout' ? '确认退出登录？' : '放弃未保存的修改？')
 const profileConfirmDescription = computed(() => profileConfirmKind.value === 'logout' ? '退出后需要重新登录才能继续使用患者端。' : '当前编辑内容还没有保存，关闭后这些修改会丢失。')
@@ -118,15 +118,17 @@ const nav: { action: HomeAction | 'home'; icon: string; name: string }[] = [
   { action: 'orders', icon: 'file', name: '我的挂号' }, { action: 'consultation', icon: 'chat', name: '图文诊室' }, { action: 'notifications', icon: 'bell', name: '站内通知' },
   { action: 'profile', icon: 'user', name: '个人中心' },
 ]
-const topNav: { action: HomeAction | 'home'; name: string }[] = [
-  { action: 'home', name: '首页' }, { action: 'doctors', name: '医生列表' },
-  { action: 'departments', name: '科室信息' }, { action: 'registration', name: '立即挂号' },
-  { action: 'orders', name: '我的挂号' }, { action: 'consultation', name: '图文诊室' }, { action: 'notifications', name: '站内通知' },
-]
+const topNav = nav
 const panelTitles: Partial<Record<HomeAction, string>> = { registration: '挂号预览', orders: '我的挂号', departments: '科室信息', doctors: '医生列表', consultation: '图文诊室', notifications: '站内通知', profile: '个人中心' }
 const panelTitle = computed(() => panel.value ? panelTitles[panel.value] ?? '服务预览' : '服务预览')
 const state = computed(() => `${sidebarCollapsed.value ? '侧栏收起' : '侧栏展开'} · 公告 ${bannerIndex.value + 1}/3 · ${checkedIn.value ? '候诊中' : '待签到'} · ${aiOpen.value ? 'AI助手打开' : panel.value ? panelTitle.value : '首页'} · 虚构数据`)
 function open(action: HomeAction) {
+  if (action === 'profile') {
+    closePanelImmediately()
+    if (window.innerWidth < 760) sidebarCollapsed.value = true
+    void router.push('/prototype/patient-home/profile')
+    return
+  }
   if (action === 'departments') { goToDepartments(); return }
   if (action === 'doctors') { goToDoctors(); return }
   if (action === 'orders') { goToOrders('待就诊'); return }
@@ -143,7 +145,6 @@ function open(action: HomeAction) {
     goToOrders(action === 'checkin' ? '待就诊' : action === 'payment' ? '待付款' : '已完成'); return
   } else {
     panel.value = action
-    if (action === 'profile') openProfileOverview()
   }
   panelDialog.value?.showModal()
 }
@@ -155,8 +156,7 @@ function openProfileOverview() {
   oldPassword.value = newPassword.value = confirmNewPassword.value = ''
 }
 function backToProfile() {
-  if (profileDirty.value) { discardDestination.value = 'overview'; askProfileConfirmation('discard'); return }
-  openProfileOverview()
+  closePanel()
 }
 function openProfileSection(section: Exclude<ProfileSection, 'overview'>) {
   profileError.value = ''
@@ -169,6 +169,8 @@ function openProfileSection(section: Exclude<ProfileSection, 'overview'>) {
     draftProfileAvatarUrl.value = profileAvatarUrl.value
   }
   profileSection.value = section
+  panel.value = 'profile'
+  panelDialog.value?.showModal()
 }
 function closePanelImmediately() {
   panelDialog.value?.close()
@@ -181,7 +183,6 @@ function askProfileConfirmation(kind: ProfileConfirmKind) {
 }
 function closePanel() {
   if (panel.value === 'profile' && profileDirty.value) {
-    discardDestination.value = 'close'
     askProfileConfirmation('discard')
     return
   }
@@ -196,8 +197,7 @@ function confirmProfileAction() {
   }
   if (draftProfileAvatarUrl.value && draftProfileAvatarUrl.value !== profileAvatarUrl.value) URL.revokeObjectURL(draftProfileAvatarUrl.value)
   draftProfileAvatarUrl.value = profileAvatarUrl.value
-  if (discardDestination.value === 'overview') openProfileOverview()
-  else closePanelImmediately()
+  closePanelImmediately()
 }
 function cancelProfileConfirmation() { profileConfirmDialog.value?.close() }
 function chooseProfileAvatar(event: Event) {
@@ -225,7 +225,7 @@ function saveProfile() {
   profileName.value = name
   profilePhone.value = phone
   profileAvatarUrl.value = draftProfileAvatarUrl.value
-  profileSection.value = 'overview'
+  closePanelImmediately()
   profileNotice.value = '资料已保存。'
 }
 function notificationSaved() { profileNotice.value = '通知偏好已保存。' }
@@ -342,9 +342,10 @@ const tabDefinitions = computed(() => {
     { id: 'orders', label: '我的挂号', path: '/prototype/patient-home/orders', query: { status: String(route.query.status || '待就诊') }, fixed: false },
     { id: 'notifications', label: '站内通知', path: '/prototype/patient-home/notifications', query: { tab: String(route.query.tab || 'system') }, fixed: false },
     { id: 'consultation', label: consultationLabel, path: '/prototype/patient-home/consultation', query: { conversation: currentConversation }, fixed: false },
+    { id: 'profile', label: '个人中心', path: '/prototype/patient-home/profile', query: {}, fixed: false },
   ]
 })
-const currentTabId = computed(() => notificationsPage.value ? 'notifications' : consultationPage.value ? 'consultation' : ordersPage.value ? 'orders' : registrationPage.value ? 'registration' : doctorsPage.value ? 'doctors' : directoryPage.value ? 'departments' : homePage.value ? 'home' : '')
+const currentTabId = computed(() => profilePage.value ? 'profile' : notificationsPage.value ? 'notifications' : consultationPage.value ? 'consultation' : ordersPage.value ? 'orders' : registrationPage.value ? 'registration' : doctorsPage.value ? 'doctors' : directoryPage.value ? 'departments' : homePage.value ? 'home' : '')
 const visibleTabs = computed(() => {
   const ids = new Set(['home', ...temporaryTabs.value, ...(currentTabId.value ? [currentTabId.value] : [])])
   return tabDefinitions.value.filter(tab => ids.has(tab.id))
@@ -371,14 +372,30 @@ onUnmounted(() => {
     <aside class="ph-sidebar" aria-label="患者端侧栏">
       <button class="ph-patient-card" aria-label="打开个人中心" @click="open('profile')"><span class="ph-patient-avatar"><img v-if="profileAvatarUrl" :src="profileAvatarUrl" alt="患者头像"><template v-else>{{ profileInitial }}</template></span><span><strong>{{ profileName }} <i class="ph-online-dot"></i></strong><small>愿你拥有健康的每一天</small></span><Icon name="chevron" /></button>
       <p class="ph-nav-caption">就医服务</p>
-      <nav aria-label="患者端导航"><button v-for="item in nav" :key="item.name" :class="{ active: (item.action === 'home' && homePage) || (item.action === 'doctors' && doctorsPage) || (item.action === 'departments' && directoryPage && !doctorsPage && !registrationPage) || (item.action === 'registration' && registrationPage) || (item.action === 'orders' && ordersPage) || (item.action === 'consultation' && consultationPage) || (item.action === 'notifications' && notificationsPage) }" :aria-label="item.name" :aria-current="((item.action === 'home' && homePage) || (item.action === 'doctors' && doctorsPage) || (item.action === 'departments' && directoryPage && !doctorsPage && !registrationPage) || (item.action === 'registration' && registrationPage) || (item.action === 'orders' && ordersPage) || (item.action === 'consultation' && consultationPage) || (item.action === 'notifications' && notificationsPage)) ? 'page' : undefined" :title="sidebarCollapsed ? item.name : undefined" @click="item.action === 'home' ? goHome() : open(item.action)"><Icon :name="item.icon" /><span>{{ item.name }}</span><b v-if="item.action === 'notifications' && notificationUnread > 0" class="ph-nav-count" data-testid="system-unread-count">{{ notificationUnread }}</b></button></nav>
+      <nav aria-label="患者端导航"><button v-for="item in nav" :key="item.name" :class="{ active: item.action === currentTabId }" :aria-label="item.name" :aria-current="item.action === currentTabId ? 'page' : undefined" :title="sidebarCollapsed ? item.name : undefined" @click="item.action === 'home' ? goHome() : open(item.action)"><Icon :name="item.icon" /><span>{{ item.name }}</span><b v-if="item.action === 'notifications' && notificationUnread > 0" class="ph-nav-count" data-testid="system-unread-count">{{ notificationUnread }}</b></button></nav>
       <div class="ph-sidebar-bottom"><div class="ph-sidebar-help"><Icon name="heart" /><strong>健康有约，服务有温度</strong><small>线上线下，都在你身边</small></div><button class="ph-register-fixed" aria-label="快捷立即挂号" @click="open('registration')"><Icon name="calendar" /><span>立即挂号</span><Icon name="arrow" /></button><button class="ph-collapse-button" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" :aria-expanded="!sidebarCollapsed" @click="sidebarCollapsed = !sidebarCollapsed"><Icon name="menu" /><span>收起侧栏</span></button></div>
     </aside>
     <div class="ph-workspace">
-      <header class="ph-topbar"><div class="ph-topbar-left"><button class="ph-mobile-menu" aria-label="展开侧栏" @click="sidebarCollapsed = false"><Icon name="menu" /></button><a class="ph-topbar-brand" href="#" aria-label="智能医疗问诊预约系统首页" @click.prevent="goHome"><span class="ph-brand-symbol"><Icon name="cross" /></span><span><strong>智能医疗问诊预约系统</strong><small>SMART HEALTHCARE</small></span></a><nav class="ph-topnav" aria-label="顶部快捷导航"><button v-for="item in topNav" :key="item.name" :class="{ active: item.action === 'home' ? homePage : item.action === 'doctors' ? doctorsPage : item.action === 'departments' ? directoryPage && !doctorsPage && !registrationPage : item.action === 'registration' ? registrationPage : item.action === 'orders' ? ordersPage : item.action === 'consultation' ? consultationPage : item.action === 'notifications' ? notificationsPage : false }" :aria-current="(item.action === 'home' ? homePage : item.action === 'doctors' ? doctorsPage : item.action === 'departments' ? directoryPage && !doctorsPage && !registrationPage : item.action === 'registration' ? registrationPage : item.action === 'orders' ? ordersPage : item.action === 'consultation' ? consultationPage : item.action === 'notifications' ? notificationsPage : false) ? 'page' : undefined" @click="item.action === 'home' ? goHome() : open(item.action)">{{ item.name }}</button></nav></div><div class="ph-topbar-right"><span class="ph-hospital-status"><i></i> 门诊服务开放中</span><span class="ph-topbar-divider"></span><button aria-label="查看站内通知" class="ph-notification-button" @click="open('notifications')"><Icon name="bell" /><i v-if="notificationUnread > 0" data-testid="notification-unread-dot"></i></button><button class="ph-topbar-user" @click="open('profile')"><span><img v-if="profileAvatarUrl" :src="profileAvatarUrl" alt="患者头像"><template v-else>{{ profileInitial }}</template></span><strong>{{ profileName }}</strong><Icon name="chevron" /></button></div></header>
-      <nav class="ph-workspace-tabs" aria-label="临时工作区标签"><button v-for="tab in visibleTabs" :key="tab.id" type="button" :class="{ active: tab.id === currentTabId }" @click="openTab(tab)"><Icon :name="tab.id === 'home' ? 'home' : tab.id === 'orders' ? 'file' : tab.id === 'registration' ? 'calendar' : tab.id === 'departments' ? 'grid' : tab.id === 'doctors' ? 'doctor' : tab.id === 'notifications' ? 'bell' : 'chat'" /><span>{{ tab.label }}</span><i v-if="!tab.fixed" class="ph-workspace-tab-close" role="button" :aria-label="`关闭${tab.label}`" @click.stop="closeTab(tab.id)">×</i></button></nav>
+      <header class="ph-topbar"><div class="ph-topbar-left"><button class="ph-mobile-menu" aria-label="展开侧栏" @click="sidebarCollapsed = false"><Icon name="menu" /></button><a class="ph-topbar-brand" href="#" aria-label="智能医疗问诊预约系统首页" @click.prevent="goHome"><span class="ph-brand-symbol"><Icon name="cross" /></span><span><strong>智能医疗问诊预约系统</strong><small>SMART HEALTHCARE</small></span></a><nav class="ph-topnav" aria-label="顶部快捷导航"><button v-for="item in topNav" :key="item.name" :class="{ active: item.action === currentTabId }" :aria-current="item.action === currentTabId ? 'page' : undefined" @click="item.action === 'home' ? goHome() : open(item.action)">{{ item.name }}</button></nav></div><div class="ph-topbar-right"><span class="ph-hospital-status"><i></i> 门诊服务开放中</span><span class="ph-topbar-divider"></span><button aria-label="查看站内通知" class="ph-notification-button" @click="open('notifications')"><Icon name="bell" /><i v-if="notificationUnread > 0" data-testid="notification-unread-dot"></i></button><button class="ph-topbar-user" @click="open('profile')"><span><img v-if="profileAvatarUrl" :src="profileAvatarUrl" alt="患者头像"><template v-else>{{ profileInitial }}</template></span><strong>{{ profileName }}</strong><Icon name="chevron" /></button></div></header>
+      <nav class="ph-workspace-tabs" aria-label="临时工作区标签"><button v-for="tab in visibleTabs" :key="tab.id" type="button" :class="{ active: tab.id === currentTabId }" @click="openTab(tab)"><Icon :name="tab.id === 'home' ? 'home' : tab.id === 'orders' ? 'file' : tab.id === 'registration' ? 'calendar' : tab.id === 'departments' ? 'grid' : tab.id === 'doctors' ? 'doctor' : tab.id === 'notifications' ? 'bell' : tab.id === 'profile' ? 'user' : 'chat'" /><span>{{ tab.label }}</span><i v-if="!tab.fixed" class="ph-workspace-tab-close" role="button" :aria-label="`关闭${tab.label}`" @click.stop="closeTab(tab.id)">×</i></button></nav>
       <div class="ph-page-content" role="main" aria-label="患者端首页原型">
-        <OrdersPrototypeView v-if="ordersPage" :initial-status="String(route.query.status || '待就诊')" :orders="patientOrders" :selected-order="String(route.query.order || '')" @consultation="goToConsultation" />
+        <section v-if="profilePage" class="ph-profile-page" data-testid="profile-page" aria-labelledby="profile-page-title">
+          <header class="ph-profile-page-heading"><span class="ph-eyebrow">YOUR PERSONAL SPACE</span><h1 id="profile-page-title">个人中心</h1><p>管理个人资料与账户设置，让每一次就医更安心。</p></header>
+          <div class="ph-profile-page-grid"><div class="ph-profile-card"><div class="ph-profile-overview">
+            <div class="ph-profile-identity"><span class="ph-profile-avatar"><img v-if="profileAvatarUrl" :src="profileAvatarUrl" alt="当前头像"><span v-else>{{ profileInitial }}</span></span><div><h3>{{ profileName }}</h3><p>患者账户 · 虚构演示资料</p></div><button class="ph-soft-button" type="button" @click="openProfileSection('edit')">编辑资料 <Icon name="edit" /></button></div>
+            <dl class="ph-profile-facts"><div><dt>手机号</dt><dd>{{ maskedProfilePhone }}</dd></div><div><dt>账户状态</dt><dd><span class="ph-profile-online-dot" />正常使用</dd></div></dl>
+          </div>
+          <p v-if="profileNotice" class="ph-inline-message" role="status">{{ profileNotice }}</p>
+          </div><div class="ph-profile-card"><h2 class="ph-profile-card-title">账户与设置</h2><div class="ph-profile-section-list" aria-label="个人中心功能">
+            <button type="button" @click="openProfileSection('notifications')"><span class="ph-profile-action-icon teal"><Icon name="bell" /></span><span><strong>通知设置</strong><small>管理系统通知和预约提醒</small></span><Icon name="chevron" /></button>
+            <button type="button" @click="openProfileSection('password')"><span class="ph-profile-action-icon blue"><Icon name="lock" /></span><span><strong>修改密码</strong><small>定期更新密码，保护账户安全</small></span><Icon name="chevron" /></button>
+            <button type="button" @click="openProfileSection('privacy')"><span class="ph-profile-action-icon purple"><Icon name="shield" /></span><span><strong>隐私与协议</strong><small>查看隐私协议和用户协议</small></span><Icon name="chevron" /></button>
+            <button type="button" @click="openProfileSection('about')"><span class="ph-profile-action-icon orange"><Icon name="info" /></span><span><strong>关于系统</strong><small>版本信息与服务说明</small></span><Icon name="chevron" /></button>
+          </div>
+          <button class="ph-profile-logout" type="button" @click="askProfileConfirmation('logout')"><Icon name="logout" />退出登录</button>
+          </div></div><p class="ph-profile-boundary"><Icon name="shield" />病历、检查报告和 AI 会话在独立医疗服务模块中管理。</p>
+        </section>
+        <OrdersPrototypeView v-else-if="ordersPage" :initial-status="String(route.query.status || '待就诊')" :orders="patientOrders" :selected-order="String(route.query.order || '')" @consultation="goToConsultation" />
         <NotificationsPrototypeView v-else-if="notificationsPage" v-model:receipts="noticeReceipts" :orders="patientOrders" @order="goToNoticeOrder" />
         <ConsultationPrototypeView v-else-if="consultationPage" :initial-conversation="String(route.query.conversation || 'ai')" />
         <DoctorTeamPrototypeView v-else-if="doctorsPage" @register="goToRegistration" />
@@ -397,22 +414,7 @@ onUnmounted(() => {
       <template v-else-if="panel === 'departments'"><p class="ph-dialog-note">选择科室后，查看相应的演示号源。</p><button v-for="item in departments" :key="item.name" class="ph-directory-row" @click="chooseDepartment(item.name)"><span class="ph-icon-tile teal"><Icon :name="item.icon" /></span><span><strong>{{ item.name }}</strong><small>{{ item.detail }} · 今日 {{ item.count }} 位医生出诊</small></span><Icon name="chevron" /></button></template>
       <template v-else-if="panel === 'doctors'"><div v-for="name in ['陈予安', '许知遥']" :key="name" class="ph-schedule-preview"><span class="ph-doctor-avatar">{{ name[0] }}</span><div><h3>{{ name }} <small>主治医师</small></h3><p>全科医学科 · 常见不适与健康咨询</p></div><button class="ph-soft-button" @click="panel = 'registration'">查看排班</button></div></template>
       <template v-else-if="panel === 'profile'">
-        <template v-if="profileSection === 'overview'">
-          <div class="ph-profile-overview">
-            <div class="ph-profile-identity"><span class="ph-profile-avatar"><img v-if="profileAvatarUrl" :src="profileAvatarUrl" alt="当前头像"><span v-else>{{ profileInitial }}</span></span><div><h3>{{ profileName }}</h3><p>患者账户 · 虚构演示资料</p></div><button class="ph-soft-button" type="button" @click="openProfileSection('edit')">编辑资料 <Icon name="edit" /></button></div>
-            <dl class="ph-profile-facts"><div><dt>手机号</dt><dd>{{ maskedProfilePhone }}</dd></div><div><dt>账户状态</dt><dd><span class="ph-profile-online-dot" />正常使用</dd></div></dl>
-          </div>
-          <p v-if="profileNotice" class="ph-inline-message" role="status">{{ profileNotice }}</p>
-          <div class="ph-profile-section-list" aria-label="个人中心功能">
-            <button type="button" @click="openProfileSection('notifications')"><span class="ph-profile-action-icon teal"><Icon name="bell" /></span><span><strong>通知设置</strong><small>管理系统通知和预约提醒</small></span><Icon name="chevron" /></button>
-            <button type="button" @click="openProfileSection('password')"><span class="ph-profile-action-icon blue"><Icon name="lock" /></span><span><strong>修改密码</strong><small>定期更新密码，保护账户安全</small></span><Icon name="chevron" /></button>
-            <button type="button" @click="openProfileSection('privacy')"><span class="ph-profile-action-icon purple"><Icon name="shield" /></span><span><strong>隐私与协议</strong><small>查看隐私协议和用户协议</small></span><Icon name="chevron" /></button>
-            <button type="button" @click="openProfileSection('about')"><span class="ph-profile-action-icon orange"><Icon name="info" /></span><span><strong>关于系统</strong><small>版本信息与服务说明</small></span><Icon name="chevron" /></button>
-          </div>
-          <button class="ph-profile-logout" type="button" @click="askProfileConfirmation('logout')"><Icon name="logout" />退出登录</button>
-          <p class="ph-profile-boundary"><Icon name="shield" />病历、检查报告和 AI 会话在独立医疗服务模块中管理。</p>
-        </template>
-        <template v-else-if="profileSection === 'edit'">
+        <template v-if="profileSection === 'edit'">
           <div class="ph-profile-subheading"><button class="ph-back-button" type="button" @click="backToProfile">← 返回个人中心</button><span>资料编辑</span></div>
           <p class="ph-dialog-note">更新你的展示资料，手机号变更需要完成验证码校验。</p>
           <p v-if="profileError" class="ph-profile-error" role="alert">{{ profileError }}</p>
