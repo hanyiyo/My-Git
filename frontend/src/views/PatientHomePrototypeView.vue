@@ -16,6 +16,8 @@ import OrdersPrototypeView from './patient-home-prototype/OrdersPrototypeView.vu
 import ConsultationPrototypeView from './patient-home-prototype/ConsultationPrototypeView.vue'
 import NotificationsPrototypeView from './patient-home-prototype/NotificationsPrototypeView.vue'
 import { createPrototypeNotices } from './patient-home-prototype/notification-data'
+import { linkedPatientOrder } from './doctor-home-prototype/linked-patient-orders'
+import { useReceptionDemo, waitingQueue } from './doctor-home-prototype/reception-demo'
 import { prototypeOrders, statusForTab } from './patient-home-prototype/order-data'
 import { departments, type HomeAction } from './patient-home-prototype/data'
 import { departmentDoctors, departmentProfiles, type PrototypeDepartmentDoctor } from './patient-home-prototype/department-data'
@@ -96,7 +98,9 @@ const aiOpen = ref(false), question = ref(''), consent = ref(false), aiBusy = re
 const aiAttachments = ref<AiAttachment[]>([]), aiMessages = ref<AiMessage[]>([]), aiRetryPayload = ref<AiRetryPayload | null>(null)
 const noticeReceipts = ref(createPrototypeNotices())
 const notificationUnread = computed(() => noticeReceipts.value.filter(item => item.tab === 'system' && !item.read && !item.deleted).length)
-const patientOrders = ref(prototypeOrders.map(order => ({ ...order })))
+const { state: linkedState, now: linkedNow } = useReceptionDemo()
+const fixtureOrders = ref(prototypeOrders.map(order => ({ ...order })))
+const patientOrders = computed(() => [...linkedState.value.visits.filter(v => v.owner === 'lin').map(v => linkedPatientOrder(v, linkedNow.value, waitingQueue(v.group).map(item => item.id))), ...fixtureOrders.value.filter(v => !linkedState.value.visits.some(item => item.id === v.id))])
 const profileSection = ref<ProfileSection>('overview')
 const profileName = ref('林同学'), profilePhone = ref('13800138000'), profileAvatarUrl = ref('')
 const draftProfileName = ref(''), draftProfilePhone = ref(''), draftProfilePhoneCode = ref(''), draftProfileAvatarUrl = ref('')

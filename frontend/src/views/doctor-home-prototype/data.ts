@@ -1,4 +1,4 @@
-// Fictional fixtures for the homepage only; no clinical or approval mutations.
+// Fictional shell fixtures; reception-demo owns mutable clinical progress.
 export const navigation = [
   { key: 'home', name: '首页', icon: 'home', caption: '今日工作概览' },
   { key: 'reception', name: '接诊工作台', icon: 'doctor', caption: '候诊与诊疗' },
@@ -8,12 +8,13 @@ export const navigation = [
   { key: 'profile', name: '个人中心', icon: 'user', caption: '资料与账户' },
 ] as const
 export type Section = typeof navigation[number]['key']
-export type Scenario = 'current' | 'ongoing' | 'upcoming' | 'finished'
+export type Scenario = 'current' | 'ongoing' | 'upcoming' | 'online' | 'finished'
 export type DemoRole = 'doctor' | 'head'
 export const scenarios: { key: Scenario; name: string; time: string }[] = [
   { key: 'current', name: '上午出诊中', time: '10:20' },
   { key: 'ongoing', name: '有未结束接诊', time: '10:20' },
   { key: 'upcoming', name: '等待下午出诊', time: '13:10' },
+  { key: 'online', name: '下午线上出诊', time: '14:20' },
   { key: 'finished', name: '今日出诊结束', time: '18:30' },
 ]
 export const schedules = [

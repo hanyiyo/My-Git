@@ -13,7 +13,7 @@ $source = @(Get-ChildItem "$root/backend/src/main" -Recurse -File; Get-ChildItem
 foreach ($file in $source) {
     $body = Get-Content $file.FullName -Raw
     if ($body -match '(?:localStorage|sessionStorage)\.setItem\s*\(') {
-        # 唯一例外是开发原型的两个枚举展示选项；认证信息仍禁止写入浏览器存储。
+        # Q7/Q17 明确授权同浏览器保存虚构联动进度；只允许指定开发原型写入，认证信息仍禁止持久化。
         $demoSettings = Join-Path $root 'frontend/src/views/doctor-home-prototype/demo-settings.ts'
         $safeDemoWriter = $file.FullName -eq $demoSettings -and
             $body.Contains('if (!import.meta.env.DEV) return') -and
@@ -22,7 +22,15 @@ foreach ($file in $source) {
             ([regex]::Matches($body, '(?:localStorage|sessionStorage)\.setItem\s*\(').Count -eq 1) -and
             $body.Contains("scenarios.find(item => item.key === settings.scenario)?.key ?? 'current'") -and
             $body.Contains("settings.role === 'head' ? 'head' : 'doctor'")
-        if (-not $safeDemoWriter) { throw "Browser storage must not persist authentication tokens: $($file.FullName)" }
+        $receptionDemo = Join-Path $root 'frontend/src/views/doctor-home-prototype/reception-demo.ts'
+        $safeReceptionWriter = $file.FullName -eq $receptionDemo -and
+            $body.Contains('if (!import.meta.env.DEV) return false') -and
+            $body.Contains("'medical-reception-prototype-v1'") -and
+            $body.Contains('navigator.locks.request(receptionKey') -and
+            $body.Contains('localStorage.setItem(receptionKey, JSON.stringify(next))') -and
+            ([regex]::Matches($body, '(?:localStorage|sessionStorage)\.setItem\s*\(').Count -eq 1) -and
+            ($body -notmatch 'accessToken|refreshToken|password|captcha')
+        if (-not $safeDemoWriter -and -not $safeReceptionWriter) { throw "Browser storage must not persist authentication tokens: $($file.FullName)" }
     }
     if ($body -match 'MemoryRedis|exposeCaptchaCode') { throw "Test adapter leaked into shipped runtime: $($file.FullName)" }
 }
