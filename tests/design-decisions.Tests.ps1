@@ -76,7 +76,7 @@ foreach ($number in 37..66) {
 
 # 医生端访谈保留已确认轮次，并明确区分后续演示目标和已交付能力。
 $doctorWorkspace = Get-Content (Join-Path $root 'docs/design/doctor-workspace-prototype.md') -Raw
-foreach ($number in 1..8) {
+foreach ($number in 1..17) {
     if ([regex]::Matches($doctorWorkspace, "(?m)^## Q${number}：").Count -ne 1) {
         throw "Doctor workspace decision must have one section: Q$number"
     }
@@ -88,6 +88,11 @@ foreach ($boundary in @('Q1–Q8', '共享演示数据', '真实接口接入属�
 }
 if (-not $doctorWorkspace.Contains('总体模块为：首页、接诊工作台、我的排班、申请处理、站内通知、个人中心。')) {
     throw 'Doctor workspace navigation must preserve the confirmed application handling name'
+}
+foreach ($boundary in @('两种视图均属于接诊工作台', '点击患者卡片只预览资料', '切换保留草稿', '权限内历史记录', '尚未开始第二阶段页面实现', '只允许叫当前排第一位的患者', '主诉、诊断、处理建议必填', '每次挂号自动保存独立草稿', '本轮 AI 摘要明确标为模拟演示', '图片上传和真实 AI 接口放到后续阶段')) {
+    if (-not $doctorWorkspace.Contains($boundary)) {
+        throw "Missing confirmed reception workspace boundary: $boundary"
+    }
 }
 
 Write-Output 'Design decision consistency validation passed.'
