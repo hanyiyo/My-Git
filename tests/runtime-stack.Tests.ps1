@@ -12,7 +12,18 @@ foreach ($dependency in @('vue','vue-router','pinia')) { if (-not $frontend.depe
 $source = @(Get-ChildItem "$root/backend/src/main" -Recurse -File; Get-ChildItem "$root/frontend/src" -Recurse -File)
 foreach ($file in $source) {
     $body = Get-Content $file.FullName -Raw
-    if ($body -match '(?:localStorage|sessionStorage)\.setItem\s*\(') { throw "Browser storage must not persist authentication tokens: $($file.FullName)" }
+    if ($body -match '(?:localStorage|sessionStorage)\.setItem\s*\(') {
+        # 唯一例外是开发原型的两个枚举展示选项；认证信息仍禁止写入浏览器存储。
+        $demoSettings = Join-Path $root 'frontend/src/views/doctor-home-prototype/demo-settings.ts'
+        $safeDemoWriter = $file.FullName -eq $demoSettings -and
+            $body.Contains('if (!import.meta.env.DEV) return') -and
+            $body.Contains("'medical-doctor-home-demo-v1'") -and
+            $body.Contains('localStorage.setItem(demoSettingsKey, JSON.stringify({ scenario, role }))') -and
+            ([regex]::Matches($body, '(?:localStorage|sessionStorage)\.setItem\s*\(').Count -eq 1) -and
+            $body.Contains("scenarios.find(item => item.key === settings.scenario)?.key ?? 'current'") -and
+            $body.Contains("settings.role === 'head' ? 'head' : 'doctor'")
+        if (-not $safeDemoWriter) { throw "Browser storage must not persist authentication tokens: $($file.FullName)" }
+    }
     if ($body -match 'MemoryRedis|exposeCaptchaCode') { throw "Test adapter leaked into shipped runtime: $($file.FullName)" }
 }
 if (-not (Test-Path "$root/.github/workflows/verify.yml")) { throw 'CI verification is required.' }

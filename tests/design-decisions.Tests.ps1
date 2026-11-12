@@ -81,7 +81,7 @@ foreach ($number in 1..8) {
         throw "Doctor workspace decision must have one section: Q$number"
     }
 }
-foreach ($boundary in @('设计访谈中', '尚未开始页面实现', '共享演示数据', '真实接口接入属于后续阶段', '线下面诊不创建医生聊天会话', '医疗结果提交即保存')) {
+foreach ($boundary in @('Q1–Q8', '共享演示数据', '真实接口接入属于后续阶段', '线下面诊不创建医生聊天会话', '医疗结果提交即保存')) {
     if (-not $doctorWorkspace.Contains($boundary)) {
         throw "Missing doctor workspace design boundary: $boundary"
     }
