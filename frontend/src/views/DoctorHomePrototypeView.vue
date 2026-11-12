@@ -29,7 +29,7 @@ const scheduleContext = ref<Record<string, string>>({}), applicationContext = re
 watch(() => route.fullPath, () => {
   const context = Object.fromEntries(['month', 'date', 'mode'].flatMap(key => typeof route.query[key] === 'string' ? [[key, String(route.query[key])]] : []))
   if (current.value === 'schedules' || current.value === 'applications') scheduleContext.value = context
-  if (current.value === 'applications') applicationContext.value = { ...context, ...(typeof route.query.schedule === 'string' ? { schedule: route.query.schedule } : {}) }
+  if (current.value === 'applications') applicationContext.value = { ...context, ...(typeof route.query.tab === 'string' ? { tab: route.query.tab } : {}) }
 }, { immediate: true })
 const schedules = computed(() => receptionState.value.schedules.filter(s => s.date === demoDate).map(s => ({ id: s.period, period: s.period === 'am' ? '上午' : '下午', time: s.period === 'am' ? '08:00–12:00' : '14:00–18:00', mode: s.mode === 'online' ? '线上问诊' : '线下面诊', place: s.mode === 'online' ? '线上图文诊室' : '门诊二楼 · 205 诊室', capacity: s.capacity, registered: scheduleNumbers(s, receptionState.value.visits).registered })))
 const demoTime = computed(() => formatTime(receptionNow.value))
@@ -67,14 +67,14 @@ async function saveDemo(changeTime = false) {
   catch { storageWarning.value = '浏览器暂时无法保留演示设置，当前页面仍可预览。' }
 }
 function syncDemo(event: StorageEvent) { if (event.key === demoSettingsKey || event.key === null) loadDemo(event.newValue) }
-function navigate(section: Section, patient?: QueuePatient) {
+function navigate(section: Section, patient?: QueuePatient, application?: Record<string, string>) {
   if (!openTabs.value.includes(section)) openTabs.value.push(section)
   if (section === 'reception' && patient) receptionPatient.value = patient
   mobileOpen.value = false
-  void router.push({ path: section === 'home' ? '/prototype/doctor-home' : `/prototype/doctor-home/${section}`, query: section === 'reception' && receptionPatient.value ? { patient: receptionPatient.value.id } : section === 'schedules' ? scheduleContext.value : section === 'applications' ? applicationContext.value : {} })
+  void router.push({ path: section === 'home' ? '/prototype/doctor-home' : `/prototype/doctor-home/${section}`, query: section === 'reception' && receptionPatient.value ? { patient: receptionPatient.value.id } : section === 'schedules' ? scheduleContext.value : section === 'applications' ? { ...applicationContext.value, ...application } : {} })
 }
-function openScheduleApplication(id: string) { applicationContext.value = { ...scheduleContext.value, schedule: id }; navigate('applications') }
-function openInvitation(id: string) { applicationContext.value = { ...scheduleContext.value, invitation: id }; navigate('applications') }
+function openScheduleApplication(id: string) { navigate('applications', undefined, { ...scheduleContext.value, tab: 'suspension', schedule: id }) }
+function openInvitation(id: string) { navigate('applications', undefined, { ...scheduleContext.value, tab: 'invitation', invitation: id }) }
 function openScheduleReception(group: 'am' | 'pm') { openReception(activeVisit.value ?? receptionState.value.visits.find(v => v.group === group && v.status === 'WAITING') ?? receptionState.value.visits.find(v => v.group === group)) }
 function closeTab(section: Section) {
   openTabs.value = openTabs.value.filter(tab => tab !== section)
@@ -143,7 +143,7 @@ onUnmounted(() => { window.removeEventListener('storage', syncDemo); window.remo
         </template>
 
         <template v-else>
-          <div :class="['dh-page-heading', { 'ds-page-heading': current === 'schedules' }]"><div><span v-if="current !== 'applications'" class="dh-eyebrow">DOCTOR WORKSPACE</span><h1>{{ currentName }}</h1><p>{{ navigation.find(item => item.key === current)!.caption }}</p></div><div v-if="current === 'schedules'" class="ds-page-date" aria-label="今日日期"><Icon name="calendar" /><div><span>今天</span><time :datetime="demoDate">{{ demoDate.replaceAll('-', ' / ') }}</time><strong>{{ new Date(`${demoDate}T12:00:00+08:00`).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' }) }}</strong></div></div></div>
+          <div :class="['dh-page-heading', { 'ds-page-heading': current === 'schedules' }]"><div><span v-if="current !== 'applications' && current !== 'notifications'" class="dh-eyebrow">DOCTOR WORKSPACE</span><h1>{{ currentName }}</h1><p v-if="current !== 'applications' && current !== 'notifications'">{{ navigation.find(item => item.key === current)!.caption }}</p></div><div v-if="current === 'schedules'" class="ds-page-date" aria-label="今日日期"><Icon name="calendar" /><div><span>今天</span><time :datetime="demoDate">{{ demoDate.replaceAll('-', ' / ') }}</time><strong>{{ new Date(`${demoDate}T12:00:00+08:00`).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' }) }}</strong></div></div></div>
           <ReceptionWorkspace v-if="current === 'reception'" :patient-id="String(route.query.patient || '')" @patient="selectReceptionPatient" @focus="receptionFocused = $event" />
           <ScheduleWorkspace v-else-if="current === 'schedules'" @apply="openScheduleApplication" @reception="openScheduleReception" />
           <template v-else-if="current === 'applications'">

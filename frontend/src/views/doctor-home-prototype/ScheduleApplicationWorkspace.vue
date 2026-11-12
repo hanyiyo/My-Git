@@ -16,16 +16,33 @@ const invitation = computed(() => state.value.invitations.find(i => i.id === rou
 const application = computed(() => schedule.value ? scheduleApplication(schedule.value, state.value.applications) : undefined)
 const blocked = computed(() => schedule.value ? suspensionBlock(schedule.value, state.value.applications, now.value) : '')
 const applications = computed(() => [...state.value.applications].sort((a, b) => b.submittedAt - a.submittedAt))
-const reason = ref(''), rejectReason = ref(''), localError = ref(''), confirmed = ref(false), applicationTab = ref<'suspension' | 'invitation' | 'department'>('suspension'), confirmDialog = ref<HTMLDialogElement>(), inviteConfirm = ref<HTMLDialogElement>(), rejectDialog = ref<HTMLDialogElement>()
+const reason = ref(''), rejectReason = ref(''), localError = ref(''), confirmed = ref(false), confirmDialog = ref<HTMLDialogElement>(), inviteConfirm = ref<HTMLDialogElement>(), rejectDialog = ref<HTMLDialogElement>()
+type ApplicationTab = 'suspension' | 'invitation' | 'department'
+const pendingInvitations = computed(() => state.value.invitations.filter(i => i.status === 'PENDING').length)
+const applicationTab = computed<ApplicationTab>(() => {
+  if (invitation.value) return 'invitation'
+  if (schedule.value) return 'suspension'
+  if (route.query.tab === 'department' && props.role === 'head') return 'department'
+  if (route.query.tab === 'suspension' || route.query.tab === 'invitation') return route.query.tab
+  return pendingInvitations.value ? 'invitation' : 'suspension'
+})
 let opener: HTMLElement | null = null
 const deadline = computed(() => schedule.value ? Math.min(now.value + 7 * 24 * 3600000, scheduleStart(schedule.value) - 24 * 3600000) : 0)
 const affected = computed(() => schedule.value ? scheduleNumbers(schedule.value, state.value.visits).registered : 0)
 watch(() => schedule.value?.id, () => { reason.value = ''; localError.value = ''; confirmed.value = false })
 watch(() => invitation.value?.id, () => { rejectReason.value = ''; localError.value = ''; confirmed.value = false })
-function backToList() { const { schedule: _schedule, ...query } = route.query; void router.push({ query }) }
-function viewApplication(a: SuspensionApplication) { void router.push({ query: { ...route.query, schedule: a.scheduleId } }) }
-function viewInvitation(id: string) { void router.push({ query: { ...route.query, invitation: id, schedule: undefined } }) }
-function backToApplicationList() { const { schedule: _schedule, invitation: _invitation, ...query } = route.query; void router.push({ query }) }
+function selectTab(tab: ApplicationTab) { void router.push({ query: { ...route.query, tab, schedule: undefined, invitation: undefined } }) }
+function tabKeydown(event: KeyboardEvent) {
+  const tabs = Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+  const index = tabs.indexOf(document.activeElement as HTMLButtonElement)
+  if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+  tabs[next]?.focus(); tabs[next]?.click()
+}
+function viewApplication(a: SuspensionApplication) { void router.push({ query: { ...route.query, tab: 'suspension', schedule: a.scheduleId, invitation: undefined } }) }
+function viewInvitation(id: string) { void router.push({ query: { ...route.query, tab: 'invitation', invitation: id, schedule: undefined } }) }
+function backToApplicationList() { selectTab(applicationTab.value) }
 async function review() {
   localError.value = ''
   if (!reason.value.trim() || reason.value.trim().length > 500) { localError.value = '请填写 1–500 字的停诊原因。'; return }
@@ -47,7 +64,15 @@ async function reject() { if (!invitation.value) return; if (await rejectSubstit
 
 <template>
   <section class="ds-applications" aria-label="申请处理">
-    <div class="ds-application-banner"><span class="ds-mode-icon"><Icon :name="invitation ? 'doctor' : 'file'" /></span><span class="ds-banner-title">{{ invitation ? '替诊邀请' : '申请处理' }}</span><div class="ds-application-nav"><button v-if="schedule || invitation" class="ds-return" @click="backToApplicationList"><Icon name="chevron" class="ds-prev" />返回申请列表</button><button class="ds-return" @click="$emit('return')"><Icon name="calendar" />返回我的排班</button></div></div>
+    <div class="ds-application-toolbar">
+      <div class="ds-application-tabs" role="tablist" aria-label="申请类型" @keydown="tabKeydown">
+        <button id="ds-tab-suspension" role="tab" aria-controls="ds-application-panel" :tabindex="applicationTab === 'suspension' ? 0 : -1" :aria-selected="applicationTab === 'suspension'" :class="{ active: applicationTab === 'suspension' }" @click="selectTab('suspension')">我的停诊申请 <b>{{ applications.length }}</b></button>
+        <button id="ds-tab-invitation" role="tab" aria-controls="ds-application-panel" :tabindex="applicationTab === 'invitation' ? 0 : -1" :aria-selected="applicationTab === 'invitation'" :class="{ active: applicationTab === 'invitation' }" @click="selectTab('invitation')">替诊邀请 <b>{{ pendingInvitations }}</b></button>
+        <button v-if="role === 'head'" id="ds-tab-department" role="tab" aria-controls="ds-application-panel" :tabindex="applicationTab === 'department' ? 0 : -1" :aria-selected="applicationTab === 'department'" :class="{ active: applicationTab === 'department' }" @click="selectTab('department')">科室审批</button>
+      </div>
+      <div class="ds-application-nav"><button v-if="schedule || invitation" class="ds-return" @click="backToApplicationList"><Icon name="chevron" class="ds-prev" />返回申请列表</button><button class="ds-return" @click="$emit('return')"><Icon name="calendar" />返回我的排班</button></div>
+    </div>
+    <div id="ds-application-panel" role="tabpanel" :aria-labelledby="`ds-tab-${applicationTab}`">
     <p v-if="!confirmDialog?.open && (warning || error || localError)" class="ds-alert" role="alert">{{ localError || error || warning }}</p>
     <p v-if="route.query.schedule && !schedule" role="alert" class="ds-alert">未找到对应出诊安排，请返回我的排班重新选择。</p>
     <div v-if="invitation" class="ds-application-layout ds-substitution-layout">
@@ -80,12 +105,12 @@ async function reject() { if (!invitation.value) return; if (await rejectSubstit
 
       </aside>
     </div>
-    <section v-if="!schedule && !invitation" class="ds-application-list" aria-label="我的停诊申请">
-      <div class="ds-application-tabs" role="tablist"><span role="tab" tabindex="0" :aria-selected="applicationTab === 'suspension'" :class="{ active: applicationTab === 'suspension' }" @click="applicationTab = 'suspension'" @keydown.enter="applicationTab = 'suspension'">我的停诊申请 <b>{{ applications.length }}</b></span><span role="tab" tabindex="0" :aria-selected="applicationTab === 'invitation'" :class="{ active: applicationTab === 'invitation' }" @click="applicationTab = 'invitation'" @keydown.enter="applicationTab = 'invitation'">替诊邀请 <b>{{ state.invitations.filter(i => i.status === 'PENDING').length }}</b></span><span v-if="role === 'head'" role="tab" tabindex="0" :aria-selected="applicationTab === 'department'" :class="{ active: applicationTab === 'department' }" @click="applicationTab = 'department'" @keydown.enter="applicationTab = 'department'">科室审批</span></div>
-      <template v-if="applicationTab === 'suspension'"><div class="ds-section-heading"><div><h2>我的停诊申请</h2></div><span>{{ applications.length }} 项</span></div><button v-for="a in applications" :key="a.id" class="ds-request-row" @click="viewApplication(a)"><span class="ds-request-icon"><Icon name="file" /></span><span><strong>{{ state.schedules.find(s => s.id === a.scheduleId)?.date }} · {{ state.schedules.find(s => s.id === a.scheduleId)?.period === 'am' ? '上午' : '下午' }}停诊申请</strong><small>{{ a.reason }}</small></span><span class="ds-request-row-status"><span :class="['ds-status', { warn: isPendingApplication(a) }]">{{ applicationLabels[a.status] }}</span><small>截止 {{ dateTimeLabel(a.deadline) }}</small></span><Icon name="chevron" /></button></template>
-      <template v-else-if="applicationTab === 'invitation'"><div class="ds-section-heading"><h2>替诊邀请</h2><span>{{ state.invitations.length }} 项</span></div><button v-for="item in state.invitations" :key="item.id" class="ds-request-row" @click="viewInvitation(item.id)"><span class="ds-request-icon ds-doctor-icon"><Icon name="doctor" /></span><span><strong>{{ item.date }} · {{ item.period === 'am' ? '上午' : '下午' }}替诊邀请</strong><small>{{ item.arrangedBy }}（科主任） · {{ item.reason }}</small></span><span class="ds-request-row-status"><span :class="['ds-status', { warn: item.status === 'PENDING' }]">{{ item.status === 'PENDING' ? '待你确认' : item.status === 'ACCEPTED' ? '待管理员复核' : item.status === 'REJECTED' ? '已拒绝' : item.status === 'EXPIRED' ? '已过期' : '已撤回' }}</span><small>截止 {{ dateTimeLabel(item.deadline) }}</small></span><Icon name="chevron" /></button></template>
-      <template v-else><div class="ds-section-heading"><h2>科室审批</h2></div><div class="ds-empty"><span><Icon name="shield" /></span><h3>科室审批将在下一阶段处理</h3><p>当前身份可以查看待办，但本轮只完成替诊邀请确认。</p></div></template>
+    <section v-if="!schedule && !invitation" class="ds-application-list" :aria-label="applicationTab === 'suspension' ? '我的停诊申请' : applicationTab === 'invitation' ? '替诊邀请' : '科室审批'">
+      <template v-if="applicationTab === 'suspension'"><div class="ds-list-summary"><span>共 {{ applications.length }} 项</span></div><button v-for="a in applications" :key="a.id" class="ds-request-row" @click="viewApplication(a)"><span class="ds-request-icon"><Icon name="file" /></span><span><strong>{{ state.schedules.find(s => s.id === a.scheduleId)?.date }} · {{ state.schedules.find(s => s.id === a.scheduleId)?.period === 'am' ? '上午' : '下午' }}停诊申请</strong><small>{{ a.reason }}</small></span><span class="ds-request-row-status"><span :class="['ds-status', { warn: isPendingApplication(a) }]">{{ applicationLabels[a.status] }}</span><small>截止 {{ dateTimeLabel(a.deadline) }}</small></span><Icon name="chevron" /></button></template>
+      <template v-else-if="applicationTab === 'invitation'"><div class="ds-list-summary"><span>待确认 {{ pendingInvitations }} 项</span><span>共 {{ state.invitations.length }} 项</span></div><button v-for="item in state.invitations" :key="item.id" class="ds-request-row" @click="viewInvitation(item.id)"><span class="ds-request-icon ds-doctor-icon"><Icon name="doctor" /></span><span><strong>{{ item.date }} · {{ item.period === 'am' ? '上午' : '下午' }}替诊邀请</strong><small>{{ item.arrangedBy }}（科主任） · {{ item.reason }}</small></span><span class="ds-request-row-status"><span :class="['ds-status', { warn: item.status === 'PENDING' }]">{{ item.status === 'PENDING' ? '待你确认' : item.status === 'ACCEPTED' ? '待管理员复核' : item.status === 'REJECTED' ? '已拒绝' : item.status === 'EXPIRED' ? '已过期' : '已撤回' }}</span><small>截止 {{ dateTimeLabel(item.deadline) }}</small></span><Icon name="chevron" /></button></template>
+      <template v-else><div class="ds-empty"><span><Icon name="shield" /></span><h3>科室审批将在下一阶段处理</h3><p>当前身份可以查看待办，但本轮只完成替诊邀请确认。</p></div></template>
     </section>
+    </div>
     <dialog ref="confirmDialog" class="ds-confirm-dialog" aria-label="核对停诊申请" @close="closed">
       <h2>确认本场停诊申请</h2><p v-if="schedule">{{ schedule.date }} · {{ periodLabel(schedule) }} {{ scheduleTime(schedule) }} · {{ modeLabel(schedule) }}</p><div class="ds-confirm-impact"><strong>将影响 {{ affected }} 位已挂号患者</strong><p>提交后暂停新增挂号并解除未付款临时占号，已付款预约保留。最终审批通过前仍需按原安排接诊。</p></div><p class="ds-reason-text">申请原因：{{ reason }}</p><p>审批截止：{{ dateTimeLabel(deadline) }}</p><label class="ds-confirm-checkbox"><input v-model="confirmed" type="checkbox">我已核对场次和影响，知晓提交不代表停诊生效</label><p v-if="error" role="alert" class="ds-alert">{{ error }} 原因已保留，可重试。</p><div class="ds-confirm-actions"><button class="ds-secondary" @click="confirmDialog?.close()">返回修改</button><button class="dh-primary" :disabled="!confirmed || busy" @click="submit">{{ busy ? '正在保存…' : '确认提交' }}</button></div>
     </dialog>
