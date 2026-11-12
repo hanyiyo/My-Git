@@ -1,6 +1,7 @@
 // Development-only fictional workflow. All tabs on the same origin share this snapshot.
 import { computed, readonly, ref } from 'vue'
 import { patients, type QueuePatient } from './data'
+import { initialSchedules, initialApplications, isPendingApplication, scheduleStart, suspensionBlock, scheduleNumbers, type DemoSchedule, type SuspensionApplication } from './schedule-data'
 
 export type VisitStatus = 'PENDING_VISIT' | 'WAITING' | 'IN_PROGRESS' | 'MISSED' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED'
 export interface ClinicalDraft { complaint: string; present: string; history: string; diagnosis: string; advice: string; medicines: { medicineId: string; quantity: number; usage: string }[] }
@@ -15,7 +16,7 @@ export interface DemoVisit extends QueuePatient {
   payment: { status: 'PENDING' | 'PAID' | 'EXPIRED'; total: number; expiresAt: number } | null
 }
 export interface DemoMedicine { id: string; name: string; specification: string; price: number; stock: number; held: number; enabled: boolean }
-interface DemoState { version: 1; revision: number; clockOffset: number; visits: DemoVisit[]; medicines: DemoMedicine[]; aiFailure: boolean }
+interface DemoState { version: 1; revision: number; clockOffset: number; visits: DemoVisit[]; medicines: DemoMedicine[]; aiFailure: boolean; schedules: DemoSchedule[]; applications: SuspensionApplication[] }
 export const receptionKey = 'medical-reception-prototype-v1'
 export const blankDraft = (): ClinicalDraft => ({ complaint: '', present: '', history: '', diagnosis: '', advice: '', medicines: [] })
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -31,7 +32,8 @@ function newVisit(patient: QueuePatient, status: VisitStatus): DemoVisit {
     draft: blankDraft(), draftVersion: 0, savedAt: null, result: null, payment: null }
 }
 function initialState(): DemoState {
-  return { version: 1, revision: 0, clockOffset: dateAt('10:20') - Date.now(), aiFailure: false,
+  const schedules = initialSchedules(), applications = initialApplications(schedules)
+  return { version: 1, revision: 0, clockOffset: dateAt('10:20') - Date.now(), aiFailure: false, schedules, applications,
     visits: [...patients.map(patient => newVisit(patient, 'WAITING')),
       newVisit({ id: 'today-online-waiting', number: 'P001', name: '林知夏', age: 21, sex: '女', source: '预约挂号', symptom: '咽部不适，希望线上咨询', checkin: '', group: 'pm' }, 'PENDING_VISIT'),
       newVisit({ id: 'online-002', number: 'P002', name: '陈亦安', age: 22, sex: '男', source: '当日挂号', symptom: '餐后胃部不适', checkin: '', group: 'pm' }, 'PENDING_VISIT')],
@@ -51,6 +53,12 @@ function readState(): DemoState {
     || initialState().visits.some(v => !data.visits.some(item => item.id === v.id))
     || data.visits.some(v => !statusText[v.status] || !v.draft || !Array.isArray(v.draft.medicines) || !Array.isArray(v.messages) || !Array.isArray(v.authorizedIds))
     || data.medicines.some(m => !Number.isInteger(m.stock) || m.stock < 0 || !Number.isInteger(m.held) || m.held < 0)) throw new Error('演示进度损坏')
+  // Extend the existing demo snapshot without discarding conversations, drafts or payments.
+  if (data.schedules === undefined && data.applications === undefined) { data.schedules = initialSchedules(); data.applications = initialApplications(data.schedules) }
+  if (!Array.isArray(data.schedules) || !Array.isArray(data.applications)
+    || initialSchedules().some(s => !data.schedules.some(item => item.id === s.id))
+    || data.schedules.some(s => !['PUBLISHED', 'SUSPENDED', 'SUBSTITUTED'].includes(s.status) || !Number.isInteger(s.capacity) || !Number.isInteger(s.paid) || !Number.isInteger(s.held) || s.held < 0 || s.paid < 0 || s.capacity < s.paid + s.held)
+    || data.applications.some(a => !data.schedules.some(s => s.id === a.scheduleId) || !['PENDING_HEAD', 'PENDING_ADMIN', 'REJECTED', 'EXPIRED', 'APPROVED'].includes(a.status) || typeof a.reason !== 'string' || !Number.isFinite(a.deadline) || !Number.isFinite(a.submittedAt))) throw new Error('排班演示进度损坏')
   return data
 }
 let loaded: DemoState
@@ -69,6 +77,9 @@ function visitById(data: DemoState, id: string) {
   return visit
 }
 function expire(data: DemoState, time: number) {
+  for (const application of data.applications) {
+    if (isPendingApplication(application) && time > application.deadline) { application.status = 'EXPIRED'; application.note = '未在审批期限内完成全部审批，申请已过期，原出诊安排保留。' }
+  }
   for (const visit of data.visits) {
     if (visit.status === 'PENDING_VISIT' && time >= sessionBounds(visit.group).end - 15 * 60000) visit.status = 'EXPIRED'
     if (visit.payment?.status === 'PENDING' && time >= visit.payment.expiresAt) {
@@ -119,6 +130,22 @@ export const setDemoTime = (time: string) => change(data => {
   data.clockOffset = dateAt(time) - Date.now(); expire(data, dateAt(time))
 })
 export const advanceDemo = (minutes: number) => change(data => { data.clockOffset += minutes * 60000; expire(data, Date.now() + data.clockOffset) })
+export const setScheduleDemoDateTime = (date: string, time: string) => change(data => {
+  const at = Date.parse(`${date}T${time}:00+08:00`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time) || !Number.isFinite(at)) throw new Error('请输入有效演示日期和时间。')
+  data.clockOffset = at - Date.now(); expire(data, at)
+})
+export const submitSuspension = (scheduleId: string, reason: string, role: 'doctor' | 'head') => change((data, time) => {
+  const schedule = data.schedules.find(s => s.id === scheduleId)
+  if (!schedule) throw new Error('出诊安排不存在，请返回我的排班重新选择。')
+  const blocked = suspensionBlock(schedule, data.applications, time)
+  if (blocked) throw new Error(blocked)
+  if (!reason.trim() || reason.trim().length > 500) throw new Error('请填写 1–500 字的停诊原因。')
+  data.applications.push({ id: crypto.randomUUID(), scheduleId, reason: reason.trim(), submittedAt: time,
+    deadline: Math.min(time + 7 * 24 * 3600000, scheduleStart(schedule) - 24 * 3600000),
+    affected: scheduleNumbers(schedule, data.visits).registered, status: role === 'head' ? 'PENDING_ADMIN' : 'PENDING_HEAD', applicantRole: role })
+  schedule.held = 0
+})
 export const setAiFailure = (failure: boolean) => change(data => { data.aiFailure = failure })
 export const adjustStock = (id: string, stock: number) => change(data => {
   const medicine = data.medicines.find(m => m.id === id)!
@@ -211,7 +238,7 @@ if (import.meta.env.DEV) {
   })
   window.setInterval(() => {
     wallTime.value = Date.now()
-    const needsExpiry = state.value.visits.some(v => (v.status === 'PENDING_VISIT' && now.value >= sessionBounds(v.group).end - 15 * 60000) || (v.payment?.status === 'PENDING' && now.value >= v.payment.expiresAt))
+    const needsExpiry = state.value.applications.some(a => isPendingApplication(a) && now.value > a.deadline) || state.value.visits.some(v => (v.status === 'PENDING_VISIT' && now.value >= sessionBounds(v.group).end - 15 * 60000) || (v.payment?.status === 'PENDING' && now.value >= v.payment.expiresAt))
     if (needsExpiry && !busy.value && !warning.value) void change(() => {})
   }, 1000)
 }

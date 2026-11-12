@@ -1,13 +1,16 @@
 <script setup lang="ts">
 // Development prototype: doctor shell and shared reception workflow, using fictional data.
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from './patient-home-prototype/PrototypeIcon.vue'
 import ReceptionWorkspace from './doctor-home-prototype/ReceptionWorkspace.vue'
 import ReceptionDemoControls from './doctor-home-prototype/ReceptionDemoControls.vue'
+import ScheduleWorkspace from './doctor-home-prototype/ScheduleWorkspace.vue'
+import ScheduleApplicationWorkspace from './doctor-home-prototype/ScheduleApplicationWorkspace.vue'
+import { applicationLabels, demoDate, scheduleNumbers } from './doctor-home-prototype/schedule-data'
 import { callVisit, formatTime, resetReception, setDemoTime, useReceptionDemo, waitingQueue } from './doctor-home-prototype/reception-demo'
 import { notices } from './patient-home-prototype/data'
-import { applications, navigation, patients, scenarios, schedules, type DemoRole, type QueuePatient, type Scenario, type Section } from './doctor-home-prototype/data'
+import { applications, navigation, patients, scenarios, type DemoRole, type QueuePatient, type Scenario, type Section } from './doctor-home-prototype/data'
 import { demoSettingsKey, saveDemoSettings } from './doctor-home-prototype/demo-settings'
 import './doctor-home-prototype/doctor-home.css'
 
@@ -20,12 +23,22 @@ const openTabs = ref<Section[]>(['home'])
 const receptionPatient = ref(patients.find(patient => patient.id === route.query.patient))
 const current = computed<Section>(() => navigation.find(item => item.key === route.params.section)?.key ?? 'home')
 const currentName = computed(() => navigation.find(item => item.key === current.value)!.name)
+const scheduleContext = ref<Record<string, string>>({}), applicationContext = ref<Record<string, string>>({})
+watch(() => route.fullPath, () => {
+  const context = Object.fromEntries(['month', 'date', 'mode'].flatMap(key => typeof route.query[key] === 'string' ? [[key, String(route.query[key])]] : []))
+  if (current.value === 'schedules' || current.value === 'applications') scheduleContext.value = context
+  if (current.value === 'applications') applicationContext.value = { ...context, ...(typeof route.query.schedule === 'string' ? { schedule: route.query.schedule } : {}) }
+}, { immediate: true })
+const schedules = computed(() => receptionState.value.schedules.filter(s => s.date === demoDate).map(s => ({ id: s.period, period: s.period === 'am' ? '上午' : '下午', time: s.period === 'am' ? '08:00–12:00' : '14:00–18:00', mode: s.mode === 'online' ? '线上问诊' : '线下面诊', place: s.mode === 'online' ? '线上图文诊室' : '门诊二楼 · 205 诊室', capacity: s.capacity, registered: scheduleNumbers(s, receptionState.value.visits).registered })))
 const demoTime = computed(() => formatTime(receptionNow.value))
 const finished = computed(() => !activeVisit.value && demoTime.value >= '18:00')
 const upcoming = computed(() => !activeVisit.value && demoTime.value >= '12:00' && demoTime.value < '14:00')
 const ongoing = computed(() => !!activeVisit.value)
-const currentSchedule = computed(() => schedules[activeVisit.value ? activeVisit.value.group === 'pm' ? 1 : 0 : demoTime.value >= '12:00' ? 1 : 0]!)
-const visibleApplications = computed(() => applications.filter(item => !item.headOnly || role.value === 'head'))
+const currentSchedule = computed(() => schedules.value[activeVisit.value ? activeVisit.value.group === 'pm' ? 1 : 0 : demoTime.value >= '12:00' ? 1 : 0]!)
+const visibleApplications = computed(() => [
+  ...applications.filter(item => item.id !== 'mine' && (!item.headOnly || role.value === 'head')).map(item => ({ ...item, scheduleId: '' })),
+  ...receptionState.value.applications.map(a => ({ id: a.id, kind: '我的申请', title: `${a.scheduleId.slice(5, 7)}月${a.scheduleId.slice(8, 10)}日${a.scheduleId.endsWith('am') ? '上午' : '下午'}停诊申请`, detail: a.reason, status: applicationLabels[a.status], actionable: false, headOnly: false, icon: 'file', scheduleId: a.scheduleId })),
+])
 const pendingCount = computed(() => visibleApplications.value.filter(item => item.actionable).length)
 const waiting = computed(() => finished.value || upcoming.value ? [] : waitingQueue(currentSchedule.value.id as 'am' | 'pm'))
 const filteredPatients = computed(() => waiting.value.filter(patient => `${patient.name}${patient.number}`.includes(search.value.trim())))
@@ -54,8 +67,10 @@ function navigate(section: Section, patient?: QueuePatient) {
   if (!openTabs.value.includes(section)) openTabs.value.push(section)
   if (section === 'reception' && patient) receptionPatient.value = patient
   mobileOpen.value = false
-  void router.push({ path: section === 'home' ? '/prototype/doctor-home' : `/prototype/doctor-home/${section}`, query: section === 'reception' && receptionPatient.value ? { patient: receptionPatient.value.id } : {} })
+  void router.push({ path: section === 'home' ? '/prototype/doctor-home' : `/prototype/doctor-home/${section}`, query: section === 'reception' && receptionPatient.value ? { patient: receptionPatient.value.id } : section === 'schedules' ? scheduleContext.value : section === 'applications' ? applicationContext.value : {} })
 }
+function openScheduleApplication(id: string) { applicationContext.value = { ...scheduleContext.value, schedule: id }; navigate('applications') }
+function openScheduleReception(group: 'am' | 'pm') { openReception(activeVisit.value ?? receptionState.value.visits.find(v => v.group === group && v.status === 'WAITING') ?? receptionState.value.visits.find(v => v.group === group)) }
 function closeTab(section: Section) {
   openTabs.value = openTabs.value.filter(tab => tab !== section)
   if (section === 'reception') receptionPatient.value = undefined
@@ -118,15 +133,18 @@ onUnmounted(() => { window.removeEventListener('storage', syncDemo); window.remo
             <section class="dh-news dh-panel"><div class="dh-section-heading"><div><span class="dh-eyebrow">HOSPITAL UPDATES</span><h2>医院动态</h2></div><button class="dh-link" @click="navigate('notifications')">全部动态<Icon name="arrow"/></button></div><button v-for="notice in notices.slice(0, 2)" :key="notice.title" class="dh-news-row" @click="viewNotice(notice)"><span>{{ notice.tag }}</span><strong>{{ notice.title }}</strong><time>{{ notice.date }}</time><Icon name="chevron"/></button></section>
           </div><div class="dh-side-column">
             <section class="dh-panel dh-schedule-panel"><div class="dh-section-heading"><h2>今日出诊</h2><button class="dh-link" @click="navigate('schedules')">全部排班<Icon name="chevron"/></button></div><div class="dh-timeline"><button v-for="schedule in schedules" :key="schedule.id" :class="['dh-schedule-row', { active: !finished && currentSchedule.id === schedule.id }]" @click="navigate('schedules')"><span class="dh-timeline-dot"></span><div class="dh-schedule-top"><strong>{{ schedule.period }} {{ schedule.time }}</strong><small>{{ finished || (schedule.id === 'am' && upcoming) ? '已结束' : schedule.id === 'pm' || upcoming ? '待出诊' : '出诊中' }}</small></div><p><Icon :name="schedule.id === 'am' ? 'hospital' : 'chat'"/>{{ schedule.mode }}</p><span>{{ schedule.place }}</span><div class="dh-capacity"><i :style="{ width: `${schedule.registered / schedule.capacity * 100}%` }"></i></div><span class="dh-capacity-label">已挂号 {{ schedule.registered }} / {{ schedule.capacity }} 人</span></button></div></section>
-            <section class="dh-panel dh-todo"><div class="dh-section-heading"><h2>申请待办 <span class="dh-count">{{ pendingCount }}</span></h2><button class="dh-link" @click="navigate('applications')">申请处理<Icon name="chevron"/></button></div><button v-for="application in visibleApplications" :key="application.id" class="dh-application" @click="navigate('applications')"><span :class="['dh-application-icon', application.headOnly ? 'purple' : application.actionable ? 'amber' : 'blue']"><Icon :name="application.icon"/></span><div><span>{{ application.kind }}<small :class="{ actionable: application.actionable }">{{ application.status }}</small></span><strong>{{ application.title }}</strong><p>{{ application.detail }}</p></div></button><p class="dh-todo-note"><Icon name="shield"/>审批结果以最终复核为准</p></section>
+            <section class="dh-panel dh-todo"><div class="dh-section-heading"><h2>申请待办 <span class="dh-count">{{ pendingCount }}</span></h2><button class="dh-link" @click="navigate('applications')">申请处理<Icon name="chevron"/></button></div><button v-for="application in visibleApplications" :key="application.id" class="dh-application" @click="application.scheduleId ? openScheduleApplication(application.scheduleId) : navigate('applications')"><span :class="['dh-application-icon', application.headOnly ? 'purple' : application.actionable ? 'amber' : 'blue']"><Icon :name="application.icon"/></span><div><span>{{ application.kind }}<small :class="{ actionable: application.actionable }">{{ application.status }}</small></span><strong>{{ application.title }}</strong><p>{{ application.detail }}</p></div></button><p class="dh-todo-note"><Icon name="shield"/>审批结果以最终复核为准</p></section>
           </div></div>
         </template>
 
         <template v-else>
           <div class="dh-page-heading"><span class="dh-eyebrow">DOCTOR WORKSPACE</span><h1>{{ currentName }}</h1><p>{{ navigation.find(item => item.key === current)!.caption }}</p></div>
           <ReceptionWorkspace v-if="current === 'reception'" :patient-id="String(route.query.patient || '')" @patient="selectReceptionPatient" @focus="receptionFocused = $event" />
-          <section v-else-if="current === 'schedules'" class="dh-panel"><div class="dh-section-heading"><h2>11月12日 · 今日出诊安排</h2><span class="dh-chip">2 场</span></div><div v-for="schedule in schedules" :key="schedule.id" class="dh-preview-list"><span :class="['dh-icon-tile', schedule.id === 'am' ? 'teal' : 'blue']"><Icon :name="schedule.id === 'am' ? 'hospital' : 'chat'"/></span><div><h3>{{ schedule.period }} {{ schedule.time }} · {{ schedule.mode }}</h3><p>{{ schedule.place }} · 已挂号 {{ schedule.registered }} / {{ schedule.capacity }}</p></div></div><p class="dh-preview-limit">排班日历、停诊申请表单将在后续阶段制作。</p></section>
-          <section v-else-if="current === 'applications'" class="dh-panel"><div class="dh-section-heading"><h2>我的申请与待办</h2><span class="dh-chip">{{ role === 'head' ? '科主任视角' : '医生视角' }}</span></div><div v-for="application in visibleApplications" :key="application.id" class="dh-preview-list"><span class="dh-icon-tile amber"><Icon :name="application.icon"/></span><div><h3>{{ application.title }}</h3><p>{{ application.detail }}</p></div><span class="dh-chip">{{ application.status }}</span></div><p class="dh-preview-limit">当前为申请摘要预览。提交、确认替诊及科主任审批操作将在后续阶段制作。</p></section>
+          <ScheduleWorkspace v-else-if="current === 'schedules'" @apply="openScheduleApplication" @reception="openScheduleReception" />
+          <template v-else-if="current === 'applications'">
+            <ScheduleApplicationWorkspace :role="role" @return="navigate('schedules')" />
+            <section class="dh-panel" style="margin-top:20px"><div class="dh-section-heading"><h2>替诊与科室待办预览</h2><span class="dh-chip">{{ role === 'head' ? '科主任视角' : '医生视角' }}</span></div><div v-for="application in visibleApplications.filter(a => !a.scheduleId)" :key="application.id" class="dh-preview-list"><span class="dh-icon-tile amber"><Icon :name="application.icon"/></span><div><h3>{{ application.title }}</h3><p>{{ application.detail }}</p></div><span class="dh-chip">{{ application.status }}</span></div><p class="dh-preview-limit">以上为虚构待办摘要；替诊确认及科主任审批将在后续阶段制作。</p></section>
+          </template>
           <section v-else-if="current === 'notifications'" class="dh-panel"><div class="dh-section-heading"><h2>业务提醒与医院动态</h2><span class="dh-chip">阅读预览</span></div><div class="dh-preview-list"><span class="dh-icon-tile amber"><Icon name="bell"/></span><div><h3>你收到一份替诊邀请</h3><p>陈予安医生 · 11月16日上午</p></div><button class="dh-link" @click="navigate('applications')">查看申请<Icon name="arrow"/></button></div><button v-for="notice in notices" :key="notice.title" class="dh-news-row" @click="viewNotice(notice)"><span>{{ notice.tag }}</span><strong>{{ notice.title }}</strong><Icon name="chevron"/></button><p class="dh-preview-limit">当前仅展示示例提醒，完整通知中心将在后续阶段制作。</p></section>
           <section v-else class="dh-panel dh-profile-preview"><span class="dh-avatar">许</span><h2>许知遥</h2><p>内科 · 副主任医师 · {{ role === 'head' ? '科主任' : '已认证医生' }}</p><div class="dh-profile-details"><span>执业信息<strong>已认证 · 虚构演示资料</strong></span><span>工作科室<strong>校医院 · 内科</strong></span><span>联系方式<strong>138****0628</strong></span></div><p class="dh-preview-limit">资料编辑与账户设置将在后续阶段制作。</p></section>
           <button class="dh-back-home dh-link" @click="navigate('home')">返回首页<Icon name="arrow"/></button>

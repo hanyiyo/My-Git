@@ -18,8 +18,8 @@ export const scenarios: { key: Scenario; name: string; time: string }[] = [
   { key: 'finished', name: '今日出诊结束', time: '18:30' },
 ]
 export const schedules = [
-  { id: 'am', period: '上午', time: '08:00–12:00', mode: '线下面诊', place: '门诊二楼 · 205 诊室', capacity: 20, registered: 14 },
-  { id: 'pm', period: '下午', time: '14:00–18:00', mode: '线上问诊', place: '线上图文诊室', capacity: 16, registered: 9 },
+  { id: 'am', period: '上午', time: '08:00–12:00', mode: '线下面诊', place: '门诊二楼 · 205 诊室', capacity: 20 },
+  { id: 'pm', period: '下午', time: '14:00–18:00', mode: '线上问诊', place: '线上图文诊室', capacity: 16 },
 ]
 export interface QueuePatient { id: string; number: string; name: string; age: number; sex: string; source: string; symptom: string; checkin: string; group: 'am' | 'pm' }
 export const patients: QueuePatient[] = [
