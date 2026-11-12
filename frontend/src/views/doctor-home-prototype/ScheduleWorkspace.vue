@@ -54,7 +54,7 @@ function moveDate(event: KeyboardEvent, date: string) {
   <div class="ds-workspace">
     <p v-if="warning" class="ds-alert" role="alert">{{ warning }}</p>
     <section aria-label="今日排班" class="ds-today">
-      <div class="ds-section-heading"><div><span class="dh-eyebrow">TODAY’S SCHEDULE</span><h2>把今天的安排，放在眼前</h2><p>{{ dateLabel(demoDate) }} · 许知遥医生 · 内科</p></div><span class="ds-date-badge"><Icon name="calendar" />今日 {{ todaySchedules.length }} 场</span></div>
+      <div class="ds-section-heading"><div><span class="dh-eyebrow">TODAY’S SCHEDULE</span><h2>把今天的安排，放在眼前</h2><p>许知遥医生 · 内科</p></div><span class="ds-date-badge"><Icon name="calendar" />今日 {{ todaySchedules.length }} 场</span></div>
       <div class="ds-today-grid"><ScheduleCard v-for="s in todaySchedules" :key="s.id" :schedule="s" compact @apply="emit('apply', $event)" @reception="emit('reception', $event)" /></div>
     </section>
     <div class="ds-month-overview"><div><h2>我的出诊日历</h2><p>看清整月安排，提前准备每一次出诊。</p></div><div><span>本月出诊 <b>{{ monthlyActive.length }}</b> 场</span><span>线上 <b>{{ monthlyActive.filter(s => s.mode === 'online').length }}</b></span><span>线下 <b>{{ monthlyActive.filter(s => s.mode === 'offline').length }}</b></span><span v-if="pendingCount" class="ds-pending-total">申请中 <b>{{ pendingCount }}</b></span></div></div>

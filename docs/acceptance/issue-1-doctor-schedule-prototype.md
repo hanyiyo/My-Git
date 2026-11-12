@@ -40,3 +40,13 @@ Q18–Q26 与公开页面操作逐项核对：今日区固定，完整日期保�
 ## 最终完整验证
 
 2026-11-12 18:20:34（Asia/Shanghai），`npm test`（执行 `scripts/verify.ps1`）退出0；日志 `.runtime/schedule-full-verify.log`。全部文档和架构检查、Vue类型检查及生产构建、真实MySQL/Redis HTTP集成、浏览器验收均通过。后端93项，0失败、0错误、0跳过；浏览器72项，0失败、0跳过、0 flaky、无全局错误。测试退出时有 Surefire JVM 关闭超时回收提示，最终为 BUILD SUCCESS、验证脚本正常退出。最终验收记录更新后重新执行全部文档检查和 `git diff --check`。
+
+## 展示与重复提示修正
+
+本轮需求：清除申请页开发说明与上下重复信息，修复签到错误重复及残留，排班日期移至右上角突出显示，申请停诊按钮标红。
+
+复现入口 `.runtime/check-application-alert.mjs`：上午执行下午患者模拟签到，关闭设置后进入申请处理。修复前同一签到错误出现两次，脚本退出1；修复后该错误不再跨页面残留，脚本退出0。原因是共享操作错误未清理，外层与申请页同时渲染；现在清理过期操作提示，并限定显示责任。
+
+`frontend/tests/doctor-schedule-prototype.spec.ts` 新增2项相关回归并更新日期展示断言，共10项通过，日志 `.runtime/application-cleanup-targeted.log`。验证申请列表/详情切换，移除开发文案，错误不跨页残留，右上角日期、红色停诊入口、窄屏，以及既有申请全流程。
+
+本次完整验证：2026-11-12 18:58:18（Asia/Shanghai），`npm test` 退出0，日志 `.runtime/application-cleanup-full-verify.log`；全部文档/架构、Vue类型检查和生产构建、真实MySQL/Redis HTTP及浏览器通过。后端93项，0失败、0错误、0跳过；浏览器74项，0失败、0跳过、0 flaky、0全局错误。关闭阶段仍有既有 Surefire JVM 超时回收提示，最终 BUILD SUCCESS。最终文档更新后重新执行全部文档检查和 `git diff --check`。桌面/手机视觉检查无脚本错误或横向溢出，截图 `.runtime/schedule-desktop.png`、`.runtime/schedule-application-desktop.png`、`.runtime/schedule-mobile.png`。

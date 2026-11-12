@@ -8,7 +8,7 @@ import ReceptionDemoControls from './doctor-home-prototype/ReceptionDemoControls
 import ScheduleWorkspace from './doctor-home-prototype/ScheduleWorkspace.vue'
 import ScheduleApplicationWorkspace from './doctor-home-prototype/ScheduleApplicationWorkspace.vue'
 import { applicationLabels, demoDate, scheduleNumbers } from './doctor-home-prototype/schedule-data'
-import { callVisit, formatTime, resetReception, setDemoTime, useReceptionDemo, waitingQueue } from './doctor-home-prototype/reception-demo'
+import { callVisit, clearReceptionError, formatTime, resetReception, setDemoTime, useReceptionDemo, waitingQueue } from './doctor-home-prototype/reception-demo'
 import { notices } from './patient-home-prototype/data'
 import { applications, navigation, patients, scenarios, type DemoRole, type QueuePatient, type Scenario, type Section } from './doctor-home-prototype/data'
 import { demoSettingsKey, saveDemoSettings } from './doctor-home-prototype/demo-settings'
@@ -23,6 +23,7 @@ const openTabs = ref<Section[]>(['home'])
 const receptionPatient = ref(patients.find(patient => patient.id === route.query.patient))
 const current = computed<Section>(() => navigation.find(item => item.key === route.params.section)?.key ?? 'home')
 const currentName = computed(() => navigation.find(item => item.key === current.value)!.name)
+watch(current, clearReceptionError, { immediate: true })
 const scheduleContext = ref<Record<string, string>>({}), applicationContext = ref<Record<string, string>>({})
 watch(() => route.fullPath, () => {
   const context = Object.fromEntries(['month', 'date', 'mode'].flatMap(key => typeof route.query[key] === 'string' ? [[key, String(route.query[key])]] : []))
@@ -82,7 +83,7 @@ function openDialog(kind: typeof dialogKind.value) {
   dialog.value?.showModal()
 }
 function closeDialog() { dialog.value?.close(); resetRequested.value = false }
-function restoreFocus() { returnFocus?.focus() }
+function restoreFocus() { if (dialogKind.value === 'controls') clearReceptionError(); returnFocus?.focus() }
 function viewPatient(patient: QueuePatient) { selectedPatient.value = patient; openDialog('patient') }
 function viewNotice(notice: typeof notices[number]) { selectedNotice.value = notice; openDialog('notice') }
 function openReception(patient?: QueuePatient) { closeDialog(); navigate('reception', patient ?? activeVisit.value) }
@@ -120,7 +121,7 @@ onUnmounted(() => { window.removeEventListener('storage', syncDemo); window.remo
       <header class="dh-topbar"><div class="dh-topbar-left"><button ref="mobileToggle" class="dh-mobile-toggle" aria-label="打开医生导航" :aria-expanded="mobileOpen" @click="mobileOpen = !mobileOpen"><Icon name="menu"/></button><a href="/prototype/doctor-home" class="dh-brand" @click.prevent="navigate('home')"><span><Icon name="cross"/></span><div><strong>智能医疗问诊预约系统</strong><small>SMART HEALTHCARE · 医生工作区</small></div></a></div><div class="dh-topbar-right"><span class="dh-hospital"><i></i> 校医院 · 内科</span><button class="dh-bell" aria-label="查看站内通知" @click="navigate('notifications')"><Icon name="bell"/><i></i></button><button class="dh-user" aria-label="个人资料" @click="navigate('profile')"><span>许</span><strong>许知遥</strong><Icon name="chevron"/></button></div></header>
       <nav class="dh-tabs" aria-label="医生临时工作区标签"><div v-for="tab in openTabs" :key="tab" :class="{ active: current === tab }"><button :aria-current="current === tab ? 'page' : undefined" @click="navigate(tab)"><Icon :name="navigation.find(item => item.key === tab)!.icon"/>{{ navigation.find(item => item.key === tab)!.name }}</button><button v-if="tab !== 'home'" :aria-label="`关闭${navigation.find(item => item.key === tab)!.name}标签`" @click="closeTab(tab)"><Icon name="close"/></button></div></nav>
 
-      <main class="dh-content" aria-label="医生端原型"><p v-if="receptionError && current !== 'reception'" role="alert" class="rd-alert">{{ receptionError }}</p>
+      <main class="dh-content" aria-label="医生端原型"><p v-if="receptionError && current !== 'reception' && current !== 'applications' && !dialog?.open" role="alert" class="rd-alert">{{ receptionError }}</p>
         <template v-if="current === 'home'">
           <section class="dh-welcome"><div><span class="dh-eyebrow">YOUR DAILY PRACTICE</span><h1>{{ upcoming || finished ? '下午好' : '上午好' }}，许知遥医生<span>。</span></h1><p>每一份信任，都值得认真回应。今天也一起守护校园健康。</p></div><div class="dh-date"><strong>12</strong><span>2026 年 11 月<small>星期四 · 演示时间 {{ demoTime }}</small></span></div></section>
 
@@ -138,12 +139,12 @@ onUnmounted(() => { window.removeEventListener('storage', syncDemo); window.remo
         </template>
 
         <template v-else>
-          <div class="dh-page-heading"><span class="dh-eyebrow">DOCTOR WORKSPACE</span><h1>{{ currentName }}</h1><p>{{ navigation.find(item => item.key === current)!.caption }}</p></div>
+          <div :class="['dh-page-heading', { 'ds-page-heading': current === 'schedules' }]"><div><span v-if="current !== 'applications'" class="dh-eyebrow">DOCTOR WORKSPACE</span><h1>{{ currentName }}</h1><p>{{ navigation.find(item => item.key === current)!.caption }}</p></div><div v-if="current === 'schedules'" class="ds-page-date" aria-label="今日日期"><Icon name="calendar" /><div><span>今天</span><time :datetime="demoDate">{{ demoDate.replaceAll('-', ' / ') }}</time><strong>{{ new Date(`${demoDate}T12:00:00+08:00`).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', weekday: 'long' }) }}</strong></div></div></div>
           <ReceptionWorkspace v-if="current === 'reception'" :patient-id="String(route.query.patient || '')" @patient="selectReceptionPatient" @focus="receptionFocused = $event" />
           <ScheduleWorkspace v-else-if="current === 'schedules'" @apply="openScheduleApplication" @reception="openScheduleReception" />
           <template v-else-if="current === 'applications'">
             <ScheduleApplicationWorkspace :role="role" @return="navigate('schedules')" />
-            <section class="dh-panel" style="margin-top:20px"><div class="dh-section-heading"><h2>替诊与科室待办预览</h2><span class="dh-chip">{{ role === 'head' ? '科主任视角' : '医生视角' }}</span></div><div v-for="application in visibleApplications.filter(a => !a.scheduleId)" :key="application.id" class="dh-preview-list"><span class="dh-icon-tile amber"><Icon :name="application.icon"/></span><div><h3>{{ application.title }}</h3><p>{{ application.detail }}</p></div><span class="dh-chip">{{ application.status }}</span></div><p class="dh-preview-limit">以上为虚构待办摘要；替诊确认及科主任审批将在后续阶段制作。</p></section>
+            <section class="dh-panel" style="margin-top:20px"><div class="dh-section-heading"><h2>替诊与科室待办</h2><span class="dh-chip">{{ role === 'head' ? '科主任视角' : '医生视角' }}</span></div><div v-for="application in visibleApplications.filter(a => !a.scheduleId)" :key="application.id" class="dh-preview-list"><span class="dh-icon-tile amber"><Icon :name="application.icon"/></span><div><h3>{{ application.title }}</h3><p>{{ application.detail }}</p></div><span class="dh-chip">{{ application.status }}</span></div></section>
           </template>
           <section v-else-if="current === 'notifications'" class="dh-panel"><div class="dh-section-heading"><h2>业务提醒与医院动态</h2><span class="dh-chip">阅读预览</span></div><div class="dh-preview-list"><span class="dh-icon-tile amber"><Icon name="bell"/></span><div><h3>你收到一份替诊邀请</h3><p>陈予安医生 · 11月16日上午</p></div><button class="dh-link" @click="navigate('applications')">查看申请<Icon name="arrow"/></button></div><button v-for="notice in notices" :key="notice.title" class="dh-news-row" @click="viewNotice(notice)"><span>{{ notice.tag }}</span><strong>{{ notice.title }}</strong><Icon name="chevron"/></button><p class="dh-preview-limit">当前仅展示示例提醒，完整通知中心将在后续阶段制作。</p></section>
           <section v-else class="dh-panel dh-profile-preview"><span class="dh-avatar">许</span><h2>许知遥</h2><p>内科 · 副主任医师 · {{ role === 'head' ? '科主任' : '已认证医生' }}</p><div class="dh-profile-details"><span>执业信息<strong>已认证 · 虚构演示资料</strong></span><span>工作科室<strong>校医院 · 内科</strong></span><span>联系方式<strong>138****0628</strong></span></div><p class="dh-preview-limit">资料编辑与账户设置将在后续阶段制作。</p></section>

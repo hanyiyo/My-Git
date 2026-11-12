@@ -40,7 +40,7 @@ const showReception = computed(() => canReception.value && (now.value < schedule
     <footer class="ds-session-actions">
       <button v-if="showReception" type="button" class="dh-primary" @click="$emit('reception', schedule.period)">{{ active ? '继续接诊' : '进入接诊工作台' }}<Icon name="arrow" /></button>
       <button v-if="application" class="ds-apply-link" type="button" @click="$emit('apply', schedule.id)">查看申请<Icon name="chevron" /></button>
-      <button v-if="!pending && application?.status !== 'APPROVED'" type="button" class="ds-apply-link" :disabled="!!blocked" :title="blocked" @click="$emit('apply', schedule.id)"><Icon name="file" />申请停诊</button>
+      <button v-if="!pending && application?.status !== 'APPROVED'" type="button" class="ds-apply-link ds-suspension-button" :disabled="!!blocked" :title="blocked" @click="$emit('apply', schedule.id)"><Icon name="file" />申请停诊</button>
     </footer>
     <p v-if="blocked && !pending && application?.status !== 'APPROVED'" class="ds-disabled-reason">{{ blocked }}</p>
   </article>

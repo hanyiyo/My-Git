@@ -124,6 +124,7 @@ function regenerate(data: DemoState, visit: DemoVisit, time: number) {
 export function useReceptionDemo() {
   return { state: computed(() => state.value), now, active, warning: readonly(warning), error: readonly(error), busy: readonly(busy) }
 }
+export function clearReceptionError() { error.value = '' }
 export const resetReception = () => change(() => {}, true)
 export const setDemoTime = (time: string) => change(data => {
   if (!/^\d{2}:\d{2}$/.test(time) || !Number.isFinite(dateAt(time))) throw new Error('请输入有效演示时间。')
