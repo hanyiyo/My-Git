@@ -20,6 +20,7 @@ import { prototypeOrders, statusForTab } from './patient-home-prototype/order-da
 import { departments, type HomeAction } from './patient-home-prototype/data'
 import { departmentDoctors, departmentProfiles, type PrototypeDepartmentDoctor } from './patient-home-prototype/department-data'
 import './patient-home-prototype/patient-home-prototype.css'
+import './patient-home-prototype/profile-prototype.css'
 
 interface AiAttachment {
   id: string
@@ -62,6 +63,9 @@ interface AiRetryPayload {
   images: AiAttachment[]
 }
 
+type ProfileSection = 'overview' | 'edit' | 'notifications' | 'password' | 'privacy' | 'about'
+type ProfileConfirmKind = 'logout' | 'discard'
+
 const aiScenarioRules: { keywords: string[]; department: string; summary: string; advice: string }[] = [
   { keywords: ['牙疼', '牙痛', '牙龈', '口腔', '牙齿'], department: '口腔科', summary: '你提到了牙齿或口腔不适，系统先整理为口腔相关症状。', advice: '先避免刺激性食物，记录疼痛出现的时间和诱因；持续或加重时尽快咨询口腔科医生。' },
   { keywords: ['皮肤', '红疹', '瘙痒', '过敏', '湿疹'], department: '皮肤科', summary: '你提到了皮肤变化或瘙痒，系统先整理为皮肤相关症状。', advice: '保持患处清洁，暂时避免已知刺激物，不要自行叠加使用多种药膏。' },
@@ -92,6 +96,18 @@ const aiAttachments = ref<AiAttachment[]>([]), aiMessages = ref<AiMessage[]>([])
 const noticeReceipts = ref(createPrototypeNotices())
 const notificationUnread = computed(() => noticeReceipts.value.filter(item => item.tab === 'system' && !item.read && !item.deleted).length)
 const patientOrders = ref(prototypeOrders.map(order => ({ ...order })))
+const profileSection = ref<ProfileSection>('overview')
+const profileName = ref('林同学'), profilePhone = ref('13800138000'), profileAvatarUrl = ref('')
+const draftProfileName = ref(''), draftProfilePhone = ref(''), draftProfilePhoneCode = ref(''), draftProfileAvatarUrl = ref('')
+const profileError = ref(''), profileNotice = ref(''), passwordError = ref(''), passwordNotice = ref('')
+const oldPassword = ref(''), newPassword = ref(''), confirmNewPassword = ref('')
+const systemNotifications = ref(true), appointmentReminders = ref(true)
+const profileConfirmDialog = ref<HTMLDialogElement>(), profileConfirmKind = ref<ProfileConfirmKind>('logout')
+const profileConfirmTitle = computed(() => profileConfirmKind.value === 'logout' ? '确认退出登录？' : '放弃未保存的修改？')
+const profileConfirmDescription = computed(() => profileConfirmKind.value === 'logout' ? '退出后需要重新登录才能继续使用患者端。' : '当前编辑内容还没有保存，关闭后这些修改会丢失。')
+const profileDirty = computed(() => profileSection.value === 'edit' && (draftProfileName.value !== profileName.value || draftProfilePhone.value !== profilePhone.value || draftProfileAvatarUrl.value !== profileAvatarUrl.value))
+const maskedProfilePhone = computed(() => profilePhone.value.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2'))
+const profileInitial = computed(() => (profileName.value.trim() || '林')[0])
 let bannerTimer: number | undefined
 let aiMessageId = 0
 const nav: { action: HomeAction | 'home'; icon: string; name: string }[] = [
@@ -123,10 +139,99 @@ function open(action: HomeAction) {
   if (action === 'ai') { aiOpen.value = true; aiDialog.value?.showModal(); return }
   if (['checkin', 'payment', 'report'].includes(action)) {
     goToOrders(action === 'checkin' ? '待就诊' : action === 'payment' ? '待付款' : '已完成'); return
-  } else panel.value = action
+  } else {
+    panel.value = action
+    if (action === 'profile') openProfileOverview()
+  }
   panelDialog.value?.showModal()
 }
-function closePanel() { panelDialog.value?.close(); panel.value = null }
+function openProfileOverview() {
+  profileSection.value = 'overview'
+  profileError.value = ''
+  profileNotice.value = ''
+  passwordError.value = ''
+  passwordNotice.value = ''
+}
+function openProfileSection(section: Exclude<ProfileSection, 'overview'>) {
+  profileError.value = ''
+  profileNotice.value = ''
+  passwordError.value = ''
+  passwordNotice.value = ''
+  if (section === 'edit') {
+    draftProfileName.value = profileName.value
+    draftProfilePhone.value = profilePhone.value
+    draftProfilePhoneCode.value = ''
+    draftProfileAvatarUrl.value = profileAvatarUrl.value
+  }
+  profileSection.value = section
+}
+function closePanelImmediately() {
+  panelDialog.value?.close()
+  panel.value = null
+  openProfileOverview()
+}
+function askProfileConfirmation(kind: ProfileConfirmKind) {
+  profileConfirmKind.value = kind
+  profileConfirmDialog.value?.showModal()
+}
+function closePanel() {
+  if (panel.value === 'profile' && profileDirty.value) {
+    askProfileConfirmation('discard')
+    return
+  }
+  closePanelImmediately()
+}
+function confirmProfileAction() {
+  profileConfirmDialog.value?.close()
+  if (profileConfirmKind.value === 'logout') {
+    closePanelImmediately()
+    void router.push('/prototype/auth')
+    return
+  }
+  if (draftProfileAvatarUrl.value && draftProfileAvatarUrl.value !== profileAvatarUrl.value) URL.revokeObjectURL(draftProfileAvatarUrl.value)
+  closePanelImmediately()
+}
+function cancelProfileConfirmation() { profileConfirmDialog.value?.close() }
+function chooseProfileAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+    profileError.value = '请选择 JPG 或 PNG 图片，且大小不超过 5MB。'
+    input.value = ''
+    return
+  }
+  if (draftProfileAvatarUrl.value && draftProfileAvatarUrl.value !== profileAvatarUrl.value) URL.revokeObjectURL(draftProfileAvatarUrl.value)
+  draftProfileAvatarUrl.value = URL.createObjectURL(file)
+  profileError.value = ''
+  input.value = ''
+}
+function saveProfile() {
+  const name = draftProfileName.value.trim()
+  const phone = draftProfilePhone.value.trim()
+  profileError.value = ''
+  if (!name) { profileError.value = '请输入昵称。'; return }
+  if (!/^1[3-9]\d{9}$/.test(phone)) { profileError.value = '请输入有效的中国大陆手机号。'; return }
+  if (phone !== profilePhone.value && !/^\d{6}$/.test(draftProfilePhoneCode.value.trim())) { profileError.value = '手机号变更需要填写 6 位验证码。'; return }
+  if (profileAvatarUrl.value && profileAvatarUrl.value !== draftProfileAvatarUrl.value) URL.revokeObjectURL(profileAvatarUrl.value)
+  profileName.value = name
+  profilePhone.value = phone
+  profileAvatarUrl.value = draftProfileAvatarUrl.value
+  profileSection.value = 'overview'
+  profileNotice.value = '资料已保存。'
+}
+function notificationSaved() { profileNotice.value = '通知偏好已保存。' }
+function submitPassword() {
+  passwordError.value = ''
+  if (!oldPassword.value || !newPassword.value || !confirmNewPassword.value) { passwordError.value = '请完整填写三项密码。'; return }
+  if (newPassword.value.length < 8) { passwordError.value = '新密码至少需要 8 位。'; return }
+  if (newPassword.value !== confirmNewPassword.value) { passwordError.value = '两次输入的新密码不一致。'; return }
+  passwordNotice.value = '密码修改成功，请重新登录。'
+  window.setTimeout(() => {
+    closePanelImmediately()
+    void router.push('/prototype/auth')
+  }, 250)
+}
 function goHome() { closePanel(); void router.push({ path: '/prototype/patient-home', query: { variant: 'A' } }) }
 function goToDepartments() { closePanel(); void router.push({ path: '/prototype/patient-home/departments', query: { variant: variant.value } }) }
 function goToDoctors() { closePanel(); void router.push({ path: '/prototype/patient-home/departments', query: { variant: variant.value, view: 'doctors' } }) }
@@ -277,13 +382,64 @@ onUnmounted(() => { if (bannerTimer) window.clearInterval(bannerTimer) })
     <button class="ph-ai-fab" aria-label="打开AI助手" @click="open('ai')"><span><Icon name="sparkles" /></span><strong>AI 助手</strong><small>描述症状，获取辅助建议</small></button>
     <PrototypeSwitcher :variants="prototypeVariants" :state="state" />
 
-    <dialog ref="panelDialog" class="ph-dialog" @close="panel = null">
-      <div class="ph-dialog-heading"><div><span class="ph-dialog-kicker">PATIENT SERVICES · 交互预览</span><h2>{{ panelTitle }}</h2></div><button class="ph-icon-button" aria-label="关闭服务预览" @click="closePanel"><Icon name="close" /></button></div>
+    <dialog ref="panelDialog" class="ph-dialog" @cancel.prevent="closePanel" @close="panel = null">
+      <div class="ph-dialog-heading"><div><span class="ph-dialog-kicker">PATIENT SERVICES · 交互预览</span><h2>{{ panelTitle }}</h2></div><button class="ph-icon-button" :aria-label="panel === 'profile' ? '关闭个人中心' : '关闭服务预览'" @click="closePanel"><Icon name="close" /></button></div>
       <template v-if="panel === 'registration'"><p class="ph-dialog-note">选择就诊方式与科室，预览挂号流程。以下号源均为虚构数据。</p><div class="ph-form-row"><label>就诊类型<select v-model="mode" aria-label="就诊类型"><option>线上问诊</option><option>线下面诊</option></select></label><label>选择科室<select v-model="department" aria-label="选择科室"><option v-for="item in departments" :key="item.name">{{ item.name }}</option></select></label></div><div class="ph-schedule-preview"><span class="ph-doctor-avatar">{{ registrationDoctor[0] }}</span><div><h3>{{ registrationDoctor }} <small>主治医师</small></h3><p>{{ department }} · {{ mode }}</p><p>11 月 10 日 下午 14:00–18:00 · 剩余 8 号</p></div><strong>¥12.00</strong></div><button class="ph-primary ph-full" @click="register">选择此号源，生成演示挂号单 <Icon name="arrow" /></button><small class="ph-dialog-footnote">提交后先进入待付款；完成模拟支付后才确认挂号。</small></template>
       <template v-else-if="panel === 'orders'"><div class="ph-order-tabs" role="tablist" aria-label="挂号状态"><button v-for="tab in ['全部', '待付款', '待就诊', '就诊中', '已完成', '已取消']" :key="tab" role="tab" :aria-selected="orderFilter === tab" @click="orderFilter = tab">{{ tab }}</button></div><p v-if="registered" class="ph-inline-message" role="status">{{ bookingPaid ? '模拟支付成功，演示挂号已确认。' : '已生成演示挂号单，请在待付款中完成模拟支付。' }}</p><article v-if="orderFilter === '全部' || orderFilter === '待就诊'" class="ph-order-preview"><span class="ph-status-tag">{{ checkedIn ? '候诊中' : '待签到' }}</span><h3>全科医学科 · {{ registrationDoctor }}医生</h3><p>线下面诊 · 11 月 10 日 14:00–18:00</p><p>签到窗口：13:30 至 17:45 前 · 演示时间 13:35</p><p v-if="checkedIn" role="status">签到成功 · 候诊序号 A012，请留意叫号通知。</p><button class="ph-primary" :disabled="checkedIn" @click="checkedIn = true">{{ checkedIn ? '已签到，等待叫号' : '模拟签到' }}</button></article><article v-if="orderFilter === '全部' || orderFilter === '待付款'" class="ph-order-preview"><span class="ph-status-tag orange">{{ paid ? '药费已缴清' : '药品待缴费' }}</span><h3>已完成就诊 · 独立药费单</h3><p>药费 ¥18.00 · 诊疗病历已保存，药费状态不影响查看</p><button class="ph-primary" :disabled="paid" @click="paid = true">{{ paid ? '已支付' : '模拟支付药费 ¥18.00' }}</button></article><article v-if="registered && !bookingPaid && (orderFilter === '待付款' || orderFilter === '全部')" class="ph-order-preview"><span class="ph-status-tag">挂号待缴费</span><h3>{{ department }} · {{ mode }}</h3><p>{{ registrationDoctor }}医生 · 11 月 10 日 14:00–18:00 · ¥12.00</p><button class="ph-primary" @click="bookingPaid = true; orderFilter = '待就诊'">模拟支付挂号费 ¥12.00</button></article><article v-if="orderFilter === '已完成'" class="ph-order-preview"><span class="ph-status-tag">已完成</span><h3>11 月 06 日 · 全科医学科</h3><p>病历总结：本次诊疗记录已归档。</p><p>报告入口用于查看已完成就诊资料；此处展示虚构病历示例。</p></article><p v-if="['就诊中', '已取消'].includes(orderFilter)" class="ph-empty">当前没有{{ orderFilter }}的演示挂号单。</p></template>
       <template v-else-if="panel === 'departments'"><p class="ph-dialog-note">选择科室后，查看相应的演示号源。</p><button v-for="item in departments" :key="item.name" class="ph-directory-row" @click="chooseDepartment(item.name)"><span class="ph-icon-tile teal"><Icon :name="item.icon" /></span><span><strong>{{ item.name }}</strong><small>{{ item.detail }} · 今日 {{ item.count }} 位医生出诊</small></span><Icon name="chevron" /></button></template>
       <template v-else-if="panel === 'doctors'"><div v-for="name in ['陈予安', '许知遥']" :key="name" class="ph-schedule-preview"><span class="ph-doctor-avatar">{{ name[0] }}</span><div><h3>{{ name }} <small>主治医师</small></h3><p>全科医学科 · 常见不适与健康咨询</p></div><button class="ph-soft-button" @click="panel = 'registration'">查看排班</button></div></template>
-      <template v-else-if="panel === 'profile'"><div class="ph-profile-preview"><span class="ph-patient-avatar">林</span><h3>林同学</h3><p>患者账户 · 虚构演示资料</p></div><p class="ph-dialog-note">这里将展示头像、昵称、手机号，以及修改密码、隐私协议、关于系统和退出登录等入口。</p></template>
+      <template v-else-if="panel === 'profile'">
+        <template v-if="profileSection === 'overview'">
+          <div class="ph-profile-overview">
+            <div class="ph-profile-identity"><span class="ph-profile-avatar"><img v-if="profileAvatarUrl" :src="profileAvatarUrl" alt="当前头像"><span v-else>{{ profileInitial }}</span></span><div><h3>{{ profileName }}</h3><p>患者账户 · 虚构演示资料</p></div><button class="ph-soft-button" type="button" @click="openProfileSection('edit')">编辑资料 <Icon name="edit" /></button></div>
+            <dl class="ph-profile-facts"><div><dt>手机号</dt><dd>{{ maskedProfilePhone }}</dd></div><div><dt>账户状态</dt><dd><span class="ph-profile-online-dot" />正常使用</dd></div></dl>
+          </div>
+          <p v-if="profileNotice" class="ph-inline-message" role="status">{{ profileNotice }}</p>
+          <div class="ph-profile-section-list" aria-label="个人中心功能">
+            <button type="button" @click="openProfileSection('notifications')"><span class="ph-profile-action-icon teal"><Icon name="bell" /></span><span><strong>通知设置</strong><small>管理系统通知和预约提醒</small></span><Icon name="chevron" /></button>
+            <button type="button" @click="openProfileSection('password')"><span class="ph-profile-action-icon blue"><Icon name="lock" /></span><span><strong>修改密码</strong><small>定期更新密码，保护账户安全</small></span><Icon name="chevron" /></button>
+            <button type="button" @click="openProfileSection('privacy')"><span class="ph-profile-action-icon purple"><Icon name="shield" /></span><span><strong>隐私与协议</strong><small>查看隐私协议和用户协议</small></span><Icon name="chevron" /></button>
+            <button type="button" @click="openProfileSection('about')"><span class="ph-profile-action-icon orange"><Icon name="info" /></span><span><strong>关于系统</strong><small>版本信息与服务说明</small></span><Icon name="chevron" /></button>
+          </div>
+          <button class="ph-profile-logout" type="button" @click="askProfileConfirmation('logout')"><Icon name="logout" />退出登录</button>
+          <p class="ph-profile-boundary"><Icon name="shield" />病历、检查报告和 AI 会话在独立医疗服务模块中管理。</p>
+        </template>
+        <template v-else-if="profileSection === 'edit'">
+          <div class="ph-profile-subheading"><button class="ph-back-button" type="button" @click="openProfileOverview">← 返回个人中心</button><span>资料编辑</span></div>
+          <p class="ph-dialog-note">更新你的展示资料，手机号变更需要完成验证码校验。</p>
+          <p v-if="profileError" class="ph-profile-error" role="alert">{{ profileError }}</p>
+          <div class="ph-profile-edit-avatar"><span class="ph-profile-avatar large"><img v-if="draftProfileAvatarUrl" :src="draftProfileAvatarUrl" alt="待保存头像"><span v-else>{{ (draftProfileName.trim() || '林')[0] }}</span></span><label class="ph-upload-avatar">更换头像<input type="file" accept="image/jpeg,image/png" aria-label="选择头像" @change="chooseProfileAvatar"></label><small>支持 JPG、PNG，最大 5MB</small></div>
+          <label class="ph-profile-field">昵称<input v-model="draftProfileName" aria-label="昵称" maxlength="20" placeholder="请输入昵称"></label>
+          <label class="ph-profile-field">手机号<input v-model="draftProfilePhone" aria-label="手机号" inputmode="numeric" maxlength="11" placeholder="请输入手机号"></label>
+          <label v-if="draftProfilePhone !== profilePhone" class="ph-profile-field">验证码<input v-model="draftProfilePhoneCode" aria-label="手机号验证码" inputmode="numeric" maxlength="6" placeholder="输入 6 位验证码"><small>原型演示中输入任意 6 位数字即可通过</small></label>
+          <div class="ph-profile-edit-actions"><button class="ph-soft-button" type="button" @click="closePanel">取消</button><button class="ph-primary" type="button" @click="saveProfile">保存资料</button></div>
+        </template>
+        <template v-else-if="profileSection === 'notifications'">
+          <div class="ph-profile-subheading"><button class="ph-back-button" type="button" @click="openProfileOverview">← 返回个人中心</button><span>通知设置</span></div>
+          <p class="ph-dialog-note">选择你希望接收的患者端提醒，开关变更会立即保存。</p>
+          <p v-if="profileNotice" class="ph-inline-message" role="status">{{ profileNotice }}</p>
+          <div class="ph-setting-list"><label class="ph-setting-row"><span><strong>系统通知</strong><small>账户安全、服务公告和状态变化</small></span><input v-model="systemNotifications" type="checkbox" aria-label="系统通知" @change="notificationSaved"></label><label class="ph-setting-row"><span><strong>预约提醒</strong><small>挂号、签到和候诊时间提醒</small></span><input v-model="appointmentReminders" type="checkbox" aria-label="预约提醒" @change="notificationSaved"></label></div>
+        </template>
+        <template v-else-if="profileSection === 'password'">
+          <div class="ph-profile-subheading"><button class="ph-back-button" type="button" @click="openProfileOverview">← 返回个人中心</button><span>修改密码</span></div>
+          <p class="ph-dialog-note">修改成功后会退出当前演示工作台，请使用新密码重新登录。</p>
+          <p v-if="passwordError" class="ph-profile-error" role="alert">{{ passwordError }}</p>
+          <p v-if="passwordNotice" class="ph-inline-message" role="status">{{ passwordNotice }}</p>
+          <form class="ph-profile-password-form" @submit.prevent="submitPassword"><label>旧密码<input v-model="oldPassword" type="password" autocomplete="current-password" aria-label="旧密码"></label><label>新密码<input v-model="newPassword" type="password" autocomplete="new-password" aria-label="新密码" placeholder="至少 8 位"></label><label>确认新密码<input v-model="confirmNewPassword" type="password" autocomplete="new-password" aria-label="确认新密码"></label><button class="ph-primary ph-full" type="submit">确认修改 <Icon name="arrow" /></button></form>
+        </template>
+        <template v-else-if="profileSection === 'privacy'">
+          <div class="ph-profile-subheading"><button class="ph-back-button" type="button" @click="openProfileOverview">← 返回个人中心</button><span>隐私与协议</span></div>
+          <div class="ph-profile-doc"><h3>隐私协议</h3><p>我们只在提供预约、问诊和账户服务所需的范围内处理信息。医疗资料按照明确授权范围使用，患者 AI 助手会话不会自动成为病历。</p><h3>用户协议</h3><p>请在使用预约、问诊和消息服务前阅读服务说明，系统输出的健康建议不能替代医生诊疗。</p><small>原型示例文本 · 以正式上线版本为准</small></div>
+        </template>
+        <template v-else-if="profileSection === 'about'">
+          <div class="ph-profile-subheading"><button class="ph-back-button" type="button" @click="openProfileOverview">← 返回个人中心</button><span>关于系统</span></div>
+          <div class="ph-profile-about"><span class="ph-brand-symbol"><Icon name="cross" /></span><h3>智能医疗问诊预约系统</h3><p>为患者提供清晰、连续的预约与问诊服务体验。</p><dl><div><dt>当前版本</dt><dd>患者端原型 v0.1</dd></div><div><dt>服务说明</dt><dd>预约、图文诊室、站内通知与 AI 辅助导诊</dd></div></dl></div>
+        </template>
+      </template>
+    </dialog>
+
+    <dialog ref="profileConfirmDialog" class="ph-confirm-dialog" aria-labelledby="profile-confirm-title">
+      <span class="ph-confirm-icon"><Icon :name="profileConfirmKind === 'logout' ? 'logout' : 'warning'" /></span><h2 id="profile-confirm-title">{{ profileConfirmTitle }}</h2><p>{{ profileConfirmDescription }}</p><div class="ph-confirm-actions"><button class="ph-soft-button" type="button" @click="cancelProfileConfirmation">再想想</button><button class="ph-primary" type="button" @click="confirmProfileAction">{{ profileConfirmKind === 'logout' ? '确认退出' : '放弃修改' }}</button></div>
     </dialog>
 
     <dialog ref="aiDialog" class="ph-ai-dialog" @close="aiOpen = false">
