@@ -76,7 +76,7 @@ foreach ($number in 37..66) {
 
 # 医生端访谈保留已确认轮次，并明确区分后续演示目标和已交付能力。
 $doctorWorkspace = Get-Content (Join-Path $root 'docs/design/doctor-workspace-prototype.md') -Raw
-foreach ($number in 1..17) {
+foreach ($number in 1..26) {
     if ([regex]::Matches($doctorWorkspace, "(?m)^## Q${number}：").Count -ne 1) {
         throw "Doctor workspace decision must have one section: Q$number"
     }
