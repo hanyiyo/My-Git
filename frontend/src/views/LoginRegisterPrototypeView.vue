@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 type Role = 'PATIENT' | 'DOCTOR' | 'ADMIN'
 type Mode = 'login' | 'register'
@@ -20,7 +21,8 @@ const phoneNumber = ref('')
 const captcha = ref('')
 const showPassword = ref(false)
 const remember = ref(true)
-const status = ref('')
+const route = useRoute()
+const status = ref(route.query.reason === 'password-changed' ? '密码修改成功，请重新登录。当前为演示流程，未修改真实账户密码。' : '')
 const submitted = ref(false)
 const registered = ref(false)
 

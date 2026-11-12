@@ -50,7 +50,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   ,{ path: '/profile', component: HomeView, meta: { role: 'PATIENT' } }
 ] })
 router.beforeEach(async to => {
-  if (import.meta.env.DEV && to.meta.prototypeWorkspace) return
+  if (import.meta.env.DEV && (to.meta.prototypeWorkspace || to.path === '/prototype/auth')) return
   const session = useSession(); await session.restore()
   if (to.meta.role && !session.account) return '/login'
   if (to.meta.role && !session.account?.roles.includes(String(to.meta.role))) return '/' + session.account!.roles[0]!.toLowerCase()
