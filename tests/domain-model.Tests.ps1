@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $glossary = Get-Content (Join-Path $root "GLOSSARY.md") -Raw
-foreach ($term in @("Account", "Schedule", "Slot", "Appointment", "Consultation", "Doctor reception workspace", "Clinical draft", "Shared health record", "Schedule change request", "System notification", "Hospital news", "Notification receipt")) {
+foreach ($term in @("Account", "Schedule", "Slot", "Appointment", "Consultation", "Doctor reception workspace", "Clinical draft", "Shared health record", "Schedule change request", "Substitution invitation", "System notification", "Hospital news", "Notification receipt")) {
   if ($glossary -notmatch [regex]::Escape($term)) { throw "Missing glossary term: $term" }
 }
 foreach ($adr in @("docs/adr/0003-schedule-slot-appointment-lifecycle.md", "docs/adr/0004-minimum-necessary-medical-visibility.md", "docs/adr/0005-defer-real-payment.md")) {

@@ -20,7 +20,7 @@ test('医生首页提供六模块框架，临时标签与继续接诊保留患�
   expect(requests).toEqual([])
 })
 
-test('候诊可以搜索、查看上下文，首页与申请页不提供审批或叫号操作', async ({ page }) => {
+test('候诊可以搜索、查看上下文，替诊待办进入申请详情处理', async ({ page }) => {
   await page.goto('/prototype/doctor-home')
   await page.getByRole('textbox', { name: '搜索候诊患者' }).fill('林知夏')
   await expect(page.getByRole('button', { name: '查看林知夏详情' })).toBeVisible()
@@ -51,7 +51,7 @@ test('候诊可以搜索、查看上下文，首页与申请页不提供审批�
   await page.getByRole('button', { name: /陈予安医生邀请你替诊/ }).click()
   await expect(page).toHaveURL(/applications/)
   await expect(page.getByRole('main')).not.toContainText('林牧医生的停诊申请')
-  await expect(page.getByRole('button', { name: /同意替诊|驳回|通过审批/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '接受替诊' })).toBeVisible()
 })
 
 test('演示场景同步跨标签、刷新保留，科主任只增加科室待办，重置需确认', async ({ page, context }) => {

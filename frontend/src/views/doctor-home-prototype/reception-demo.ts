@@ -16,7 +16,17 @@ export interface DemoVisit extends QueuePatient {
   payment: { status: 'PENDING' | 'PAID' | 'EXPIRED'; total: number; expiresAt: number } | null
 }
 export interface DemoMedicine { id: string; name: string; specification: string; price: number; stock: number; held: number; enabled: boolean }
-interface DemoState { version: 1; revision: number; clockOffset: number; visits: DemoVisit[]; medicines: DemoMedicine[]; aiFailure: boolean; schedules: DemoSchedule[]; applications: SuspensionApplication[] }
+export type SubstitutionInvitationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED'
+export interface SubstitutionInvitation {
+  id: string; scheduleId: string; originalDoctor: string; arrangedBy: string; department: string; date: string; period: 'am' | 'pm'
+  mode: 'online' | 'offline'; place: string; affected: number; deadline: number; reason: string; createdAt: number
+  status: SubstitutionInvitationStatus; conflict: boolean; rejectionReason?: string
+}
+export interface DoctorNotification {
+  id: string; section: 'pending' | 'normal'; kind: 'substitution' | 'application' | 'reception'; title: string; summary: string; body: string
+  createdAt: number; read: boolean; deleted: boolean; action: 'applications' | 'schedules' | 'reception' | null; relatedId?: string; invitationId?: string
+}
+interface DemoState { version: 1; revision: number; clockOffset: number; visits: DemoVisit[]; medicines: DemoMedicine[]; aiFailure: boolean; schedules: DemoSchedule[]; applications: SuspensionApplication[]; invitations: SubstitutionInvitation[]; notifications: DoctorNotification[] }
 export const receptionKey = 'medical-reception-prototype-v1'
 export const blankDraft = (): ClinicalDraft => ({ complaint: '', present: '', history: '', diagnosis: '', advice: '', medicines: [] })
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -33,7 +43,14 @@ function newVisit(patient: QueuePatient, status: VisitStatus): DemoVisit {
 }
 function initialState(): DemoState {
   const schedules = initialSchedules(), applications = initialApplications(schedules)
-  return { version: 1, revision: 0, clockOffset: dateAt('10:20') - Date.now(), aiFailure: false, schedules, applications,
+  const invitations: SubstitutionInvitation[] = [{ id: 'substitution-demo-001', scheduleId: '2026-11-21-am', originalDoctor: '许知遥', arrangedBy: '陈予安', department: '内科', date: '2026-11-21', period: 'am', mode: 'offline', place: '门诊二楼 · 205 诊室', affected: 6, deadline: Date.parse('2026-11-19T18:00:00+08:00'), reason: '原出诊医生临时参加院内培训，科主任安排同科替诊。', createdAt: Date.parse('2026-11-12T09:30:00+08:00'), status: 'PENDING', conflict: false },
+    { id: 'substitution-conflict-001', scheduleId: '2026-11-17-am', originalDoctor: '许知遥', arrangedBy: '陈予安', department: '内科', date: '2026-11-17', period: 'am', mode: 'offline', place: '门诊二楼 · 205 诊室', affected: 3, deadline: Date.parse('2026-11-15T18:00:00+08:00'), reason: '用于演示替诊医生已有同一时段排班的拦截。', createdAt: Date.parse('2026-11-12T09:20:00+08:00'), status: 'PENDING', conflict: true }]
+  const notifications: DoctorNotification[] = [
+    { id: 'doctor-notice-invitation', section: 'pending', kind: 'substitution', title: '你收到一份替诊邀请', summary: '陈予安（科主任）为你安排 11月21日上午线下面诊替诊。', body: '请核对出诊安排、预约人数和本人排班后选择接受或拒绝。接受后仍需等待管理员复核，尚未正式生效。', createdAt: Date.parse('2026-11-12T09:30:00+08:00'), read: false, deleted: false, action: 'applications', relatedId: 'substitution-demo-001', invitationId: 'substitution-demo-001' },
+    { id: 'doctor-notice-application', section: 'normal', kind: 'application', title: '停诊申请进度有更新', summary: '11月20日下午停诊申请正在等待管理员复核。', body: '申请已保存，新增挂号已暂停，已付款预约仍保留。最终结果以管理员复核为准。', createdAt: Date.parse('2026-11-12T08:30:00+08:00'), read: false, deleted: false, action: 'applications', relatedId: '2026-11-20-pm' },
+    { id: 'doctor-notice-reception', section: 'normal', kind: 'reception', title: '下午线上问诊即将开始', summary: '13:30 开放签到，请按队列顺序接诊。', body: '下午线上问诊安排为 14:00–18:00，患者签到后会进入候诊队列。', createdAt: Date.parse('2026-11-12T08:00:00+08:00'), read: true, deleted: false, action: 'reception' }
+  ]
+  return { version: 1, revision: 0, clockOffset: dateAt('10:20') - Date.now(), aiFailure: false, schedules, applications, invitations, notifications,
     visits: [...patients.map(patient => newVisit(patient, 'WAITING')),
       newVisit({ id: 'today-online-waiting', number: 'P001', name: '林知夏', age: 21, sex: '女', source: '预约挂号', symptom: '咽部不适，希望线上咨询', checkin: '', group: 'pm' }, 'PENDING_VISIT'),
       newVisit({ id: 'online-002', number: 'P002', name: '陈亦安', age: 22, sex: '男', source: '当日挂号', symptom: '餐后胃部不适', checkin: '', group: 'pm' }, 'PENDING_VISIT')],
@@ -55,10 +72,14 @@ function readState(): DemoState {
     || data.medicines.some(m => !Number.isInteger(m.stock) || m.stock < 0 || !Number.isInteger(m.held) || m.held < 0)) throw new Error('演示进度损坏')
   // Extend the existing demo snapshot without discarding conversations, drafts or payments.
   if (data.schedules === undefined && data.applications === undefined) { data.schedules = initialSchedules(); data.applications = initialApplications(data.schedules) }
+  if (!Array.isArray(data.invitations)) data.invitations = initialState().invitations
+  if (!Array.isArray(data.notifications)) data.notifications = initialState().notifications
   if (!Array.isArray(data.schedules) || !Array.isArray(data.applications)
     || initialSchedules().some(s => !data.schedules.some(item => item.id === s.id))
     || data.schedules.some(s => !['PUBLISHED', 'SUSPENDED', 'SUBSTITUTED'].includes(s.status) || !Number.isInteger(s.capacity) || !Number.isInteger(s.paid) || !Number.isInteger(s.held) || s.held < 0 || s.paid < 0 || s.capacity < s.paid + s.held)
-    || data.applications.some(a => !data.schedules.some(s => s.id === a.scheduleId) || !['PENDING_HEAD', 'PENDING_ADMIN', 'REJECTED', 'EXPIRED', 'APPROVED'].includes(a.status) || typeof a.reason !== 'string' || !Number.isFinite(a.deadline) || !Number.isFinite(a.submittedAt))) throw new Error('排班演示进度损坏')
+    || data.applications.some(a => !data.schedules.some(s => s.id === a.scheduleId) || !['PENDING_HEAD', 'PENDING_ADMIN', 'REJECTED', 'EXPIRED', 'APPROVED'].includes(a.status) || typeof a.reason !== 'string' || !Number.isFinite(a.deadline) || !Number.isFinite(a.submittedAt))
+    || data.invitations.some(i => !['PENDING', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED'].includes(i.status) || !Number.isFinite(i.deadline) || !Number.isFinite(i.createdAt))
+    || data.notifications.some(n => !['pending', 'normal'].includes(n.section) || typeof n.title !== 'string' || typeof n.body !== 'string')) throw new Error('排班演示进度损坏')
   return data
 }
 let loaded: DemoState
@@ -79,6 +100,13 @@ function visitById(data: DemoState, id: string) {
 function expire(data: DemoState, time: number) {
   for (const application of data.applications) {
     if (isPendingApplication(application) && time > application.deadline) { application.status = 'EXPIRED'; application.note = '未在审批期限内完成全部审批，申请已过期，原出诊安排保留。' }
+  }
+  for (const invitation of data.invitations) {
+    if (invitation.status === 'PENDING' && time > invitation.deadline) {
+      invitation.status = 'EXPIRED'
+      const notice = data.notifications.find(n => n.invitationId === invitation.id)
+      if (notice) { notice.section = 'normal'; notice.summary = '替诊邀请已过期，原出诊安排保留。'; notice.body = '超过确认截止时间，无法继续处理。请在申请处理查看历史记录。' }
+    }
   }
   for (const visit of data.visits) {
     if (visit.status === 'PENDING_VISIT' && time >= sessionBounds(visit.group).end - 15 * 60000) visit.status = 'EXPIRED'
@@ -146,6 +174,31 @@ export const submitSuspension = (scheduleId: string, reason: string, role: 'doct
     deadline: Math.min(time + 7 * 24 * 3600000, scheduleStart(schedule) - 24 * 3600000),
     affected: scheduleNumbers(schedule, data.visits).registered, status: role === 'head' ? 'PENDING_ADMIN' : 'PENDING_HEAD', applicantRole: role })
   schedule.held = 0
+  data.notifications.unshift({ id: crypto.randomUUID(), section: 'normal', kind: 'application', title: '停诊申请已提交', summary: `${schedule.date} ${schedule.period === 'am' ? '上午' : '下午'}停诊申请已进入处理流程。`, body: '新增挂号已暂停，已付款预约仍保留。请在申请处理查看节点进度。', createdAt: time, read: false, deleted: false, action: 'applications', relatedId: scheduleId })
+})
+export const markDoctorNotificationRead = (id: string) => change(data => { const notice = data.notifications.find(n => n.id === id); if (notice) notice.read = true })
+export const markAllDoctorNotificationsRead = (section?: 'pending' | 'normal') => change(data => { data.notifications.filter(n => !n.deleted && (!section || n.section === section)).forEach(n => { n.read = true }) })
+export const deleteDoctorNotification = (id: string) => change(data => { const notice = data.notifications.find(n => n.id === id); if (notice) notice.deleted = true })
+export const clearDoctorNotifications = (section: 'pending' | 'normal') => change(data => { data.notifications.filter(n => !n.deleted && n.section === section).forEach(n => { n.deleted = true }) })
+export const acceptSubstitution = (id: string) => change(data => {
+  const invitation = data.invitations.find(i => i.id === id)
+  if (!invitation) throw new Error('替诊邀请不存在。')
+  if (invitation.status !== 'PENDING') throw new Error('该替诊邀请已处理或已失效。')
+  if (Date.now() + data.clockOffset > invitation.deadline) throw new Error('确认截止时间已过，无法接受替诊。')
+  if (invitation.conflict) throw new Error('你在该时段已有出诊安排，无法接受替诊。')
+  invitation.status = 'ACCEPTED'
+  const notice = data.notifications.find(n => n.invitationId === id)
+  if (notice) { notice.section = 'normal'; notice.summary = '你已接受替诊邀请，等待管理员复核。'; notice.body = '替诊尚未正式生效，管理员复核通过后才会创建替诊排班并迁移有效预约。' }
+})
+export const rejectSubstitution = (id: string, reason: string) => change(data => {
+  const invitation = data.invitations.find(i => i.id === id)
+  if (!invitation) throw new Error('替诊邀请不存在。')
+  if (invitation.status !== 'PENDING') throw new Error('该替诊邀请已处理或已失效。')
+  if (!reason.trim() || reason.trim().length > 500) throw new Error('请填写 1–500 字的拒绝原因。')
+  if (Date.now() + data.clockOffset > invitation.deadline) throw new Error('确认截止时间已过，无法拒绝。')
+  invitation.status = 'REJECTED'; invitation.rejectionReason = reason.trim()
+  const notice = data.notifications.find(n => n.invitationId === id)
+  if (notice) { notice.section = 'normal'; notice.summary = '你已拒绝替诊邀请，已退回科主任重新安排。'; notice.body = `拒绝原因：${reason.trim()}` }
 })
 export const setAiFailure = (failure: boolean) => change(data => { data.aiFailure = failure })
 export const adjustStock = (id: string, stock: number) => change(data => {
