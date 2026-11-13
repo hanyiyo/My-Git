@@ -91,12 +91,17 @@ test('确认暂停新增弹窗打开后焦点落在弹窗确认按钮', async ({
 
 test('排班草稿支持发布，日期减号可删除无预约排班', async ({ page }) => {
   await page.goto('/prototype/admin-schedules')
+  const draftCalendarItem = page.locator('[data-calendar-date="2026-11-14"] .schedule-status-draft')
+  await expect(draftCalendarItem).toHaveCSS('background-color', 'rgb(238, 241, 244)')
+  await expect(draftCalendarItem).toHaveCSS('color', 'rgb(127, 138, 150)')
   await page.locator('[data-calendar-date="2026-11-14"]').click()
   await page.locator('.schedule-card').first().click()
   const detail = page.getByRole('complementary', { name: '排班详情' })
   await expect(detail).toContainText('周宁')
   await expect(detail).toContainText('线上问诊')
   await expect(detail).toContainText('业务影响')
+  await expect(detail.getByRole('button', { name: '发布排班' })).toHaveCSS('background-color', 'rgb(52, 124, 219)')
+  await expect(detail.getByRole('button', { name: '发布排班' })).toHaveCSS('color', 'rgb(255, 255, 255)')
   await detail.getByRole('button', { name: '关闭排班详情' }).click()
   await expect(detail).toBeHidden()
   await page.locator('.schedule-card').first().click()
