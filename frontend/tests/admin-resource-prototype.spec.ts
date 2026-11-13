@@ -48,6 +48,17 @@ test('医生治理工作台支持资质审核备注和科室归属', async ({ pa
   await expect(page.getByRole('dialog', { name: '调整医生科室' })).toBeVisible()
 })
 
+test('医生治理工作台保证每个科室只有一名科主任', async ({ page }) => {
+  await page.goto('/prototype/admin-doctors')
+  await page.getByRole('button', { name: '查看D-1098详情' }).click()
+  const drawer = page.getByRole('complementary', { name: '资源详情' })
+  await drawer.getByRole('button', { name: '标记科主任' }).click()
+  await expect(drawer.getByRole('status')).toContainText('由周宁更换为马凌担任科主任')
+  await drawer.getByRole('button', { name: '关闭资源详情' }).click()
+  await expect(page.locator('tr').filter({ hasText: 'D-1098' })).toContainText('科主任')
+  await expect(page.locator('tr').filter({ hasText: 'D-1021' })).not.toContainText('科主任')
+})
+
 test('科室管理工作台支持负责人任命和停用影响提示', async ({ page }) => {
   await page.goto('/prototype/admin-departments')
   await expect(page.getByRole('heading', { name: '科室管理工作台' })).toBeVisible()

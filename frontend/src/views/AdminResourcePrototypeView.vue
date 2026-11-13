@@ -125,7 +125,21 @@ function openReview() { const item = selected.value as Doctor; reviewStatus.valu
 function saveReview() { const item = selected.value as Doctor; if (!reviewNote.value.trim()) return; item.credentialStatus = reviewStatus.value; item.operations.unshift({ id: `op-${Date.now()}`, action: `资质${credentialLabels[reviewStatus.value]}`, time: '刚刚', operator: '运营管理员', note: `审核备注：${reviewNote.value.trim()}` }); reviewOpen.value = false; notice.value = '资质状态和审核备注已保存。' }
 function openDepartmentEdit() { const item = selected.value as Doctor; departmentValue.value = item.department; departmentOpen.value = true }
 function saveDepartmentEdit() { const item = selected.value as Doctor; item.department = departmentValue.value; item.operations.unshift({ id: `op-${Date.now()}`, action: '调整科室归属', time: '刚刚', operator: '运营管理员', note: `调整为${departmentValue.value}` }); departmentOpen.value = false; notice.value = '医生科室归属已更新。' }
-function toggleHead(item: Doctor) { item.head = !item.head; item.operations.unshift({ id: `op-${Date.now()}`, action: item.head ? '标记科主任' : '取消科主任标记', time: '刚刚', operator: '运营管理员', note: '科主任标记已更新' }); notice.value = item.head ? '已标记为科主任。' : '已取消科主任标记。' }
+function toggleHead(item: Doctor) {
+  const department = departments.value.find(value => value.name === item.department)
+  const previous = doctors.value.find(value => value.department === item.department && value.head && value.id !== item.id)
+  if (item.head) {
+    item.head = false
+    if (department?.headDoctor === item.name) department.headDoctor = ''
+    item.operations.unshift({ id: `op-${Date.now()}`, action: '取消科主任标记', time: '刚刚', operator: '运营管理员', note: '科主任标记已更新' })
+    notice.value = '已取消科主任标记。'
+    return
+  }
+  doctors.value.forEach(value => { if (value.department === item.department) value.head = value.id === item.id })
+  if (department) department.headDoctor = item.name
+  item.operations.unshift({ id: `op-${Date.now()}`, action: '标记科主任', time: '刚刚', operator: '运营管理员', note: previous ? `已替换${previous.name}的科主任标记` : '科主任标记已更新' })
+  notice.value = previous ? `已由${previous.name}更换为${item.name}担任科主任。` : '已标记为科主任。'
+}
 function openHead() { const item = selected.value as Department; headDoctorValue.value = doctors.value.find(doctor => doctor.name === item.headDoctor)?.id ?? ''; headOpen.value = true }
 function saveHead() { const item = selected.value as Department; const doctor = doctors.value.find(value => value.id === headDoctorValue.value); doctors.value.forEach(value => { if (value.department === item.name) value.head = value.id === headDoctorValue.value }); item.headDoctor = doctor?.name ?? ''; item.operations.unshift({ id: `op-${Date.now()}`, action: doctor ? '科主任任命' : '科主任解除', time: '刚刚', operator: '运营管理员', note: doctor ? `任命${doctor.name}为科主任` : '解除科主任任命' }); headOpen.value = false; notice.value = doctor ? `已任命${doctor.name}为科主任。` : '已解除科主任任命。' }
 function onKeydown(event: KeyboardEvent) { if (event.key === 'Escape') { pendingAction.value = null; newOpen.value = false; reviewOpen.value = false; departmentOpen.value = false; headOpen.value = false; closeDetails() } }
