@@ -23,6 +23,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/prototype/auth', component: LoginRegisterPrototypeView },
   ...(import.meta.env.DEV ? [
     { path: '/prototype/admin-home', component: () => import('./views/AdminHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
+    { path: '/prototype/admin-orders', component: () => import('./views/AdminOrdersPrototypeView.vue'), meta: { prototypeWorkspace: true } },
     { path: '/prototype/doctor-home/:section?', component: () => import('./views/DoctorHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
     { path: '/prototype/patient-home', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
     { path: '/prototype/patient-home/departments', component: () => import('./views/PatientHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },

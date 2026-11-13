@@ -42,7 +42,13 @@ const schedules = [{ time: '08:00–12:00', department: '内科', doctors: '5 �
 function refresh() { refreshCount.value += 1; lastRefreshed.value = refreshCount.value === 1 ? '刚刚' : `${refreshCount.value} 次刷新` }
 function openTodo(todo: Todo) { activeTodo.value = todo }
 function closeTodo() { activeTodo.value = null }
-function navigate(module: string) { activeTodo.value = null; if (module === '运营总览') return; void router.push({ path: '/prototype/admin-home', query: { module } }) }
+function navigate(module: string) {
+  activeTodo.value = null
+  if (module === '运营总览') return
+  if (module === '预约与订单') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'appointments' } })
+  if (module === '退款 / 异常') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'refunds' } })
+  void router.push({ path: '/prototype/admin-home', query: { module } })
+}
 </script>
 
 <template>

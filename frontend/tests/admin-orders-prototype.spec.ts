@@ -1,0 +1,58 @@
+import { test, expect } from '@playwright/test'
+
+test('预约运营工作台展示三类记录并保留管理员权限边界', async ({ page }) => {
+  const apiRequests: string[] = []
+  page.on('request', request => { if (request.url().includes('/api/')) apiRequests.push(request.url()) })
+  await page.goto('/prototype/admin-orders?tab=appointments')
+  await expect(page.getByRole('heading', { name: '预约运营工作台' })).toBeVisible()
+  for (const label of ['预约登记', '支付订单', '退款异常']) await expect(page.getByRole('tab', { name: new RegExp(label) })).toBeVisible()
+  await expect(page.getByText('陈亦安')).toBeVisible()
+  await expect(page.getByText('医疗内容权限')).toBeVisible()
+  await expect(page.getByText('默认未开启')).toBeVisible()
+  expect(apiRequests).toEqual([])
+})
+
+test('预约筛选、URL状态、详情时间线和管理员代签到可用', async ({ page }) => {
+  await page.goto('/prototype/admin-orders?tab=appointments')
+  await page.getByLabel('预约日期').selectOption('2026-11-12')
+  await expect(page).toHaveURL(/date=2026-11-12/)
+  await expect(page.getByText('苏晚晴')).toBeVisible()
+  await expect(page.getByText('陈亦安')).not.toBeVisible()
+  await page.getByLabel('预约日期').selectOption('2026-11-13')
+  await page.getByLabel('预约状态').selectOption('CONFIRMED')
+  await expect(page.getByText('陈亦安')).toBeVisible()
+  await expect(page).toHaveURL(/status=CONFIRMED/)
+  await page.getByRole('button', { name: '查看APT-20261113-002详情' }).click()
+  const drawer = page.getByRole('complementary', { name: '预约详情' })
+  await expect(drawer).toContainText('业务时间线')
+  await drawer.getByRole('button', { name: '管理员代签到' }).click()
+  await expect(drawer.getByRole('status')).toContainText('已记录管理员代签到')
+  await expect(drawer.getByRole('button', { name: /当前不可代签到/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(drawer).not.toBeVisible()
+})
+
+test('退款异常支持重试、人工备注和三类标签切换', async ({ page }) => {
+  await page.goto('/prototype/admin-orders?tab=refunds')
+  await expect(page.getByRole('heading', { name: '退款异常' })).toBeVisible()
+  await page.getByRole('button', { name: '查看REF-3001详情' }).click()
+  const drawer = page.getByRole('complementary', { name: '退款详情' })
+  await drawer.getByRole('button', { name: '重试退款' }).click()
+  await expect(drawer.getByRole('status')).toContainText('已提交退款重试')
+  await drawer.getByLabel('人工处理备注').fill('已联系支付渠道，等待回执。')
+  await drawer.getByRole('button', { name: '记录人工处理' }).click()
+  await expect(drawer.getByRole('status')).toContainText('已保存人工处理备注')
+  await drawer.getByRole('button', { name: '关闭退款详情' }).click()
+  await page.getByRole('tab', { name: /支付订单/ }).click()
+  await expect(page).toHaveURL(/tab=payments/)
+  await expect(page.getByRole('heading', { name: '支付订单' })).toBeVisible()
+})
+
+test('预约运营工作台在移动宽度无横向溢出并能打开侧栏', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto('/prototype/admin-orders?tab=appointments')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.getByRole('button', { name: '打开侧栏' }).click()
+  await expect(page.getByRole('complementary', { name: '管理员端导航' })).toBeVisible()
+  await page.getByRole('button', { name: '关闭侧栏' }).click()
+})
