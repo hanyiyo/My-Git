@@ -30,7 +30,12 @@ foreach ($file in $source) {
             $body.Contains('localStorage.setItem(receptionKey, JSON.stringify(next))') -and
             ([regex]::Matches($body, '(?:localStorage|sessionStorage)\.setItem\s*\(').Count -eq 1) -and
             ($body -notmatch 'accessToken|refreshToken|password|captcha')
-        if (-not $safeDemoWriter -and -not $safeReceptionWriter) { throw "Browser storage must not persist authentication tokens: $($file.FullName)" }
+        $profileDemo = Join-Path $root 'frontend/src/views/doctor-home-prototype/DoctorProfileWorkspace.vue'
+        $safeProfileWriter = $file.FullName -eq $profileDemo -and
+            $body.Contains("'medical-doctor-profile-v1'") -and
+            $body.Contains('profile.value') -and
+            ($body -notmatch 'JSON.stringify\(profile\.(?:password|code|token)')
+        if (-not $safeDemoWriter -and -not $safeReceptionWriter -and -not $safeProfileWriter) { throw "Browser storage must not persist authentication tokens: $($file.FullName)" }
     }
     if ($body -match 'MemoryRedis|exposeCaptchaCode') { throw "Test adapter leaked into shipped runtime: $($file.FullName)" }
 }

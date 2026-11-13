@@ -8,6 +8,7 @@ import ReceptionDemoControls from './doctor-home-prototype/ReceptionDemoControls
 import ScheduleWorkspace from './doctor-home-prototype/ScheduleWorkspace.vue'
 import ScheduleApplicationWorkspace from './doctor-home-prototype/ScheduleApplicationWorkspace.vue'
 import DoctorNotificationsWorkspace from './doctor-home-prototype/DoctorNotificationsWorkspace.vue'
+import DoctorProfileWorkspace from './doctor-home-prototype/DoctorProfileWorkspace.vue'
 import { applicationLabels, demoDate, scheduleNumbers } from './doctor-home-prototype/schedule-data'
 import { callVisit, clearReceptionError, formatTime, resetReception, setDemoTime, useReceptionDemo, waitingQueue } from './doctor-home-prototype/reception-demo'
 import { notices } from './patient-home-prototype/data'
@@ -18,6 +19,7 @@ import './doctor-home-prototype/doctor-home.css'
 const route = useRoute(), router = useRouter()
 const { state: receptionState, active: activeVisit, now: receptionNow, error: receptionError } = useReceptionDemo()
 const receptionFocused = ref(false)
+const doctorProfile = ref({ name: '许知遥', avatar: '' })
 const scenario = ref<Scenario>('current'), role = ref<DemoRole>('doctor')
 const storageWarning = ref(''), collapsed = ref(false), mobileOpen = ref(false), search = ref('')
 const openTabs = ref<Section[]>(['home'])
@@ -67,6 +69,9 @@ async function saveDemo(changeTime = false) {
   catch { storageWarning.value = '浏览器暂时无法保留演示设置，当前页面仍可预览。' }
 }
 function syncDemo(event: StorageEvent) { if (event.key === demoSettingsKey || event.key === null) loadDemo(event.newValue) }
+function syncDoctorProfile(event?: StorageEvent | { name: string; avatar: string }) { if (event && 'name' in event) { doctorProfile.value = event; return } try { const value = JSON.parse(event?.newValue || localStorage.getItem('medical-doctor-profile-v1') || 'null'); if (value && typeof value.name === 'string') doctorProfile.value = { name: value.name, avatar: typeof value.avatar === 'string' ? value.avatar : '' } } catch { doctorProfile.value = { name: '许知遥', avatar: '' } } }
+const syncDoctorStorage = (event: StorageEvent) => syncDoctorProfile(event)
+const resetDoctorProfile = () => syncDoctorProfile()
 function navigate(section: Section, patient?: QueuePatient, application?: Record<string, string>) {
   if (!openTabs.value.includes(section)) openTabs.value.push(section)
   if (section === 'reception' && patient) receptionPatient.value = patient
@@ -91,7 +96,8 @@ function restoreFocus() { if (dialogKind.value === 'controls') clearReceptionErr
 function viewPatient(patient: QueuePatient) { selectedPatient.value = patient; openDialog('patient') }
 function viewNotice(notice: typeof notices[number]) { selectedNotice.value = notice; openDialog('notice') }
 function openReception(patient?: QueuePatient) { closeDialog(); navigate('reception', patient ?? activeVisit.value) }
-async function resetDemo() { if (!await resetReception()) return; scenario.value = 'current'; role.value = 'doctor'; search.value = ''; receptionPatient.value = undefined; openTabs.value = ['home']; await saveDemo(true); closeDialog(); navigate('home') }
+async function resetDemo() { if (!await resetReception()) return; window.dispatchEvent(new CustomEvent('doctor-profile-reset')); scenario.value = 'current'; role.value = 'doctor'; search.value = ''; receptionPatient.value = undefined; openTabs.value = ['home']; await saveDemo(true); closeDialog(); navigate('home') }
+function logoutDoctor() { void router.push('/prototype/auth?role=doctor') }
 async function requestReset() { resetRequested.value = true; await nextTick(); resetCancel.value?.focus() }
 function closeMobileNavigation() { mobileOpen.value = false; mobileToggle.value?.focus() }
 function keydown(event: KeyboardEvent) { if (event.key === 'Escape' && mobileOpen.value && !dialog.value?.open) closeMobileNavigation() }
@@ -104,25 +110,28 @@ const statistics = computed(() => [
 ])
 onMounted(() => {
   try { loadDemo(localStorage.getItem(demoSettingsKey)) } catch { storageWarning.value = '浏览器暂时无法读取演示设置。' }
+  syncDoctorProfile()
   if (!openTabs.value.includes(current.value)) openTabs.value.push(current.value)
   window.addEventListener('storage', syncDemo)
+  window.addEventListener('storage', syncDoctorStorage)
+  window.addEventListener('doctor-profile-reset', resetDoctorProfile)
   window.addEventListener('keydown', keydown)
 })
-onUnmounted(() => { window.removeEventListener('storage', syncDemo); window.removeEventListener('keydown', keydown) })
+onUnmounted(() => { window.removeEventListener('storage', syncDemo); window.removeEventListener('storage', syncDoctorStorage); window.removeEventListener('doctor-profile-reset', resetDoctorProfile); window.removeEventListener('keydown', keydown) })
 </script>
 
 <template>
   <div :class="['doctor-prototype', { 'dh-collapsed': collapsed || receptionFocused }]">
     <button v-if="mobileOpen" class="dh-backdrop" aria-label="关闭导航遮罩" @click="closeMobileNavigation"></button>
     <aside :class="['dh-sidebar', { 'dh-mobile-open': mobileOpen }]" aria-label="医生端侧栏">
-      <button class="dh-profile" aria-label="打开医生个人中心" @click="navigate('profile')"><span class="dh-avatar">许<span></span></span><span class="dh-profile-copy"><strong>许知遥<small>医生</small></strong><span>内科 · 副主任医师</span><em>{{ role === 'head' ? '科主任' : '已认证医生' }}</em></span></button>
+      <button class="dh-profile" aria-label="打开医生个人中心" @click="navigate('profile')"><span class="dh-avatar"><img v-if="doctorProfile.avatar" :src="doctorProfile.avatar" alt="医生头像"><template v-else>{{ doctorProfile.name.slice(0, 1) }}</template><span></span></span><span class="dh-profile-copy"><strong>{{ doctorProfile.name }}<small>医生</small></strong><span>内科 · 副主任医师</span><em>{{ role === 'head' ? '科主任' : '已认证医生' }}</em></span></button>
       <span class="dh-nav-caption">医 生 工 作 区</span>
       <nav aria-label="医生端导航"><button v-for="item in navigation" :key="item.key" :class="{ active: current === item.key }" :aria-current="current === item.key ? 'page' : undefined" :aria-label="item.name" :title="collapsed ? item.name : undefined" @click="navigate(item.key)"><Icon :name="item.icon"/><span>{{ item.name }}</span><b v-if="item.key === 'applications'">{{ pendingCount }}</b><b v-if="item.key === 'notifications' && doctorUnread">{{ doctorUnread }}</b></button></nav>
       <div class="dh-sidebar-bottom"><div class="dh-care"><Icon name="heart"/><strong>专注每一次诊疗</strong><span>让关怀，始终在线</span></div><button class="dh-sidebar-primary" aria-label="快捷进入接诊工作台" @click="openReception()"><Icon name="doctor"/><span>进入接诊工作台</span><Icon name="arrow"/></button><button class="dh-collapse" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" :aria-expanded="!collapsed" @click="collapsed = !collapsed"><Icon name="menu"/><span>收起侧栏</span></button></div>
     </aside>
 
     <div class="dh-workspace">
-      <header class="dh-topbar"><div class="dh-topbar-left"><button ref="mobileToggle" class="dh-mobile-toggle" aria-label="打开医生导航" :aria-expanded="mobileOpen" @click="mobileOpen = !mobileOpen"><Icon name="menu"/></button><a href="/prototype/doctor-home" class="dh-brand" @click.prevent="navigate('home')"><span><Icon name="cross"/></span><div><strong>智能医疗问诊预约系统</strong><small>SMART HEALTHCARE · 医生工作区</small></div></a></div><div class="dh-topbar-right"><span class="dh-hospital"><i></i> 校医院 · 内科</span><button class="dh-bell" aria-label="查看站内通知" @click="navigate('notifications')"><Icon name="bell"/><i v-if="doctorUnread"></i></button><button class="dh-user" aria-label="个人资料" @click="navigate('profile')"><span>许</span><strong>许知遥</strong><Icon name="chevron"/></button></div></header>
+      <header class="dh-topbar"><div class="dh-topbar-left"><button ref="mobileToggle" class="dh-mobile-toggle" aria-label="打开医生导航" :aria-expanded="mobileOpen" @click="mobileOpen = !mobileOpen"><Icon name="menu"/></button><a href="/prototype/doctor-home" class="dh-brand" @click.prevent="navigate('home')"><span><Icon name="cross"/></span><div><strong>智能医疗问诊预约系统</strong><small>SMART HEALTHCARE · 医生工作区</small></div></a></div><div class="dh-topbar-right"><span class="dh-hospital"><i></i> 校医院 · 内科</span><button class="dh-bell" aria-label="查看站内通知" @click="navigate('notifications')"><Icon name="bell"/><i v-if="doctorUnread"></i></button><button class="dh-user" aria-label="个人资料" @click="navigate('profile')"><span><img v-if="doctorProfile.avatar" :src="doctorProfile.avatar" alt="医生头像"><template v-else>{{ doctorProfile.name.slice(0, 1) }}</template></span><strong>{{ doctorProfile.name }}</strong><Icon name="chevron"/></button></div></header>
       <nav class="dh-tabs" aria-label="医生临时工作区标签"><div v-for="tab in openTabs" :key="tab" :class="{ active: current === tab }"><button :aria-current="current === tab ? 'page' : undefined" @click="navigate(tab)"><Icon :name="navigation.find(item => item.key === tab)!.icon"/>{{ navigation.find(item => item.key === tab)!.name }}</button><button v-if="tab !== 'home'" :aria-label="`关闭${navigation.find(item => item.key === tab)!.name}标签`" @click="closeTab(tab)"><Icon name="close"/></button></div></nav>
 
       <main class="dh-content" aria-label="医生端原型"><p v-if="receptionError && current !== 'reception' && current !== 'applications' && !dialog?.open" role="alert" class="rd-alert">{{ receptionError }}</p>
@@ -150,7 +159,7 @@ onUnmounted(() => { window.removeEventListener('storage', syncDemo); window.remo
             <ScheduleApplicationWorkspace :role="role" @return="navigate('schedules')" />
           </template>
           <DoctorNotificationsWorkspace v-else-if="current === 'notifications'" @navigate="(section, id) => section === 'applications' ? (id?.startsWith('substitution-') ? openInvitation(id) : id ? openScheduleApplication(id) : navigate('applications')) : navigate(section)" />
-          <section v-else class="dh-panel dh-profile-preview"><span class="dh-avatar">许</span><h2>许知遥</h2><p>内科 · 副主任医师 · {{ role === 'head' ? '科主任' : '已认证医生' }}</p><div class="dh-profile-details"><span>执业信息<strong>已认证 · 虚构演示资料</strong></span><span>工作科室<strong>校医院 · 内科</strong></span><span>联系方式<strong>138****0628</strong></span></div><p class="dh-preview-limit">资料编辑与账户设置将在后续阶段制作。</p></section>
+          <DoctorProfileWorkspace v-else :role="role" :has-active-visit="!!activeVisit" @navigate="section => navigate(section, undefined, { tab: 'department' })" @profile-change="syncDoctorProfile" @logout="logoutDoctor" />
           <button class="dh-back-home dh-link" @click="navigate('home')">返回首页<Icon name="arrow"/></button>
         </template>
         <footer class="dh-footer"><span>智能医疗问诊预约系统 · 医生工作区</span><span><Icon name="shield"/>以专业守护健康，以关怀回应信任</span></footer>
