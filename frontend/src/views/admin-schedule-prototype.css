@@ -52,3 +52,6 @@
 .schedule-form-actions .schedule-publish-button{border:1px solid #347cdb;background:#347cdb;color:#fff}
 .schedule-form-actions .schedule-publish-button:hover{background:#2e70c6;color:#fff}
 @media(max-width:760px){.schedule-form-actions{grid-template-columns:1fr}.schedule-form-actions button{width:100%}}
+.schedule-modal .ph-date-picker{min-width:0}
+.schedule-modal .ph-date-picker-popover{z-index:90}
+.schedule-form-error{margin:0;padding:9px 11px;border:1px solid #f0c7c4;border-radius:8px;background:#fff1f0;color:#c25050;font-size:9px;line-height:1.7}
