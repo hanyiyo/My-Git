@@ -5,6 +5,7 @@ test('管理员排班工作台展示月历、日期详情和独立排班入口',
   page.on('request', request => { if (request.url().includes('/api/')) apiRequests.push(request.url()) })
   await page.goto('/prototype/admin-schedules')
   await expect(page.getByRole('heading', { name: '排班管理工作台' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '＋新增排班' })).toHaveCSS('background-color', 'rgb(237, 245, 254)')
   await expect(page.locator('[aria-label="排班月历"]')).toBeVisible()
   await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('11月13日')
   await expect(page.getByRole('region', { name: '上午排班' })).toContainText('上午')

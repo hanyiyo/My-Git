@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Icon from './patient-home-prototype/PrototypeIcon.vue'
 import PrototypeDatePicker from './patient-home-prototype/PrototypeDatePicker.vue'
 import './admin-home-prototype.css'
+import './admin-resource-prototype.css'
 import './admin-schedule-prototype.css'
 
 type ScheduleStatus = 'DRAFT' | 'PUBLISHED' | 'PAUSED' | 'SUSPENDED' | 'SUBSTITUTED' | 'COMPLETED'
