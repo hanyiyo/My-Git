@@ -25,7 +25,7 @@ test('月历日期卡片下方可新增排班，表单日期使用日历下拉�
   await dialog.getByLabel('门诊时段').selectOption('pm')
   await dialog.getByLabel('服务方式').selectOption('online')
   await dialog.getByLabel('总号源').fill('18')
-  await dialog.getByRole('button', { name: '保存为草稿' }).click()
+  await dialog.getByRole('button', { name: '保存草稿' }).click()
   await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('11月20日')
   await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('马凌')
 
@@ -33,8 +33,38 @@ test('月历日期卡片下方可新增排班，表单日期使用日历下拉�
   const conflict = page.getByRole('dialog', { name: '新增排班' })
   await conflict.getByLabel('医生').selectOption('周宁')
   await conflict.getByLabel('门诊时段').selectOption('am')
-  await conflict.getByRole('button', { name: '保存为草稿' }).click()
+  await conflict.getByRole('button', { name: '保存草稿' }).click()
   await expect(page.getByRole('status')).toContainText('同一医生同一时段已有排班')
+})
+
+test('新增排班可直接发布，保存草稿和发布按钮使用清晰的对比色', async ({ page }) => {
+  await page.goto('/prototype/admin-schedules')
+  await page.getByRole('button', { name: '新增排班 2026-11-21' }).click()
+  const dialog = page.getByRole('dialog', { name: '新增排班' })
+  const draft = dialog.getByRole('button', { name: '保存草稿' })
+  const publish = dialog.getByRole('button', { name: '发布排班' })
+  await expect(draft).toBeVisible()
+  await expect(publish).toBeVisible()
+  await expect(draft).toHaveCSS('color', 'rgb(94, 136, 171)')
+  await expect(publish).toHaveCSS('background-color', 'rgb(52, 124, 219)')
+  await dialog.getByLabel('医生').selectOption('马凌')
+  await dialog.getByLabel('门诊时段').selectOption('pm')
+  await publish.click()
+  await expect(page.getByRole('region', { name: '下午排班' })).toContainText('已发布')
+  await expect(page.getByRole('region', { name: '下午排班' })).toContainText('马凌')
+})
+
+test('从排班详情编辑草稿时先收回右侧抽屉并打开可编辑表单', async ({ page }) => {
+  await page.goto('/prototype/admin-schedules')
+  await page.locator('[data-calendar-date="2026-11-14"]').click()
+  await page.locator('.schedule-card').first().click()
+  const drawer = page.getByRole('complementary', { name: '排班详情' })
+  await drawer.getByRole('button', { name: '编辑草稿' }).click()
+  await expect(drawer).toBeHidden()
+  const dialog = page.getByRole('dialog', { name: '编辑排班' })
+  await expect(dialog.getByLabel('医生')).toBeEnabled()
+  await dialog.getByLabel('总号源').fill('21')
+  await expect(dialog.getByLabel('总号源')).toHaveValue('21')
 })
 
 test('排班草稿支持发布，日期减号可删除无预约排班', async ({ page }) => {

@@ -45,3 +45,10 @@
 .schedule-drawer .schedule-detail-note{margin-bottom:0}
 @media(max-width:1050px){.schedule-day-overview{position:static}.schedule-card-meta{min-width:96px}}
 @media(max-width:760px){.schedule-day-overview{padding:15px 12px}.schedule-day-overview-header{flex-direction:column}.schedule-day-overview-header .admin-soft{width:100%}.schedule-card{grid-template-columns:54px minmax(0,1fr) auto 10px;gap:7px;padding:9px 8px}.schedule-card-time{padding-right:6px}.schedule-card-meta{min-width:72px}.schedule-card-meta>strong{font-size:11px}.schedule-card-meta>strong small{font-size:6px}.schedule-card-meta>em{font-size:6px}.schedule-drawer{width:min(430px,calc(100vw - 8px));padding:24px 18px}.schedule-drawer-grid{gap:10px;padding:12px}}
+.schedule-form-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+.schedule-form-actions button{min-height:37px;padding:0 14px;border-radius:8px;font-size:10px;font-weight:600}
+.schedule-form-actions .schedule-draft-button{border:1px solid #b8d2e8;background:#edf5fe;color:#5e88ab}
+.schedule-form-actions .schedule-draft-button:hover{background:#e2effb;color:#4f7d9f}
+.schedule-form-actions .schedule-publish-button{border:1px solid #347cdb;background:#347cdb;color:#fff}
+.schedule-form-actions .schedule-publish-button:hover{background:#2e70c6;color:#fff}
+@media(max-width:760px){.schedule-form-actions{grid-template-columns:1fr}.schedule-form-actions button{width:100%}}
