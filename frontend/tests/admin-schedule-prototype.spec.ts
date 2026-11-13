@@ -1,0 +1,63 @@
+import { test, expect } from '@playwright/test'
+
+test('管理员排班工作台展示月历、日期详情和独立排班入口', async ({ page }) => {
+  const apiRequests: string[] = []
+  page.on('request', request => { if (request.url().includes('/api/')) apiRequests.push(request.url()) })
+  await page.goto('/prototype/admin-schedules')
+  await expect(page.getByRole('heading', { name: '排班管理工作台' })).toBeVisible()
+  await expect(page.locator('[aria-label="排班月历"]')).toBeVisible()
+  await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('11月13日')
+  await expect(page.getByRole('button', { name: '新增排班 2026-11-13' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '删除排班 2026-11-13' })).toBeDisabled()
+  await page.locator('[data-calendar-date="2026-11-14"]').click()
+  await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('11月14日')
+  expect(apiRequests).toEqual([])
+})
+
+test('月历日期卡片下方可新增排班，表单日期使用日历下拉框并校验冲突', async ({ page }) => {
+  await page.goto('/prototype/admin-schedules')
+  await page.getByRole('button', { name: '新增排班 2026-11-20' }).click()
+  const dialog = page.getByRole('dialog', { name: '新增排班' })
+  await expect(dialog.getByRole('button', { name: '出诊日期' })).toBeVisible()
+  await dialog.getByLabel('医生').selectOption('马凌')
+  await dialog.getByLabel('门诊时段').selectOption('pm')
+  await dialog.getByLabel('服务方式').selectOption('online')
+  await dialog.getByLabel('总号源').fill('18')
+  await dialog.getByRole('button', { name: '保存为草稿' }).click()
+  await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('11月20日')
+  await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('马凌')
+
+  await page.getByRole('button', { name: '新增排班 2026-11-13' }).click()
+  const conflict = page.getByRole('dialog', { name: '新增排班' })
+  await conflict.getByLabel('医生').selectOption('周宁')
+  await conflict.getByLabel('门诊时段').selectOption('am')
+  await conflict.getByRole('button', { name: '保存为草稿' }).click()
+  await expect(page.getByRole('status')).toContainText('同一医生同一时段已有排班')
+})
+
+test('排班草稿支持发布，日期减号可删除无预约排班', async ({ page }) => {
+  await page.goto('/prototype/admin-schedules')
+  await page.locator('[data-calendar-date="2026-11-14"]').click()
+  await page.locator('.schedule-detail-row').first().click()
+  const detail = page.getByRole('complementary', { name: '所选日期详情' })
+  await detail.getByRole('button', { name: '发布排班' }).click()
+  await expect(detail.getByRole('status')).toContainText('排班已发布')
+  await page.getByRole('button', { name: '删除排班 2026-11-14' }).click()
+  const confirm = page.getByRole('dialog', { name: '确认删除排班' })
+  await expect(confirm).toContainText('没有已挂号患者')
+  await confirm.getByRole('button', { name: '确认删除' }).click()
+  await expect(page.getByRole('complementary', { name: '所选日期详情' })).toContainText('当天没有符合条件的排班')
+  await page.locator('[data-calendar-date="2026-11-13"]').click()
+  await expect(page.getByRole('button', { name: '删除排班 2026-11-13' })).toBeDisabled()
+})
+
+test('管理员首页排班入口可进入工作台，移动宽度无横向溢出', async ({ page }) => {
+  await page.goto('/prototype/admin-home?variant=A')
+  await page.getByRole('button', { name: '排班', exact: true }).click()
+  await expect(page).toHaveURL(/\/prototype\/admin-schedules/)
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.reload()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('button', { name: '打开侧栏' }).click()
+  await expect(page.getByRole('complementary', { name: '管理员端导航' })).toBeVisible()
+})

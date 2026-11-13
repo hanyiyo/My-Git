@@ -50,6 +50,7 @@ function navigate(module: string) {
   if (module === '患者') return void router.push({ path: '/prototype/admin-patients' })
   if (module === '医生') return void router.push({ path: '/prototype/admin-doctors' })
   if (module === '科室') return void router.push({ path: '/prototype/admin-departments' })
+  if (module === '排班') return void router.push({ path: '/prototype/admin-schedules' })
   void router.push({ path: '/prototype/admin-home', query: { module } })
 }
 </script>
