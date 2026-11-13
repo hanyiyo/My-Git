@@ -78,6 +78,14 @@ test('从排班详情编辑草稿时先收回右侧抽屉并打开可编辑表�
   await expect(dialog.getByLabel('总号源')).toHaveValue('21')
 })
 
+test('确认暂停新增弹窗打开后焦点落在弹窗确认按钮', async ({ page }) => {
+  await page.goto('/prototype/admin-schedules')
+  await page.locator('.schedule-card').first().click()
+  await page.getByRole('complementary', { name: '排班详情' }).getByRole('button', { name: '暂停新增' }).click()
+  const dialog = page.getByRole('dialog', { name: '确认暂停新增' })
+  await expect(dialog.getByRole('button', { name: '确认暂停新增' })).toBeFocused()
+})
+
 test('排班草稿支持发布，日期减号可删除无预约排班', async ({ page }) => {
   await page.goto('/prototype/admin-schedules')
   await page.locator('[data-calendar-date="2026-11-14"]').click()

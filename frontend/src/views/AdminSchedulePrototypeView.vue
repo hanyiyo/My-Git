@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from './patient-home-prototype/PrototypeIcon.vue'
 import PrototypeDatePicker from './patient-home-prototype/PrototypeDatePicker.vue'
@@ -64,6 +64,7 @@ const modal = ref<'new' | 'delete' | 'pause' | null>(null)
 const editingId = ref('')
 const deleteTarget = ref<Schedule | null>(null)
 const actionTarget = ref<Schedule | null>(null)
+const pauseConfirmButton = ref<HTMLButtonElement | null>(null)
 const form = reactive({ date: selectedDate.value, doctor: '', period: 'am' as Period, mode: 'offline' as ScheduleMode, capacity: 20, fee: 30 })
 const statuses: Record<ScheduleStatus, string> = { DRAFT: '草稿', PUBLISHED: '已发布', PAUSED: '暂停新增', SUSPENDED: '已停诊', SUBSTITUTED: '已替诊', COMPLETED: '已结束' }
 
@@ -161,7 +162,11 @@ function confirmDelete() {
   const id = deleteTarget.value.id; schedules.value = schedules.value.filter(item => item.id !== id); selectedSchedule.value = null; modal.value = null; notice.value = '排班已删除。'; deleteTarget.value = null
 }
 function publishSchedule(item: Schedule) { item.status = 'PUBLISHED'; item.note = '已开放患者预约'; notice.value = '排班已发布，号源已对患者端开放。' }
-function requestPause(item: Schedule) { actionTarget.value = item; modal.value = 'pause' }
+function requestPause(item: Schedule) {
+  actionTarget.value = item
+  modal.value = 'pause'
+  void nextTick(() => pauseConfirmButton.value?.focus())
+}
 function confirmPause() { if (!actionTarget.value) return; actionTarget.value.status = 'PAUSED'; actionTarget.value.note = '暂停新增挂号，等待停诊 / 替诊处理'; notice.value = '已暂停新增挂号。'; modal.value = null; actionTarget.value = null }
 function syncDate(value: string) { if (value === 'ALL') return; openDate(value); monthCursor.value = value.slice(0, 7) }
 function onKeydown(event: KeyboardEvent) { if (event.key === 'Escape') { modal.value = null; selectedSchedule.value = null } }
@@ -186,6 +191,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     </section>
     <div v-if="modal === 'new'" class="schedule-modal-backdrop"><section class="schedule-modal" role="dialog" aria-modal="true" :aria-label="formTitle"><button type="button" class="schedule-modal-close" aria-label="关闭排班表单" @click="modal = null">×</button><span class="schedule-detail-kicker">排班配置</span><h2>{{ formTitle }}</h2><label>出诊日期<PrototypeDatePicker v-model="form.date" label="出诊日期" min-date="2026-10-01" max-date="2026-12-31" /></label><label>医生<select v-model="form.doctor" aria-label="医生"><option value="" disabled>请选择已认证医生</option><option v-for="doctor in doctors" :key="doctor.name" :value="doctor.name">{{ doctor.name }} · {{ doctor.title }} · {{ doctor.department }}</option></select></label><div class="schedule-form-two"><label>门诊时段<select v-model="form.period" aria-label="门诊时段"><option value="am">上午 · 08:00–12:00</option><option value="pm">下午 · 14:00–18:00</option></select></label><label>服务方式<select v-model="form.mode" aria-label="服务方式"><option value="online">线上问诊</option><option value="offline">线下面诊</option></select></label></div><div class="schedule-form-two"><label>总号源<input v-model.number="form.capacity" aria-label="总号源" type="number" min="1" max="99"></label><label>挂号费<input v-model.number="form.fee" aria-label="挂号费" type="number" min="0" max="9999"><small>默认价格可在全局规则中维护</small></label></div><p class="schedule-form-note">同一医生同一日期同一时段不能重复排班，线上和线下不可混合。</p><p v-if="formNotice" class="schedule-form-error" role="alert">{{ formNotice }}</p><div class="schedule-form-actions"><button type="button" class="schedule-draft-button" @click="saveSchedule(false)">保存草稿</button><button type="button" class="schedule-publish-button" @click="saveSchedule(true)">发布排班</button></div></section></div>
     <div v-if="modal === 'delete'" class="schedule-modal-backdrop"><section class="schedule-confirm" role="dialog" aria-modal="true" aria-label="确认删除排班"><span class="schedule-confirm-icon">!</span><h2>确认删除排班</h2><p>{{ deleteTarget?.date }} {{ deleteTarget?.doctor }} · {{ deleteTarget?.period === 'am' ? '上午' : '下午' }}</p><div class="schedule-confirm-impact">该场次没有已挂号患者，可以删除。已有患者挂号的排班必须保留，并通过停诊或替诊流程处理。</div><div class="schedule-confirm-actions"><button type="button" class="admin-soft" @click="modal = null">取消</button><button type="button" class="schedule-danger" @click="confirmDelete">确认删除</button></div></section></div>
-    <div v-if="modal === 'pause'" class="schedule-modal-backdrop"><section class="schedule-confirm" role="dialog" aria-modal="true" aria-label="确认暂停新增"><span class="schedule-confirm-icon">!</span><h2>确认暂停新增</h2><p>{{ actionTarget?.doctor }} · {{ actionTarget?.date }}</p><div class="schedule-confirm-impact">暂停后患者不能继续新挂号，已有支付预约保留；后续停诊或替诊结果进入审批与替诊复核。</div><div class="schedule-confirm-actions"><button type="button" class="admin-soft" @click="modal = null">取消</button><button type="button" class="schedule-danger" @click="confirmPause">确认暂停新增</button></div></section></div>
+    <div v-if="modal === 'pause'" class="schedule-modal-backdrop"><section class="schedule-confirm" role="dialog" aria-modal="true" aria-label="确认暂停新增"><span class="schedule-confirm-icon">!</span><h2>确认暂停新增</h2><p>{{ actionTarget?.doctor }} · {{ actionTarget?.date }}</p><div class="schedule-confirm-impact">暂停后患者不能继续新挂号，已有支付预约保留；后续停诊或替诊结果进入审批与替诊复核。</div><div class="schedule-confirm-actions"><button type="button" class="admin-soft" @click="modal = null">取消</button><button ref="pauseConfirmButton" type="button" class="schedule-danger" @click="confirmPause">确认暂停新增</button></div></section></div>
   </div>
 </template>
