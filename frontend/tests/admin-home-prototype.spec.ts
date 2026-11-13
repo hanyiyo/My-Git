@@ -22,6 +22,20 @@ test('管理员首页资源导航可以进入账户管理', async ({ page }) => 
   await expect(page.getByRole('heading', { name: '账户管理' })).toBeVisible()
 })
 
+test('管理员首页资源导航可以进入三个资源工作台', async ({ page }) => {
+  const entries = [
+    ['患者', '/prototype/admin-patients', '患者资源工作台'],
+    ['医生', '/prototype/admin-doctors', '医生治理工作台'],
+    ['科室', '/prototype/admin-departments', '科室管理工作台'],
+  ] as const
+  for (const [label, path, heading] of entries) {
+    await page.goto('/prototype/admin-home?variant=A')
+    await page.getByRole('button', { name: label, exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(path.replaceAll('/', '\\/')))
+    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+  }
+})
+
 test('管理员首页支持时间切换、刷新、待办抽屉和快捷入口', async ({ page }) => {
   await page.goto('/prototype/admin-home?variant=A')
   await page.getByRole('button', { name: '近 7 日' }).click()

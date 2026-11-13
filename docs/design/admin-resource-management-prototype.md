@@ -1,6 +1,6 @@
 # 管理员资源模块原型规划
 
-状态：已确认规划，尚未实现。页面统一采用管理员端 A 版视觉和交互模式。
+状态：已确认并实现 A 版原型。页面统一采用管理员端 A 版视觉和交互模式，使用虚构演示数据，不连接真实资源接口。
 
 ## 页面结构
 
@@ -54,4 +54,4 @@
 2. 医生治理工作台：加入资质状态、科室关联和审核备注。
 3. 科室管理工作台：加入科主任任命和停用影响提示。
 
-建议开发入口：`/prototype/admin-patients`、`/prototype/admin-doctors`、`/prototype/admin-departments`。完成每页后从管理员首页“资源”导航进入，并提供对应访问路径。
+访问入口：`/prototype/admin-patients`、`/prototype/admin-doctors`、`/prototype/admin-departments`。三个页面均可从管理员首页“资源”导航进入。

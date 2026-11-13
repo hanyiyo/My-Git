@@ -112,6 +112,9 @@ function navigate(module: string) {
   if (module === '预约与订单') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'appointments' } })
   if (module === '退款 / 异常') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'refunds' } })
   if (module === '账户管理') return void router.push({ path: '/prototype/admin-accounts' })
+  if (module === '患者') return void router.push({ path: '/prototype/admin-patients' })
+  if (module === '医生') return void router.push({ path: '/prototype/admin-doctors' })
+  if (module === '科室') return void router.push({ path: '/prototype/admin-departments' })
   void router.push({ path: '/prototype/admin-home', query: { module } })
 }
 function closeDetails() { selectedAppointment.value = null; selectedPayment.value = null; selectedRefund.value = null }
