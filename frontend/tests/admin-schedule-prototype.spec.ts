@@ -84,6 +84,9 @@ test('确认暂停新增弹窗打开后焦点落在弹窗确认按钮', async ({
   await page.getByRole('complementary', { name: '排班详情' }).getByRole('button', { name: '暂停新增' }).click()
   const dialog = page.getByRole('dialog', { name: '确认暂停新增' })
   await expect(dialog.getByRole('button', { name: '确认暂停新增' })).toBeFocused()
+  await expect(page.locator('.schedule-modal-backdrop')).toHaveCSS('z-index', '130')
+  await expect(page.locator('.schedule-drawer-backdrop')).toHaveCSS('z-index', '110')
+  await expect(dialog.getByRole('button', { name: '确认暂停新增' })).toHaveCSS('box-shadow', 'rgb(255, 240, 237) 0px 0px 0px 5px')
 })
 
 test('排班草稿支持发布，日期减号可删除无预约排班', async ({ page }) => {
