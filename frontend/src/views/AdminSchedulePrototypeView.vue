@@ -124,6 +124,7 @@ function navigate(module: string) {
   if (module === '医生') return void router.push({ path: '/prototype/admin-doctors' })
   if (module === '科室') return void router.push({ path: '/prototype/admin-departments' })
   if (module === '排班') return void router.push({ path: '/prototype/admin-schedules', query: { date: selectedDate.value } })
+  if (module === '号源') return void router.push({ path: '/prototype/admin-slots', query: { date: selectedDate.value } })
   void router.push({ path: '/prototype/admin-home', query: { module } })
 }
 function openNew(date = selectedDate.value) {
