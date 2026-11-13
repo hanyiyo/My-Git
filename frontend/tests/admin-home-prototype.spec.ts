@@ -6,7 +6,7 @@ test('管理员首页展示运营驾驶舱与完整管理导航', async ({ page 
   await page.goto('/prototype/admin-home?variant=A')
   await expect(page.getByRole('heading', { name: '早上好，管理员。' })).toBeVisible()
   const navigation = page.getByRole('navigation', { name: '管理员功能导航' })
-  for (const label of ['运营总览', '预约与订单', '退款 / 异常', '患者', '医生', '科室', '排班', '号源', '账户管理', '药品与库存', '药费订单', '审批与替诊', '新闻通知', '医疗访问审核', '审计日志', '全局规则', 'AI 配置', '管理员账户']) {
+  for (const label of ['运营总览', '预约与订单', '退款 / 异常', '患者', '医生', '科室', '排班', '号源', '药品与库存', '药费订单', '审批与替诊', '新闻通知', '医疗访问审核', '审计日志', '全局规则', 'AI 配置', '管理员账户']) {
     await expect(navigation.getByRole('button', { name: label, exact: true })).toBeVisible()
   }
   await expect(page.getByText('医疗内容权限')).toBeVisible()
@@ -15,11 +15,9 @@ test('管理员首页展示运营驾驶舱与完整管理导航', async ({ page 
   expect(apiRequests).toEqual([])
 })
 
-test('管理员首页资源导航可以进入账户管理', async ({ page }) => {
+test('管理员首页不再提供重复的账户管理入口', async ({ page }) => {
   await page.goto('/prototype/admin-home?variant=A')
-  await page.getByRole('button', { name: '账户管理', exact: true }).click()
-  await expect(page).toHaveURL(/\/prototype\/admin-accounts/)
-  await expect(page.getByRole('heading', { name: '账户管理' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '账户管理', exact: true })).toHaveCount(0)
 })
 
 test('管理员首页资源导航可以进入三个资源工作台', async ({ page }) => {

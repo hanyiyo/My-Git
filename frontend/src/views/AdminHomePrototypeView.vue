@@ -13,7 +13,7 @@ const collapsed = ref(false), mobileOpen = ref(false), activeTodo = ref<Todo | n
 const lastRefreshed = ref('刚刚'), refreshCount = ref(0), range = ref('today')
 const groups = [
   { name: '运营', items: [{ label: '运营总览', icon: 'grid', active: true }, { label: '预约与订单', icon: 'calendar' }, { label: '退款 / 异常', icon: 'warning', badge: '3' }] },
-  { name: '资源', items: [{ label: '患者', icon: 'user' }, { label: '医生', icon: 'doctor' }, { label: '科室', icon: 'hospital' }, { label: '排班', icon: 'calendar' }, { label: '号源', icon: 'grid' }, { label: '账户管理', icon: 'scan' }] },
+  { name: '资源', items: [{ label: '患者', icon: 'user' }, { label: '医生', icon: 'doctor' }, { label: '科室', icon: 'hospital' }, { label: '排班', icon: 'calendar' }, { label: '号源', icon: 'grid' }] },
   { name: '药品', items: [{ label: '药品与库存', icon: 'heart', badge: '4' }, { label: '药费订单', icon: 'wallet' }] },
   { name: '治理', items: [{ label: '审批与替诊', icon: 'file', badge: '6' }, { label: '新闻通知', icon: 'bell' }, { label: '医疗访问审核', icon: 'lock', badge: '1' }, { label: '审计日志', icon: 'scan' }] },
   { name: '系统', items: [{ label: '全局规则', icon: 'settings' }, { label: 'AI 配置', icon: 'sparkles' }, { label: '管理员账户', icon: 'user' }] },
@@ -47,7 +47,6 @@ function navigate(module: string) {
   if (module === '运营总览') return
   if (module === '预约与订单') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'appointments' } })
   if (module === '退款 / 异常') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'refunds' } })
-  if (module === '账户管理') return void router.push({ path: '/prototype/admin-accounts' })
   if (module === '患者') return void router.push({ path: '/prototype/admin-patients' })
   if (module === '医生') return void router.push({ path: '/prototype/admin-doctors' })
   if (module === '科室') return void router.push({ path: '/prototype/admin-departments' })

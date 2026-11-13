@@ -32,6 +32,22 @@ test('患者资源工作台启停账户需要二次确认', async ({ page }) => 
   await expect(drawer).toContainText('停用账户已完成')
 })
 
+test('患者详情承接登录锁定和重置登录状态', async ({ page }) => {
+  await page.goto('/prototype/admin-patients')
+  await page.getByRole('button', { name: '查看P-1007详情' }).click()
+  const drawer = page.getByRole('complementary', { name: '资源详情' })
+  await drawer.getByRole('button', { name: '锁定登录' }).click()
+  const lockConfirm = page.getByRole('dialog', { name: '确认锁定登录' })
+  await expect(lockConfirm).toContainText('只阻止登录')
+  await lockConfirm.getByRole('button', { name: '确认锁定登录' }).click()
+  await expect(drawer).toContainText('锁定登录已完成')
+  await expect(drawer).toContainText('登录状态已锁定')
+  await drawer.getByRole('button', { name: '重置登录状态' }).click()
+  const resetConfirm = page.getByRole('dialog', { name: '确认重置登录状态' })
+  await resetConfirm.getByRole('button', { name: '确认重置登录状态' }).click()
+  await expect(drawer).toContainText('重置登录状态已完成')
+})
+
 test('医生治理工作台支持资质审核备注和科室归属', async ({ page }) => {
   await page.goto('/prototype/admin-doctors')
   await expect(page.getByRole('heading', { name: '医生治理工作台' })).toBeVisible()
@@ -46,6 +62,18 @@ test('医生治理工作台支持资质审核备注和科室归属', async ({ pa
   await expect(drawer).toContainText('已认证')
   await drawer.getByRole('button', { name: '调整科室' }).click()
   await expect(page.getByRole('dialog', { name: '调整医生科室' })).toBeVisible()
+})
+
+test('医生详情承接解除登录锁定', async ({ page }) => {
+  await page.goto('/prototype/admin-doctors')
+  await page.getByRole('button', { name: '查看D-1098详情' }).click()
+  const drawer = page.getByRole('complementary', { name: '资源详情' })
+  await expect(drawer).toContainText('登录状态已锁定')
+  await drawer.getByRole('button', { name: '解除登录锁定' }).click()
+  const confirm = page.getByRole('dialog', { name: '确认解除登录锁定' })
+  await confirm.getByRole('button', { name: '确认解除登录锁定' }).click()
+  await expect(drawer).toContainText('解除登录锁定已完成')
+  await expect(drawer).toContainText('登录状态正常')
 })
 
 test('医生治理工作台保证每个科室只有一名科主任', async ({ page }) => {
