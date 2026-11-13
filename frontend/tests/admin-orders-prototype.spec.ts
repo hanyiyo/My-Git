@@ -10,6 +10,7 @@ test('预约运营工作台展示三类记录并保留管理员权限边界', as
   await expect(page.getByText('医疗内容权限')).toBeVisible()
   await expect(page.getByText('默认未开启')).toBeVisible()
   expect(apiRequests).toEqual([])
+  await expect(page.getByRole('button', { name: '重置筛选' })).toHaveCSS('color', 'rgb(113, 154, 195)')
 })
 
 test('预约筛选、URL状态、详情时间线和管理员代签到可用', async ({ page }) => {

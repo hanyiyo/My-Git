@@ -10,6 +10,7 @@ test('账户管理展示统一账户目录和治理边界', async ({ page }) => 
   await expect(page.getByText('医疗内容权限')).toBeVisible()
   await expect(page.getByText('默认未开启')).toBeVisible()
   await expect(page.getByText('医疗正文、附件、预约内容和医生资质审核均在独立模块处理。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '重置筛选' })).toHaveCSS('color', 'rgb(113, 154, 195)')
   expect(apiRequests).toEqual([])
 })
 
@@ -41,7 +42,9 @@ test('账户高风险治理操作需要二次确认并更新状态', async ({ pa
   await expect(drawer.getByRole('status')).toContainText('停用账户已完成')
   await expect(drawer).toContainText('已停用')
   await drawer.getByRole('button', { name: '重置登录状态' }).click()
+  await expect(drawer.getByRole('button', { name: '重置登录状态' })).toHaveCSS('color', 'rgb(113, 154, 195)')
   await expect(page.getByRole('dialog', { name: '确认重置登录状态' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '确认重置登录状态' }).getByRole('button', { name: '确认重置登录状态' })).toHaveCSS('color', 'rgb(113, 154, 195)')
 })
 
 test('账户管理在移动宽度无横向溢出并能打开侧栏', async ({ page }) => {
