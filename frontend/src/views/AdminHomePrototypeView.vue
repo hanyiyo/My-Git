@@ -7,6 +7,7 @@ import AdminPharmacyView from './AdminPharmacyView.vue'
 import AdminMedicineOrdersPrototypeView from './AdminMedicineOrdersPrototypeView.vue'
 import AdminGovernancePrototypeView from './AdminGovernancePrototypeView.vue'
 import AdminNewsPrototypeView from './AdminNewsPrototypeView.vue'
+import AdminMedicalPrototypeView from './AdminMedicalPrototypeView.vue'
 import './admin-home-prototype.css'
 
 type Priority = 'urgent' | 'today' | 'notice'
@@ -19,6 +20,7 @@ const pharmacyModule = computed(() => activeModule.value === '药品与库存')
 const medicineOrdersModule = computed(() => activeModule.value === '药费订单')
 const governanceModule = computed(() => activeModule.value === '审批与替诊')
 const newsModule = computed(() => activeModule.value === '新闻通知')
+const medicalModule = computed(() => activeModule.value === '医疗访问审核')
 const lastRefreshed = ref('刚刚'), refreshCount = ref(0), range = ref('today')
 const groups = [
   { name: '运营', items: [{ label: '运营总览', icon: 'grid', active: true }, { label: '预约与订单', icon: 'calendar' }, { label: '退款 / 异常', icon: 'warning', badge: '3' }] },
@@ -30,7 +32,7 @@ const groups = [
 const todos: Todo[] = [
   { id: 'approval', title: '停诊替诊终审', detail: '6 条申请 · 其中 2 条将在 24 小时内截止', priority: 'urgent', action: '去处理', module: '审批与替诊' },
   { id: 'refund', title: '退款失败待处理', detail: '3 笔退款需要重新发起或人工核对', priority: 'urgent', action: '查看异常', module: '退款 / 异常' },
-  { id: 'medical', title: '医疗访问审核', detail: '1 条申请等待独立授权与理由登记', priority: 'urgent', action: '进入审核', module: '医疗访问审核' },
+  { id: 'medical', title: '医疗访问审核', detail: '核对审核资格，按预约登记访问理由和范围', priority: 'urgent', action: '进入审核', module: '医疗访问审核' },
   { id: 'schedule', title: '今日即将开诊', detail: '上午 08:00 · 4 个科室 · 12 位医生', priority: 'today', action: '查看排班', module: '排班' },
   { id: 'hold', title: '未支付占号', detail: '18 个临时占号将在 10 分钟内到期', priority: 'today', action: '查看订单', module: '预约与订单' },
   { id: 'stock', title: '库存预警', detail: '4 个药品低于预警阈值，其中 1 个已缺货', priority: 'today', action: '补充库存', module: '药品与库存' },
@@ -75,7 +77,7 @@ function navigate(module: string) {
           <button v-for="item in group.items" :key="item.label" type="button" :class="{ active: item.label === activeModule }" :aria-label="item.label" @click="navigate(item.label)"><Icon :name="item.icon" /><span>{{ item.label }}</span><b v-if="item.badge">{{ item.badge }}</b></button>
         </template>
       </nav>
-      <div class="admin-sidebar-bottom"><div class="admin-permission"><Icon name="lock" /><div><strong>医疗内容权限</strong><span>默认未开启</span></div></div><button type="button" class="admin-collapse" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" :aria-expanded="!collapsed" @click="collapsed = !collapsed"><Icon name="chevron" /><span>{{ collapsed ? '展开侧栏' : '收起侧栏' }}</span></button></div>
+      <div class="admin-sidebar-bottom"><div class="admin-permission"><Icon name="lock" /><div><strong>医疗内容权限</strong><span>{{ medicalModule ? '查看需单次授权' : '默认未开启' }}</span></div></div><button type="button" class="admin-collapse" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" :aria-expanded="!collapsed" @click="collapsed = !collapsed"><Icon name="chevron" /><span>{{ collapsed ? '展开侧栏' : '收起侧栏' }}</span></button></div>
     </aside>
     <button v-if="mobileOpen" type="button" class="admin-backdrop" aria-label="关闭侧栏" @click="mobileOpen = false"></button>
     <section class="admin-workspace">
@@ -88,6 +90,7 @@ function navigate(module: string) {
         <AdminMedicineOrdersPrototypeView v-else-if="medicineOrdersModule" :embedded="true" />
         <AdminGovernancePrototypeView v-else-if="governanceModule" :embedded="true" />
         <AdminNewsPrototypeView v-else-if="newsModule" :embedded="true" />
+        <AdminMedicalPrototypeView v-else-if="medicalModule" />
         <template v-else>
         <div class="admin-page-heading"><div><span class="admin-eyebrow">运营总览 / {{ range === 'today' ? '今日' : '近 7 日' }}</span><h1>早上好，管理员。</h1><p>这里是今天的医院运营状态，优先处理需要人工介入的事项。</p></div><div class="admin-date"><strong>13</strong><span>星期五<small>2026 年 11 月</small></span></div></div>
         <section class="admin-hero"><div><span class="admin-status"><i></i>系统运行正常</span><h2>今天有 {{ visibleTodos.length }} 项运营事项需要关注</h2><p>审批、退款和库存提醒已按紧急程度整理，点击即可进入对应处理流程。</p><div class="admin-hero-actions"><button type="button" class="admin-primary" @click="openTodo(visibleTodos[0])">查看紧急事项 <Icon name="arrow" /></button><button type="button" class="admin-hero-secondary" @click="navigate('排班')">查看今日排班 <Icon name="chevron" /></button></div></div><div class="admin-hero-card"><span class="admin-hero-kicker">TODAY'S OPERATIONS</span><strong>286</strong><span>今日挂号总量</span><div><b>线上 104</b><b>线下 182</b></div></div></section>
