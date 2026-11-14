@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Icon from './patient-home-prototype/PrototypeIcon.vue'
 import AdminPharmacyView from './AdminPharmacyView.vue'
 import AdminMedicineOrdersPrototypeView from './AdminMedicineOrdersPrototypeView.vue'
+import AdminGovernancePrototypeView from './AdminGovernancePrototypeView.vue'
 import './admin-home-prototype.css'
 
 type Priority = 'urgent' | 'today' | 'notice'
@@ -15,6 +16,7 @@ const collapsed = ref(false), mobileOpen = ref(false), activeTodo = ref<Todo | n
 const activeModule = computed(() => String(route.query.module || '运营总览'))
 const pharmacyModule = computed(() => activeModule.value === '药品与库存')
 const medicineOrdersModule = computed(() => activeModule.value === '药费订单')
+const governanceModule = computed(() => activeModule.value === '审批与替诊')
 const lastRefreshed = ref('刚刚'), refreshCount = ref(0), range = ref('today')
 const groups = [
   { name: '运营', items: [{ label: '运营总览', icon: 'grid', active: true }, { label: '预约与订单', icon: 'calendar' }, { label: '退款 / 异常', icon: 'warning', badge: '3' }] },
@@ -82,6 +84,7 @@ function navigate(module: string) {
       <main class="admin-content">
         <AdminPharmacyView v-if="pharmacyModule" :embedded="true" />
         <AdminMedicineOrdersPrototypeView v-else-if="medicineOrdersModule" :embedded="true" />
+        <AdminGovernancePrototypeView v-else-if="governanceModule" :embedded="true" />
         <template v-else>
         <div class="admin-page-heading"><div><span class="admin-eyebrow">运营总览 / {{ range === 'today' ? '今日' : '近 7 日' }}</span><h1>早上好，管理员。</h1><p>这里是今天的医院运营状态，优先处理需要人工介入的事项。</p></div><div class="admin-date"><strong>13</strong><span>星期五<small>2026 年 11 月</small></span></div></div>
         <section class="admin-hero"><div><span class="admin-status"><i></i>系统运行正常</span><h2>今天有 {{ visibleTodos.length }} 项运营事项需要关注</h2><p>审批、退款和库存提醒已按紧急程度整理，点击即可进入对应处理流程。</p><div class="admin-hero-actions"><button type="button" class="admin-primary" @click="openTodo(visibleTodos[0])">查看紧急事项 <Icon name="arrow" /></button><button type="button" class="admin-hero-secondary" @click="navigate('排班')">查看今日排班 <Icon name="chevron" /></button></div></div><div class="admin-hero-card"><span class="admin-hero-kicker">TODAY'S OPERATIONS</span><strong>286</strong><span>今日挂号总量</span><div><b>线上 104</b><b>线下 182</b></div></div></section>
