@@ -31,9 +31,8 @@ const tickets = ref<GovernanceTicket[]>([
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 const router = useRouter()
-const statusFilter = ref<GovernanceState | 'ALL'>('ADMIN_REVIEW')
-const typeFilter = ref<RequestType | 'ALL'>('ALL')
-const departmentFilter = ref('ALL'), doctorFilter = ref('ALL'), substituteFilter = ref('ALL')
+type ProcessingFilter = 'ALL' | 'PENDING' | 'PROCESSED'
+const processingFilter = ref<ProcessingFilter>('PENDING')
 const startDate = ref(''), endDate = ref(''), keyword = ref('')
 const selected = ref<GovernanceTicket | null>(null)
 const modal = ref<ModalAction | null>(null), formReason = ref(''), formError = ref(''), notice = ref('')
@@ -44,24 +43,22 @@ const stateClass = (state: GovernanceState) => state.toLowerCase().replaceAll('_
 const typeClass = (type: RequestType) => type.toLowerCase().replaceAll('_', '-')
 const formatTime = (value: number) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const isUrgent = (item: GovernanceTicket) => Boolean(item.emergency || Date.parse(`${item.date}T${item.time.slice(0, 5)}:00+08:00`) - demoNow < 2 * 60 * 60 * 1000)
-const departments = computed(() => [...new Set(tickets.value.map(item => item.department))])
-const doctors = computed(() => [...new Set(tickets.value.map(item => item.doctor))])
-const substitutes = computed(() => [...new Set(tickets.value.map(item => item.substitute).filter(Boolean) as string[])])
+const processedStates: GovernanceState[] = ['HEAD_REJECTED', 'APPROVED_STOP', 'APPROVED_SUBSTITUTE', 'EMERGENCY_STOP']
+const isProcessed = (item: GovernanceTicket) => processedStates.includes(item.state)
 const summary = computed(() => ({ admin: tickets.value.filter(item => item.state === 'ADMIN_REVIEW').length, emergency: tickets.value.filter(item => isUrgent(item) && item.state === 'ADMIN_REVIEW').length, substitute: tickets.value.filter(item => item.state === 'SUBSTITUTE_REVIEW').length, handled: tickets.value.filter(item => ['APPROVED_STOP', 'APPROVED_SUBSTITUTE', 'EMERGENCY_STOP'].includes(item.state) && item.submittedAt >= demoNow - 7 * 86400000).length }))
 const dateError = computed(() => startDate.value && endDate.value && startDate.value > endDate.value ? '结束日期不能早于开始日期。' : '')
 const filtered = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return tickets.value.filter(item => {
     const dateMatch = (!startDate.value || item.date >= startDate.value) && (!endDate.value || item.date <= endDate.value)
-    const statusMatch = statusFilter.value === 'ALL' || item.state === statusFilter.value
-    const typeMatch = typeFilter.value === 'ALL' || item.type === typeFilter.value || (typeFilter.value === 'EMERGENCY_STOP' && item.emergency)
+    const processingMatch = processingFilter.value === 'ALL' || (processingFilter.value === 'PROCESSED' ? isProcessed(item) : !isProcessed(item))
     const textMatch = !query || `${item.id}${item.doctor}${item.department}${item.substitute ?? ''}${item.reason}`.toLowerCase().includes(query)
-    return dateMatch && statusMatch && typeMatch && (departmentFilter.value === 'ALL' || item.department === departmentFilter.value) && (doctorFilter.value === 'ALL' || item.doctor === doctorFilter.value) && (substituteFilter.value === 'ALL' || item.substitute === substituteFilter.value) && textMatch
+    return dateMatch && processingMatch && textMatch
   }).sort((a, b) => b.submittedAt - a.submittedAt)
 })
 const patientSelectionComplete = computed(() => Boolean(selected.value?.patients.length && selected.value.patients.every(patient => patientChoices.value[patient.id])))
 
-function resetFilters() { startDate.value = ''; endDate.value = ''; statusFilter.value = 'ADMIN_REVIEW'; typeFilter.value = 'ALL'; departmentFilter.value = 'ALL'; doctorFilter.value = 'ALL'; substituteFilter.value = 'ALL'; keyword.value = '' }
+function resetFilters() { startDate.value = ''; endDate.value = ''; processingFilter.value = 'PENDING'; keyword.value = '' }
 function openDetails(item: GovernanceTicket) { selected.value = item; notice.value = ''; formError.value = '' }
 function closeDetails() { selected.value = null }
 function canReview(item: GovernanceTicket | null) { return Boolean(item && item.state === 'ADMIN_REVIEW') }
@@ -91,7 +88,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <div class="governance-content">
       <div class="governance-heading"><div><span class="admin-eyebrow">治理 / 停诊与替诊</span><h1>审批与替诊工作台</h1><p>处理排班变更的管理员终审，患者影响与退款预览仅展示运营必要信息。</p></div><div class="governance-heading-actions"><span class="orders-demo-chip"><i></i>虚构演示数据</span><button type="button" class="admin-soft" @click="resetFilters"><Icon name="refresh" />重置筛选</button></div></div>
       <section class="orders-summary governance-summary" aria-label="审批与替诊摘要"><article class="warning"><span>待管理员复核</span><strong>{{ summary.admin }}</strong><small>需要人工终审</small></article><article><span>紧急处理</span><strong>{{ summary.emergency }}</strong><small>距出诊不足 2 小时</small></article><article><span>替诊待确认</span><strong>{{ summary.substitute }}</strong><small>等待替诊医生确认</small></article><article><span>近 7 日已处理</span><strong>{{ summary.handled }}</strong><small>停诊 / 替诊已完成</small></article></section>
-      <section class="governance-filters" aria-label="审批与替诊筛选"><div class="governance-date"><label>提交日期<input v-model="startDate" type="date" aria-label="提交开始日期"></label><span>至</span><label><span class="visually-hidden">提交结束日期</span><input v-model="endDate" type="date" aria-label="提交结束日期"></label></div><label>申请类型<select v-model="typeFilter" aria-label="申请类型"><option value="ALL">全部类型</option><option value="SUBSTITUTE">替诊</option><option value="STOP">直接停诊</option><option value="EMERGENCY_STOP">紧急停诊</option></select></label><label>工单状态<select v-model="statusFilter" aria-label="工单状态"><option value="ALL">全部状态</option><option v-for="(label, state) in statusLabels" :key="state" :value="state">{{ label }}</option></select></label><label>科室<select v-model="departmentFilter" aria-label="审批科室"><option value="ALL">全部科室</option><option v-for="department in departments" :key="department" :value="department">{{ department }}</option></select></label><label>原医生<select v-model="doctorFilter" aria-label="原医生"><option value="ALL">全部医生</option><option v-for="doctor in doctors" :key="doctor" :value="doctor">{{ doctor }}</option></select></label><label>替诊医生<select v-model="substituteFilter" aria-label="替诊医生"><option value="ALL">全部替诊医生</option><option v-for="doctor in substitutes" :key="doctor" :value="doctor">{{ doctor }}</option></select></label><label class="governance-search">关键词<input v-model="keyword" aria-label="搜索审批工单" placeholder="工单号、医生或理由"></label><button type="button" class="governance-reset" @click="resetFilters">清除条件</button><p v-if="dateError" class="governance-filter-error" role="alert">{{ dateError }}</p><span v-else class="governance-filter-note">默认待管理员复核 · 日期最多查询近一年</span></section>
+      <section class="governance-filters" aria-label="审批与替诊筛选"><label>处理状态<select v-model="processingFilter" aria-label="处理状态"><option value="PENDING">待处理</option><option value="PROCESSED">已处理</option><option value="ALL">全部工单</option></select></label><div class="governance-date"><label>提交日期<input v-model="startDate" type="date" aria-label="提交开始日期"></label><span>至</span><label><span class="visually-hidden">提交结束日期</span><input v-model="endDate" type="date" aria-label="提交结束日期"></label></div><label class="governance-search">关键词<input v-model="keyword" aria-label="搜索审批工单" placeholder="工单号、医生或理由"></label><button type="button" class="governance-reset" @click="resetFilters">重置筛选</button><p v-if="dateError" class="governance-filter-error" role="alert">{{ dateError }}</p><span v-else class="governance-filter-note">待处理包含科主任审核、替诊确认和管理员复核 · 日期最多查询近一年</span></section>
       <p v-if="notice" class="governance-feedback" role="status">{{ notice }}</p>
       <section class="orders-table-panel governance-panel" aria-label="审批工单列表"><div class="orders-table-head"><div><h2>审批工单 <span>{{ filtered.length }} 条</span></h2><p>列表包含全部状态；只有“待管理员复核”允许执行终审动作</p></div><button type="button" class="admin-link" @click="notice = `已刷新，当前显示 ${filtered.length} 条审批工单。`">刷新数据 <Icon name="refresh" /></button></div><div class="orders-table-wrap"><table class="orders-table governance-table"><caption class="visually-hidden">审批与替诊工单列表</caption><thead><tr><th>工单编号</th><th>申请类型</th><th>原医生 / 科室</th><th>出诊安排</th><th>替诊医生</th><th>当前状态</th><th>提交时间</th><th>截止提醒</th><th>操作</th></tr></thead><tbody><tr v-for="item in filtered" :key="item.id" tabindex="0" @click="openDetails(item)" @keydown.enter="openDetails(item)"><td><strong>{{ item.id }}</strong><span>{{ item.patients.length }} 位患者受影响</span></td><td><span :class="['governance-type', `type-${typeClass(item.type)}`]">{{ item.emergency ? '紧急替诊' : typeLabels[item.type] }}</span></td><td><strong>{{ item.doctor }}</strong><span>{{ item.department }}</span></td><td><strong>{{ item.date }} · {{ item.period }}</strong><span>{{ item.time }}</span></td><td><strong>{{ item.substitute || '直接停诊' }}</strong><span v-if="item.conflict" class="governance-danger">存在冲突</span></td><td><span :class="['governance-state', `state-${stateClass(item.state)}`]">{{ statusLabels[item.state] }}</span></td><td><strong>{{ formatTime(item.submittedAt) }}</strong></td><td><span v-if="isUrgent(item)" class="governance-urgent">紧急处理</span><span v-else class="governance-muted">按流程处理</span></td><td><button type="button" class="orders-row-action" :aria-label="`查看${item.id}详情`" @click.stop="openDetails(item)">查看详情 <Icon name="chevron" /></button></td></tr><tr v-if="!dateError && !filtered.length"><td colspan="9" class="orders-empty"><Icon name="file" /><strong>当前筛选暂无审批工单</strong><span>可以清除条件后继续查看。</span></td></tr><tr v-if="dateError"><td colspan="9" class="orders-empty"><Icon name="calendar" /><strong>日期范围无效</strong><span>请先修正提交日期范围。</span></td></tr></tbody></table></div></section>
       <p class="orders-footnote"><Icon name="shield" /> 管理员只处理停诊与替诊终审，不查看病历、症状、处方或其他医疗正文。</p>

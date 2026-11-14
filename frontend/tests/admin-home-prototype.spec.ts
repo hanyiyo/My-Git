@@ -77,15 +77,18 @@ test('管理员首页可在审批与替诊模块查看默认待复核工单', as
   await page.goto('/prototype/admin-home?module=%E5%AE%A1%E6%89%B9%E4%B8%8E%E6%9B%BF%E8%AF%8A')
   await expect(page.getByRole('heading', { name: '审批与替诊工作台' })).toBeVisible()
   await expect(page.getByRole('button', { name: '审批与替诊', exact: true })).toHaveClass(/active/)
-  await expect(page.getByLabel('工单状态')).toHaveValue('ADMIN_REVIEW')
+  await expect(page.getByLabel('处理状态')).toHaveValue('PENDING')
   await expect(page.getByText('待管理员复核').first()).toBeVisible()
   await expect(page.getByText('SUS-20261113-001')).toBeVisible()
-  await expect(page.getByText('SUS-20261113-003')).not.toBeVisible()
+  await expect(page.getByText('SUS-20261113-003')).toBeVisible()
   await expect(page.getByText('SUS-20261112-004')).not.toBeVisible()
-  await expect(page.getByLabel('申请类型')).toBeVisible()
-  await expect(page.getByLabel('审批科室')).toBeVisible()
+  await expect(page.getByLabel('处理状态').locator('option')).toHaveCount(3)
+  await expect(page.getByLabel('提交开始日期')).toBeVisible()
   await expect(page.getByLabel('搜索审批工单')).toBeVisible()
   expect(apiRequests).toEqual([])
+  await page.getByLabel('处理状态').selectOption('PROCESSED')
+  await expect(page.getByText('SUS-20261112-004')).toBeVisible()
+  await expect(page.getByText('SUS-20261113-001')).not.toBeVisible()
 })
 
 test('审批详情展示校验与患者影响，普通替诊确认后同步状态', async ({ page }) => {
@@ -138,7 +141,7 @@ test('驳回与紧急处理都要求表单完成后才能提交', async ({ page 
 
 test('非管理员复核工单只读，并可跳转预约与订单', async ({ page }) => {
   await page.goto('/prototype/admin-home?module=%E5%AE%A1%E6%89%B9%E4%B8%8E%E6%9B%BF%E8%AF%8A')
-  await page.getByLabel('工单状态').selectOption('SUBSTITUTE_REVIEW')
+  await page.getByLabel('处理状态').selectOption('ALL')
   await page.getByRole('button', { name: '查看SUS-20261113-003详情' }).click()
   const drawer = page.getByRole('complementary', { name: '审批工单详情' })
   await expect(drawer).toContainText('管理员只能查看')
