@@ -15,6 +15,13 @@ test('管理员首页展示运营驾驶舱与完整管理导航', async ({ page 
   expect(apiRequests).toEqual([])
 })
 
+test('管理员首页可在药品与库存模块内维护药品', async ({ page }) => {
+  await page.goto('/prototype/admin-home?module=%E8%8D%AF%E5%93%81%E4%B8%8E%E5%BA%93%E5%AD%98')
+  await expect(page.getByRole('heading', { name: '药品与库存工作台' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '药品与库存', exact: true })).toHaveClass(/active/)
+  await expect(page.getByLabel('搜索药品')).toBeVisible()
+})
+
 test('管理员首页不再提供重复的账户管理入口', async ({ page }) => {
   await page.goto('/prototype/admin-home?variant=A')
   await expect(page.getByRole('button', { name: '账户管理', exact: true })).toHaveCount(0)

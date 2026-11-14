@@ -6,6 +6,8 @@ import Icon from './patient-home-prototype/PrototypeIcon.vue'
 import './admin-resource-prototype.css'
 import './admin-pharmacy.css'
 
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+
 type Medicine = { id: string; name: string; spec: string; feeMinor: number; stock: number; availableStock: number; heldStock: number; totalStock: number; threshold: number; active: boolean; hasPrescriptionHistory: boolean; createdAt: number; updatedAt: number }
 type Consumption = { id: string; state: string; quantity: number; createdAt: number; paidAt: number | null }
 
@@ -80,7 +82,7 @@ onMounted(() => load().catch(failure => { error.value = failure instanceof Error
 </script>
 
 <template>
-  <AdminOperationsShell>
+  <AdminOperationsShell :embedded="props.embedded">
     <main class="pharmacy-content"><div class="pharmacy-heading"><div><span class="admin-eyebrow">药品 / 库存</span><h1>药品与库存工作台</h1><p>维护可开具药品资料，掌握可用库存和待缴费订单锁定情况。</p></div><div class="pharmacy-heading-actions"><span class="resource-demo-chip"><i></i>真实业务接口</span><button type="button" class="admin-primary pharmacy-add" @click="openNew">＋新增药品</button></div></div>
       <section class="resource-summary pharmacy-summary" aria-label="药品库存摘要"><article v-for="item in summary" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>{{ item.note }}</small></article></section>
       <p v-if="notice" class="pharmacy-feedback" role="status">{{ notice }}</p><p v-if="error && !profileModal && !stockModal && !deleteModal" class="pharmacy-error" role="alert">{{ error }}</p>

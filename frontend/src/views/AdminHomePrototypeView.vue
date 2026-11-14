@@ -3,6 +3,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from './patient-home-prototype/PrototypeIcon.vue'
+import AdminPharmacyView from './AdminPharmacyView.vue'
 import './admin-home-prototype.css'
 
 type Priority = 'urgent' | 'today' | 'notice'
@@ -10,6 +11,8 @@ type Todo = { id: string; title: string; detail: string; priority: Priority; act
 
 const route = useRoute(), router = useRouter()
 const collapsed = ref(false), mobileOpen = ref(false), activeTodo = ref<Todo | null>(null)
+const activeModule = computed(() => String(route.query.module || '运营总览'))
+const pharmacyModule = computed(() => activeModule.value === '药品与库存')
 const lastRefreshed = ref('刚刚'), refreshCount = ref(0), range = ref('today')
 const groups = [
   { name: '运营', items: [{ label: '运营总览', icon: 'grid', active: true }, { label: '预约与订单', icon: 'calendar' }, { label: '退款 / 异常', icon: 'warning', badge: '3' }] },
@@ -44,7 +47,7 @@ function openTodo(todo: Todo) { activeTodo.value = todo }
 function closeTodo() { activeTodo.value = null }
 function navigate(module: string) {
   activeTodo.value = null
-  if (module === '运营总览') return
+  if (module === '运营总览') return void router.push('/prototype/admin-home')
   if (module === '预约与订单') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'appointments' } })
   if (module === '退款 / 异常') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'refunds' } })
   if (module === '患者') return void router.push({ path: '/prototype/admin-patients' })
@@ -63,7 +66,7 @@ function navigate(module: string) {
       <nav class="admin-nav" aria-label="管理员功能导航">
         <template v-for="group in groups" :key="group.name">
           <p class="admin-nav-caption">{{ group.name }}</p>
-          <button v-for="item in group.items" :key="item.label" type="button" :class="{ active: item.active }" :aria-label="item.label" @click="navigate(item.label)"><Icon :name="item.icon" /><span>{{ item.label }}</span><b v-if="item.badge">{{ item.badge }}</b></button>
+          <button v-for="item in group.items" :key="item.label" type="button" :class="{ active: item.label === activeModule }" :aria-label="item.label" @click="navigate(item.label)"><Icon :name="item.icon" /><span>{{ item.label }}</span><b v-if="item.badge">{{ item.badge }}</b></button>
         </template>
       </nav>
       <div class="admin-sidebar-bottom"><div class="admin-permission"><Icon name="lock" /><div><strong>医疗内容权限</strong><span>默认未开启</span></div></div><button type="button" class="admin-collapse" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" :aria-expanded="!collapsed" @click="collapsed = !collapsed"><Icon name="chevron" /><span>{{ collapsed ? '展开侧栏' : '收起侧栏' }}</span></button></div>
@@ -75,6 +78,8 @@ function navigate(module: string) {
         <div class="admin-topbar-right"><div class="admin-updated"><span>数据更新于 {{ lastRefreshed }}</span><button type="button" aria-label="刷新运营数据" @click="refresh"><Icon name="refresh" /></button></div><button type="button" class="admin-bell" aria-label="查看通知"><Icon name="bell" /><i></i></button><div class="admin-user"><span>管</span><strong>运营管理员</strong><Icon name="chevron" /></div></div>
       </header>
       <main class="admin-content">
+        <AdminPharmacyView v-if="pharmacyModule" :embedded="true" />
+        <template v-else>
         <div class="admin-page-heading"><div><span class="admin-eyebrow">运营总览 / {{ range === 'today' ? '今日' : '近 7 日' }}</span><h1>早上好，管理员。</h1><p>这里是今天的医院运营状态，优先处理需要人工介入的事项。</p></div><div class="admin-date"><strong>13</strong><span>星期五<small>2026 年 11 月</small></span></div></div>
         <section class="admin-hero"><div><span class="admin-status"><i></i>系统运行正常</span><h2>今天有 {{ visibleTodos.length }} 项运营事项需要关注</h2><p>审批、退款和库存提醒已按紧急程度整理，点击即可进入对应处理流程。</p><div class="admin-hero-actions"><button type="button" class="admin-primary" @click="openTodo(visibleTodos[0])">查看紧急事项 <Icon name="arrow" /></button><button type="button" class="admin-hero-secondary" @click="navigate('排班')">查看今日排班 <Icon name="chevron" /></button></div></div><div class="admin-hero-card"><span class="admin-hero-kicker">TODAY'S OPERATIONS</span><strong>286</strong><span>今日挂号总量</span><div><b>线上 104</b><b>线下 182</b></div></div></section>
         <div class="admin-toolbar"><div class="admin-range" role="group" aria-label="统计时间范围"><button type="button" :class="{ active: range === 'today' }" @click="range = 'today'">今日</button><button type="button" :class="{ active: range === '7d' }" @click="range = '7d'">近 7 日</button></div><span>统计口径：医院当地时间 · 实时演示数据</span></div>
@@ -87,6 +92,7 @@ function navigate(module: string) {
           <aside class="admin-side-column"><article class="admin-panel admin-todo-panel"><div class="admin-section-heading"><div><h2>待处理事项 <span>{{ visibleTodos.filter(t => t.priority === 'urgent').length }} 紧急</span></h2><p>按优先级排列</p></div><button type="button" class="admin-link" @click="navigate('预约与订单')">全部 <Icon name="arrow" /></button></div><div v-for="todo in visibleTodos" :key="todo.id" class="admin-todo-row" :class="todo.priority" @click="openTodo(todo)"><i></i><div><strong>{{ todo.title }}</strong><span>{{ todo.detail }}</span></div><button type="button" :aria-label="`${todo.title}详情`"><Icon name="chevron" /></button></div></article><article class="admin-panel"><div class="admin-section-heading"><div><h2>科室挂号分布</h2><p>今日有效登记</p></div><span class="admin-panel-note">253 条</span></div><div class="admin-department-list"><div v-for="department in departments" :key="department.name"><span>{{ department.name }}</span><div><i :class="department.color" :style="{ width: `${department.value}%` }"></i></div><b>{{ department.value }}</b></div></div></article></aside>
         </section>
         <footer class="admin-footer"><span>智能医疗问诊预约系统 · 运营驾驶舱</span><span><i></i>演示数据 · 不连接真实业务接口</span></footer>
+        </template>
       </main>
     </section>
     <dialog v-if="activeTodo" open class="admin-dialog" aria-label="待处理事项详情" @click.self="closeTodo"><button type="button" class="admin-dialog-close" aria-label="关闭详情" @click="closeTodo"><Icon name="close" /></button><span class="admin-dialog-kicker">{{ priorityLabel[activeTodo.priority] }}</span><h2>{{ activeTodo.title }}</h2><p>{{ activeTodo.detail }}</p><div class="admin-dialog-detail"><span>所属模块</span><strong>{{ activeTodo.module }}</strong><span>当前状态</span><strong>{{ activeTodo.priority === 'urgent' ? '需要管理员处理' : '待处理' }}</strong></div><p class="admin-dialog-note">此处为首页演示抽屉，复杂业务会进入对应管理页面，医疗正文与附件不会在首页展示。</p><div class="admin-dialog-actions"><button type="button" class="admin-primary" @click="navigate(activeTodo.module)">进入{{ activeTodo.module }}</button><button type="button" class="admin-soft" @click="closeTodo">稍后处理</button></div></dialog>
