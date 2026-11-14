@@ -79,6 +79,16 @@ test('管理员药费订单日期范围无效时停留在页面并提示修正',
   await expect(page.getByText('日期范围无效')).toBeVisible()
 })
 
+test('药费订单内容区使用管理员工作台宽度而不是全局窄页面样式', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/prototype/admin-home?module=%E8%8D%AF%E8%B4%B9%E8%AE%A2%E5%8D%95')
+  const content = page.locator('.medicine-orders-content')
+  await expect(content).toHaveCSS('max-width', 'none')
+  expect(await content.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(900)
+  await expect(page.locator('.medicine-orders-summary')).toHaveCSS('display', 'grid')
+  await expect(page.locator('.orders-table-wrap')).toHaveCSS('overflow', 'auto')
+})
+
 test('管理员首页不再提供重复的账户管理入口', async ({ page }) => {
   await page.goto('/prototype/admin-home?variant=A')
   await expect(page.getByRole('button', { name: '账户管理', exact: true })).toHaveCount(0)
