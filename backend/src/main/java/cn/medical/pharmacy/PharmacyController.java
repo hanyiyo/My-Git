@@ -8,12 +8,15 @@ import org.springframework.web.bind.annotation.*;
 @RestController @RequestMapping("/api/v1") public class PharmacyController {
  private final PharmacyService service; public PharmacyController(PharmacyService service){this.service=service;}
  public record MedicineInput(@NotBlank String name,@NotBlank String spec,@Min(0) long feeMinor,@Min(0) int stock,@Min(0) int threshold,boolean active){}
+ public record MedicineUpdateInput(@NotBlank String name,@NotBlank String spec,@Min(0) long feeMinor,@Min(0) int threshold,boolean active){}
+ public record StockInput(@Min(0) int totalStock){}
  public record PrescriptionInput(@NotEmpty List<Line> lines){} public record Line(@NotBlank String medicineId,@Min(1) int quantity){}
- @GetMapping("/admin/pharmacy/medicines") List<PharmacyMapper.Medicine> medicines(){return service.listMedicines();}
+ @GetMapping("/admin/pharmacy/medicines") List<PharmacyService.AdminMedicineView> medicines(){return service.listAdminMedicines();}
  @GetMapping("/doctor/pharmacy/medicines") List<PharmacyMapper.Medicine> doctorMedicines(){return service.listMedicines().stream().filter(PharmacyMapper.Medicine::active).toList();}
- @GetMapping("/admin/pharmacy/medicines/{id}/history") List<PharmacyService.OrderView> history(@PathVariable String id){return service.medicineHistory(id);}
+ @GetMapping("/admin/pharmacy/medicines/{id}/history") List<PharmacyService.ConsumptionView> history(@PathVariable String id){return service.medicineConsumptionHistory(id);}
  @PostMapping("/admin/pharmacy/medicines") @ResponseStatus(HttpStatus.CREATED) PharmacyMapper.Medicine create(@Valid @RequestBody MedicineInput i){return service.saveMedicine(null,i.name(),i.spec(),i.feeMinor(),i.stock(),i.threshold(),i.active());}
- @PutMapping("/admin/pharmacy/medicines/{id}") PharmacyMapper.Medicine update(@PathVariable String id,@Valid @RequestBody MedicineInput i){return service.saveMedicine(id,i.name(),i.spec(),i.feeMinor(),i.stock(),i.threshold(),i.active());}
+ @PutMapping("/admin/pharmacy/medicines/{id}") PharmacyMapper.Medicine update(@PathVariable String id,@Valid @RequestBody MedicineUpdateInput i){return service.updateMedicine(id,i.name(),i.spec(),i.feeMinor(),i.threshold(),i.active());}
+ @PatchMapping("/admin/pharmacy/medicines/{id}/stock") PharmacyService.AdminMedicineView adjustStock(@PathVariable String id,@Valid @RequestBody StockInput i){return service.adjustStock(id,i.totalStock());}
  @DeleteMapping("/admin/pharmacy/medicines/{id}") void delete(@PathVariable String id){service.deleteMedicine(id);}
  @GetMapping("/doctor/pharmacy/appointments/{id}/prescriptions") PharmacyService.OrderView doctor(JwtAuthenticationToken a,@PathVariable String id){return service.doctorPrescription(a.getName(),id);}
  @PostMapping("/doctor/pharmacy/appointments/{id}/prescriptions") PharmacyService.OrderView prescribe(JwtAuthenticationToken a,@PathVariable String id,@Valid @RequestBody PrescriptionInput i){return service.reservePrescription(a.getName(),id,i.lines().stream().map(x->new PharmacyService.PrescriptionLineInput(x.medicineId(),x.quantity())).toList());}

@@ -44,7 +44,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/admin/ai', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/admin/medical', component: AdminMedicalView, meta: { role: 'ADMIN' } },
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
-  { path: '/admin/pharmacy', component: AdminPharmacyView, meta: { role: 'ADMIN' } },
+  { path: '/admin/pharmacy', component: AdminPharmacyView, meta: { role: 'ADMIN', adminWorkspace: true } },
   { path: '/admin/accounts', component: AdminAccountsView, meta: { role: 'ADMIN' } },
   { path: '/admin/settings', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/patient/preconsultation', redirect: '/assistant/business', meta: { role: 'PATIENT' } },

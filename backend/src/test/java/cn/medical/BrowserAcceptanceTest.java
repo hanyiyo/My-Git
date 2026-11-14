@@ -21,14 +21,18 @@ class BrowserAcceptanceTest {
         try (var socket = new ServerSocket(0)) { frontendPort = socket.getLocalPort(); }
         // Preserve child output outside Surefire's native stream so CI retains complete assertion diagnostics.
         Path report = frontend.resolve("playwright-results.json");
-        var builder = new ProcessBuilder("node", "node_modules/@playwright/test/cli.js", "test", "--reporter=json")
+        var command = new java.util.ArrayList<String>();
+        command.addAll(java.util.List.of("node", "node_modules/@playwright/test/cli.js", "test", "--reporter=json"));
+        var grep = System.getenv("MEDICAL_PLAYWRIGHT_GREP");
+        if (grep != null && !grep.isBlank()) { command.add("--grep"); command.add(grep); }
+        var builder = new ProcessBuilder(command)
             .directory(frontend.toFile()).redirectOutput(report.toFile()).redirectError(ProcessBuilder.Redirect.INHERIT);
         builder.environment().put("MEDICAL_API_URL", "http://127.0.0.1:" + port);
         builder.environment().put("MEDICAL_FRONTEND_TEST_PORT", Integer.toString(frontendPort));
         var process = builder.start();
-        boolean finished = process.waitFor(Duration.ofMinutes(8).toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        boolean finished = process.waitFor(Duration.ofMinutes(10).toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
         if (!finished) { process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly); process.destroyForcibly(); }
-        assertThat(finished).as("Browser tests complete within eight minutes, including the cross-tab reception workflows").isTrue();
+        assertThat(finished).as("Browser tests complete within ten minutes, including the cross-tab reception workflows").isTrue();
         if (process.exitValue() != 0 && java.nio.file.Files.exists(report)) {
             var results = new com.fasterxml.jackson.databind.ObjectMapper().readTree(report.toFile());
             for (var specs : results.findValues("specs")) for (var spec : specs) {

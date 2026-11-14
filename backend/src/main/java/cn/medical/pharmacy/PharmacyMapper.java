@@ -8,6 +8,7 @@ public interface PharmacyMapper {
  record Medicine(String id,String name,String spec,long feeMinor,int stock,int threshold,boolean active,long createdAt,long updatedAt) {}
  record Order(String id,String appointmentId,String patientId,String doctorId,String state,long totalMinor,long expiresAt,int medicinePaymentHours,long createdAt,Long paidAt) {}
  record Line(long id,String orderId,String medicineId,String medicineName,String medicineSpec,long feeMinor,int quantity) {}
+ record Consumption(String id,String state,int quantity,long createdAt,Long paidAt) {}
  @Select("SELECT id,name,spec,fee_minor,stock,threshold,active,created_at,updated_at FROM pharmacy_medicine ORDER BY active DESC,name,id") List<Medicine> medicines();
  @Select("SELECT id,name,spec,fee_minor,stock,threshold,active,created_at,updated_at FROM pharmacy_medicine WHERE id=#{id}") Medicine medicine(String id);
  @Select("SELECT id,name,spec,fee_minor,stock,threshold,active,created_at,updated_at FROM pharmacy_medicine WHERE id=#{id} FOR UPDATE") Medicine lockMedicine(String id);
@@ -23,6 +24,7 @@ public interface PharmacyMapper {
  @Select("SELECT COALESCE(SUM(l.quantity),0) FROM pharmacy_order_line l JOIN pharmacy_order o ON o.id=l.order_id WHERE l.medicine_id=#{id} AND o.state='PENDING_PAYMENT'") int held(String id);
  @Select("SELECT COUNT(*) FROM pharmacy_order_line WHERE medicine_id=#{id}") int history(String id);
  @Select("SELECT DISTINCT o.id,o.appointment_id,o.patient_id,o.doctor_id,o.state,o.total_minor,o.expires_at,o.medicine_payment_hours,o.created_at,o.paid_at FROM pharmacy_order o JOIN pharmacy_order_line l ON l.order_id=o.id WHERE l.medicine_id=#{id} ORDER BY o.created_at DESC") List<Order> ordersForMedicine(String id);
+ @Select("SELECT o.id,o.state,l.quantity,o.created_at,o.paid_at FROM pharmacy_order o JOIN pharmacy_order_line l ON l.order_id=o.id WHERE l.medicine_id=#{id} ORDER BY o.created_at DESC") List<Consumption> consumptionHistory(String id);
  @Update("UPDATE pharmacy_order SET state='PAID',paid_at=#{at} WHERE id=#{id} AND state='PENDING_PAYMENT' AND expires_at>#{at}") int markPaid(@Param("id") String id,@Param("at") long at);
  @Update("UPDATE pharmacy_order SET state='EXPIRED' WHERE id=#{id} AND state='PENDING_PAYMENT' AND expires_at<=#{at}") int expire(@Param("id") String id,@Param("at") long at);
  @Update("UPDATE pharmacy_medicine SET stock=stock+#{quantity},updated_at=#{at} WHERE id=#{id}") int releaseStock(@Param("id") String id,@Param("quantity") int quantity,@Param("at") long at);

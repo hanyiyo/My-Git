@@ -16,10 +16,25 @@ public class PharmacyService {
  public record MedicineView(PharmacyMapper.Medicine medicine) {}
  public record LineView(String medicineId,String name,String spec,long feeMinor,int quantity) {}
  public record OrderView(String id,String appointmentId,String patientId,String doctorId,String state,long totalMinor,long expiresAt,int medicinePaymentHours,long createdAt,Long paidAt,List<LineView> lines) {}
+ public record AdminMedicineView(String id,String name,String spec,long feeMinor,int stock,int availableStock,int heldStock,int totalStock,int threshold,boolean active,boolean hasPrescriptionHistory,long createdAt,long updatedAt) {}
+ public record ConsumptionView(String id,String state,int quantity,long createdAt,Long paidAt) {}
   private final PharmacyMapper pharmacy; private final BookingService booking; private final ReceptionService reception; private final Clock clock; private final RulesService rules;
   public PharmacyService(PharmacyMapper pharmacy,BookingService booking,ReceptionService reception,Clock clock,RulesService rules){this.pharmacy=pharmacy;this.booking=booking;this.reception=reception;this.clock=clock;this.rules=rules;}
  @Transactional(readOnly=true) public List<PharmacyMapper.Medicine> listMedicines(){return pharmacy.medicines();}
+ @Transactional(readOnly=true) public List<AdminMedicineView> listAdminMedicines(){return pharmacy.medicines().stream().map(this::adminView).toList();}
   @Transactional(readOnly=true) public List<OrderView> medicineHistory(String medicineId){ if(pharmacy.medicine(medicineId)==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在"); return pharmacy.ordersForMedicine(medicineId).stream().map(this::view).toList(); }
+ @Transactional(readOnly=true) public List<ConsumptionView> medicineConsumptionHistory(String medicineId){ if(pharmacy.medicine(medicineId)==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在"); return pharmacy.consumptionHistory(medicineId).stream().map(value -> new ConsumptionView(value.id(),value.state(),value.quantity(),value.createdAt(),value.paidAt())).toList(); }
+ @Transactional public AdminMedicineView adjustStock(String id,int totalStock){
+   var medicine=pharmacy.lockMedicine(id); if(medicine==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在");
+   int held=pharmacy.held(id); if(totalStock<held) throw new ApiFailure(409,"STOCK_BELOW_HELD","总库存不能低于已锁定库存");
+   var updated=new PharmacyMapper.Medicine(medicine.id(),medicine.name(),medicine.spec(),medicine.feeMinor(),totalStock-held,medicine.threshold(),medicine.active(),medicine.createdAt(),clock.millis());
+   pharmacy.updateMedicine(updated); return adminView(updated);
+ }
+ @Transactional public PharmacyMapper.Medicine updateMedicine(String id,String name,String spec,long feeMinor,int threshold,boolean active){
+   var old=pharmacy.lockMedicine(id); if(old==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在");
+   if(name==null||name.isBlank()||spec==null||spec.isBlank()||feeMinor<0||threshold<0) throw new ApiFailure(400,"INVALID_INPUT","药品字段无效");
+   var updated=new PharmacyMapper.Medicine(id,name.trim(),spec.trim(),feeMinor,old.stock(),threshold,active,old.createdAt(),clock.millis()); pharmacy.updateMedicine(updated); return pharmacy.medicine(id);
+ }
  @Transactional public PharmacyMapper.Medicine saveMedicine(String id,String name,String spec,long feeMinor,int stock,int threshold,boolean active){
    if(name==null||name.isBlank()||spec==null||spec.isBlank()||feeMinor<0||stock<0||threshold<0) throw new ApiFailure(400,"INVALID_INPUT","药品字段无效");
    long now=clock.millis(); var m=new PharmacyMapper.Medicine(id==null||id.isBlank()?UUID.randomUUID().toString():id,name.trim(),spec.trim(),feeMinor,stock,threshold,active,now,now);
@@ -43,5 +58,6 @@ public class PharmacyService {
  @Transactional public void expireDue(){long now=clock.millis();for(var o:pharmacy.dueOrders(now))expire(o);}
  private void expire(PharmacyMapper.Order o){if(pharmacy.expire(o.id(),clock.millis())==1)for(var l:pharmacy.lines(o.id()))pharmacy.releaseStock(l.medicineId(),l.quantity(),clock.millis());}
  private OrderView view(PharmacyMapper.Order o){return new OrderView(o.id(),o.appointmentId(),o.patientId(),o.doctorId(),o.state(),o.totalMinor(),o.expiresAt(),o.medicinePaymentHours(),o.createdAt(),o.paidAt(),pharmacy.lines(o.id()).stream().map(l->new LineView(l.medicineId(),l.medicineName(),l.medicineSpec(),l.feeMinor(),l.quantity())).toList());}
+ private AdminMedicineView adminView(PharmacyMapper.Medicine medicine){int held=pharmacy.held(medicine.id()); return new AdminMedicineView(medicine.id(),medicine.name(),medicine.spec(),medicine.feeMinor(),medicine.stock(),medicine.stock(),held,medicine.stock()+held,medicine.threshold(),medicine.active(),pharmacy.history(medicine.id())>0,medicine.createdAt(),medicine.updatedAt());}
 }
 
