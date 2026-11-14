@@ -9,6 +9,7 @@ import AdminGovernancePrototypeView from './AdminGovernancePrototypeView.vue'
 import AdminNewsPrototypeView from './AdminNewsPrototypeView.vue'
 import AdminMedicalPrototypeView from './AdminMedicalPrototypeView.vue'
 import AdminAuditPrototypeView from './AdminAuditPrototypeView.vue'
+import AdminRulesPrototypeView from './AdminRulesPrototypeView.vue'
 import './admin-home-prototype.css'
 
 type Priority = 'urgent' | 'today' | 'notice'
@@ -23,6 +24,7 @@ const governanceModule = computed(() => activeModule.value === '审批与替诊'
 const newsModule = computed(() => activeModule.value === '新闻通知')
 const medicalModule = computed(() => activeModule.value === '医疗访问审核')
 const auditModule = computed(() => activeModule.value === '审计日志')
+const rulesModule = computed(() => activeModule.value === '全局规则')
 const lastRefreshed = ref('刚刚'), refreshCount = ref(0), range = ref('today')
 const groups = [
   { name: '运营', items: [{ label: '运营总览', icon: 'grid', active: true }, { label: '预约与订单', icon: 'calendar' }, { label: '退款 / 异常', icon: 'warning', badge: '3' }] },
@@ -55,6 +57,7 @@ function refresh() { refreshCount.value += 1; lastRefreshed.value = refreshCount
 function openTodo(todo: Todo) { activeTodo.value = todo }
 function closeTodo() { activeTodo.value = null }
 function navigate(module: string) {
+  mobileOpen.value = false
   activeTodo.value = null
   if (module === '运营总览') return void router.push('/prototype/admin-home')
   if (module === '预约与订单') return void router.push({ path: '/prototype/admin-orders', query: { tab: 'appointments' } })
@@ -93,6 +96,7 @@ function navigate(module: string) {
         <AdminNewsPrototypeView v-else-if="newsModule" :embedded="true" />
         <AdminMedicalPrototypeView v-else-if="medicalModule" />
         <AdminAuditPrototypeView v-else-if="auditModule" />
+        <AdminRulesPrototypeView v-else-if="rulesModule" />
         <template v-else>
         <div class="admin-page-heading"><div><span class="admin-eyebrow">运营总览 / {{ range === 'today' ? '今日' : '近 7 日' }}</span><h1>早上好，管理员。</h1><p>这里是今天的医院运营状态，优先处理需要人工介入的事项。</p></div><div class="admin-date"><strong>13</strong><span>星期五<small>2026 年 11 月</small></span></div></div>
         <section class="admin-hero"><div><span class="admin-status"><i></i>系统运行正常</span><h2>今天有 {{ visibleTodos.length }} 项运营事项需要关注</h2><p>审批、退款和库存提醒已按紧急程度整理，点击即可进入对应处理流程。</p><div class="admin-hero-actions"><button type="button" class="admin-primary" @click="openTodo(visibleTodos[0])">查看紧急事项 <Icon name="arrow" /></button><button type="button" class="admin-hero-secondary" @click="navigate('排班')">查看今日排班 <Icon name="chevron" /></button></div></div><div class="admin-hero-card"><span class="admin-hero-kicker">TODAY'S OPERATIONS</span><strong>286</strong><span>今日挂号总量</span><div><b>线上 104</b><b>线下 182</b></div></div></section>
