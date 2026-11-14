@@ -1,0 +1,41 @@
+import { test, expect } from '@playwright/test'
+
+test('管理员新闻工作台展示全部状态并可筛选与打开详情', async ({ page }) => {
+  await page.goto('/prototype/admin-home?module=%E6%96%B0%E9%97%BB%E9%80%9A%E7%9F%A5')
+  await expect(page.getByRole('heading', { name: '新闻通知工作台' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /全部/ })).toBeVisible()
+  await expect(page.getByText('冬季流感门诊服务时间调整公告')).toBeVisible()
+  await page.getByRole('tab', { name: /草稿/ }).click()
+  await expect(page.getByText('儿童健康义诊活动报名提醒')).toBeVisible()
+  await expect(page.getByText('冬季流感门诊服务时间调整公告')).not.toBeVisible()
+  await page.getByRole('tab', { name: /全部/ }).click()
+  await page.getByText('冬季流感门诊服务时间调整公告').click()
+  const drawer = page.getByRole('complementary', { name: '医院新闻详情' })
+  await expect(drawer).toContainText('正文')
+  await expect(drawer).toContainText('门诊时间表.pdf')
+  await drawer.getByRole('button', { name: '关闭新闻详情' }).click()
+})
+
+test('管理员新闻工作台可新建草稿并校验必填字段', async ({ page }) => {
+  await page.goto('/prototype/admin-home?module=%E6%96%B0%E9%97%BB%E9%80%9A%E7%9F%A5')
+  await page.getByRole('button', { name: /新建新闻/ }).click()
+  const dialog = page.getByRole('dialog', { name: '新建医院新闻' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '保存' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('标题和正文为必填项')
+  await dialog.getByLabel('新闻标题').fill('测试公告')
+  await dialog.getByLabel('新闻正文').fill('这是一条演示医院新闻正文。')
+  await dialog.getByRole('button', { name: '保存' }).click()
+  await expect(page.getByText('测试公告')).toBeVisible()
+  await expect(page.getByRole('status')).toContainText('草稿已保存')
+})
+
+test('已发布新闻可撤回，撤回后保留历史且不可编辑', async ({ page }) => {
+  await page.goto('/prototype/admin-home?module=%E6%96%B0%E9%97%BB%E9%80%9A%E7%9F%A5')
+  await page.getByText('冬季流感门诊服务时间调整公告').click()
+  const drawer = page.getByRole('complementary', { name: '医院新闻详情' })
+  await drawer.getByRole('button', { name: '撤回新闻' }).click()
+  await expect(page.getByRole('status')).toContainText('新闻已撤回')
+  await expect(drawer).toContainText('已撤回')
+  await expect(drawer.getByRole('button', { name: '编辑' })).not.toBeVisible()
+})
