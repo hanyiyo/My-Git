@@ -11,7 +11,21 @@ const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: fa
 type Medicine = { id: string; name: string; spec: string; feeMinor: number; stock: number; availableStock: number; heldStock: number; totalStock: number; threshold: number; active: boolean; hasPrescriptionHistory: boolean; createdAt: number; updatedAt: number }
 type Consumption = { id: string; state: string; quantity: number; createdAt: number; paidAt: number | null }
 
+const demoMedicines: Medicine[] = [
+  { id: 'MED-001', name: '对乙酰氨基酚片', spec: '0.5g × 12 片 / 盒', feeMinor: 1800, stock: 36, availableStock: 32, heldStock: 4, totalStock: 36, threshold: 10, active: true, hasPrescriptionHistory: true, createdAt: 1762675200000, updatedAt: 1762675200000 },
+  { id: 'MED-002', name: '阿莫西林胶囊', spec: '0.25g × 24 粒 / 盒', feeMinor: 3200, stock: 8, availableStock: 6, heldStock: 2, totalStock: 8, threshold: 8, active: true, hasPrescriptionHistory: true, createdAt: 1762675200000, updatedAt: 1762675200000 },
+  { id: 'MED-003', name: '氯雷他定片', spec: '10mg × 6 片 / 盒', feeMinor: 1500, stock: 0, availableStock: 0, heldStock: 0, totalStock: 0, threshold: 5, active: true, hasPrescriptionHistory: false, createdAt: 1762675200000, updatedAt: 1762675200000 },
+  { id: 'MED-004', name: '维生素 C 片', spec: '100mg × 100 片 / 瓶', feeMinor: 980, stock: 48, availableStock: 48, heldStock: 0, totalStock: 48, threshold: 12, active: true, hasPrescriptionHistory: false, createdAt: 1762675200000, updatedAt: 1762675200000 },
+  { id: 'MED-005', name: '布洛芬缓释胶囊', spec: '0.3g × 20 粒 / 盒', feeMinor: 2600, stock: 13, availableStock: 10, heldStock: 3, totalStock: 13, threshold: 6, active: false, hasPrescriptionHistory: true, createdAt: 1762675200000, updatedAt: 1762675200000 },
+]
+const demoConsumptions: Record<string, Consumption[]> = {
+  'MED-001': [{ id: 'DEMO-ORDER-001', state: 'PAID', quantity: 2, createdAt: 1762761600000, paidAt: 1762765200000 }],
+  'MED-002': [{ id: 'DEMO-ORDER-002', state: 'PENDING_PAYMENT', quantity: 2, createdAt: 1762765200000, paidAt: null }],
+}
+const copyMedicines = (items: Medicine[]) => items.map(item => ({ ...item }))
+
 const medicines = ref<Medicine[]>([]), selected = ref<Medicine | null>(null), consumptions = ref<Consumption[]>([])
+const localDemoMedicines = ref(copyMedicines(demoMedicines))
 const busy = ref(false), historyBusy = ref(false), notice = ref(''), error = ref(''), historyError = ref('')
 const keyword = ref(''), statusFilter = ref<'ALL' | 'ACTIVE' | 'INACTIVE'>('ACTIVE'), warningFilter = ref<'ALL' | 'LOW'>('ALL')
 const profileModal = ref(false), stockModal = ref(false), deleteModal = ref(false)
@@ -29,8 +43,9 @@ const summary = computed(() => [
   { label: '锁定库存', value: medicines.value.reduce((sum, item) => sum + item.heldStock, 0), note: '待缴费订单占用' },
 ])
 const formTitle = computed(() => profile.id ? '编辑药品资料' : '新增药品')
+const demoMode = computed(() => props.embedded)
 
-async function load() { medicines.value = await api<Medicine[]>('/admin/pharmacy/medicines') }
+async function load() { medicines.value = demoMode.value ? copyMedicines(localDemoMedicines.value) : await api<Medicine[]>('/admin/pharmacy/medicines') }
 function money(value: number) { return `¥${(value / 100).toFixed(2)}` }
 function statusLabel(item: Medicine) { return item.active ? '启用' : '停用' }
 function isLow(item: Medicine) { return item.availableStock <= item.threshold }
@@ -42,7 +57,16 @@ function openEdit(item: Medicine) { Object.assign(profile, { id: item.id, name: 
 async function saveProfile() {
   busy.value = true; error.value = ''; notice.value = ''
   try {
-    if (profile.id) await api(`/admin/pharmacy/medicines/${profile.id}`, 'PUT', { name: profile.name, spec: profile.spec, feeMinor: profile.feeMinor, threshold: profile.threshold, active: profile.active })
+    if (demoMode.value) {
+      if (profile.id) {
+        const item = localDemoMedicines.value.find(value => value.id === profile.id)
+        if (item) Object.assign(item, { name: profile.name, spec: profile.spec, feeMinor: profile.feeMinor, threshold: profile.threshold, active: profile.active })
+      } else {
+        const nextId = Math.max(0, ...localDemoMedicines.value.map(item => Number(item.id.replace('MED-', '')) || 0)) + 1
+        const id = `MED-${String(nextId).padStart(3, '0')}`
+        localDemoMedicines.value.push({ id, name: profile.name, spec: profile.spec, feeMinor: profile.feeMinor, stock: 0, availableStock: 0, heldStock: 0, totalStock: 0, threshold: profile.threshold, active: profile.active, hasPrescriptionHistory: false, createdAt: Date.now(), updatedAt: Date.now() })
+      }
+    } else if (profile.id) await api(`/admin/pharmacy/medicines/${profile.id}`, 'PUT', { name: profile.name, spec: profile.spec, feeMinor: profile.feeMinor, threshold: profile.threshold, active: profile.active })
     else await api('/admin/pharmacy/medicines', 'POST', { name: profile.name, spec: profile.spec, feeMinor: profile.feeMinor, stock: 0, threshold: profile.threshold, active: profile.active })
     const id = profile.id; await load(); profileModal.value = false; notice.value = id ? '药品资料已更新。' : '药品已创建，可继续调整库存。'
     if (selected.value) selected.value = medicines.value.find(item => item.id === selected.value?.id) ?? null
@@ -51,7 +75,7 @@ async function saveProfile() {
 }
 async function toggleActive(item: Medicine) {
   busy.value = true; error.value = ''; notice.value = ''
-  try { await api(`/admin/pharmacy/medicines/${item.id}`, 'PUT', { name: item.name, spec: item.spec, feeMinor: item.feeMinor, threshold: item.threshold, active: !item.active }); await load(); notice.value = `${item.name}已${item.active ? '停用' : '启用'}。`; if (selected.value?.id === item.id) selected.value = medicines.value.find(value => value.id === item.id) ?? null }
+  try { if (demoMode.value) { const target = localDemoMedicines.value.find(value => value.id === item.id); if (target) target.active = !target.active } else await api(`/admin/pharmacy/medicines/${item.id}`, 'PUT', { name: item.name, spec: item.spec, feeMinor: item.feeMinor, threshold: item.threshold, active: !item.active }); await load(); notice.value = `${item.name}已${item.active ? '停用' : '启用'}。`; if (selected.value?.id === item.id) selected.value = medicines.value.find(value => value.id === item.id) ?? null }
   catch (failure) { error.value = failure instanceof Error ? failure.message : '状态更新失败，请重试' }
   finally { busy.value = false }
 }
@@ -59,7 +83,7 @@ function openStock(item: Medicine) { selected.value = item; stockForm.totalStock
 async function saveStock() {
   if (!selected.value) return
   busy.value = true; error.value = ''; notice.value = ''
-  try { const updated = await api<Medicine>(`/admin/pharmacy/medicines/${selected.value.id}/stock`, 'PATCH', { totalStock: stockForm.totalStock }); await load(); selected.value = medicines.value.find(item => item.id === updated.id) ?? updated; stockModal.value = false; notice.value = `总库存已调整为 ${updated.totalStock}，可用库存为 ${updated.availableStock}。` }
+  try { let updated: Medicine; if (demoMode.value) { const target = localDemoMedicines.value.find(item => item.id === selected.value!.id); if (!target || !Number.isInteger(stockForm.totalStock) || stockForm.totalStock < target.heldStock) throw new Error('目标总库存不能低于锁定库存。'); target.totalStock = stockForm.totalStock; target.stock = stockForm.totalStock; target.availableStock = stockForm.totalStock - target.heldStock; target.updatedAt = Date.now(); updated = { ...target } } else updated = await api<Medicine>(`/admin/pharmacy/medicines/${selected.value.id}/stock`, 'PATCH', { totalStock: stockForm.totalStock }); await load(); selected.value = medicines.value.find(item => item.id === updated.id) ?? updated; stockModal.value = false; notice.value = `总库存已调整为 ${updated.totalStock}，可用库存为 ${updated.availableStock}。` }
   catch (failure) { error.value = failure instanceof Error ? failure.message : '库存调整失败，请重试' }
   finally { busy.value = false }
 }
@@ -67,13 +91,13 @@ function requestDelete(item: Medicine) { selected.value = item; error.value = ''
 async function confirmDelete() {
   if (!selected.value) return
   busy.value = true; error.value = ''
-  try { await api(`/admin/pharmacy/medicines/${selected.value.id}`, 'DELETE'); const name = selected.value.name; selected.value = null; deleteModal.value = false; await load(); notice.value = `${name}已删除。` }
+  try { const name = selected.value.name; if (demoMode.value) localDemoMedicines.value = localDemoMedicines.value.filter(item => item.id !== selected.value!.id); else await api(`/admin/pharmacy/medicines/${selected.value.id}`, 'DELETE'); selected.value = null; deleteModal.value = false; await load(); notice.value = `${name}已删除。` }
   catch (failure) { error.value = failure instanceof Error ? failure.message : '删除失败，请重试' }
   finally { busy.value = false }
 }
 async function openDetails(item: Medicine) {
   selected.value = item; consumptions.value = []; historyError.value = ''; historyBusy.value = true
-  try { consumptions.value = await api<Consumption[]>(`/admin/pharmacy/medicines/${item.id}/history`) }
+  try { consumptions.value = demoMode.value ? (demoConsumptions[item.id] ?? []).map(record => ({ ...record })) : await api<Consumption[]>(`/admin/pharmacy/medicines/${item.id}/history`) }
   catch (failure) { historyError.value = failure instanceof Error ? failure.message : '消耗记录暂不可用' }
   finally { historyBusy.value = false }
 }
@@ -83,7 +107,7 @@ onMounted(() => load().catch(failure => { error.value = failure instanceof Error
 
 <template>
   <AdminOperationsShell :embedded="props.embedded">
-    <main class="pharmacy-content"><div class="pharmacy-heading"><div><span class="admin-eyebrow">药品 / 库存</span><h1>药品与库存工作台</h1><p>维护可开具药品资料，掌握可用库存和待缴费订单锁定情况。</p></div><div class="pharmacy-heading-actions"><span class="resource-demo-chip"><i></i>真实业务接口</span><button type="button" class="admin-primary pharmacy-add" @click="openNew">＋新增药品</button></div></div>
+    <main class="pharmacy-content"><div class="pharmacy-heading"><div><span class="admin-eyebrow">药品 / 库存</span><h1>药品与库存工作台</h1><p>维护可开具药品资料，掌握可用库存和待缴费订单锁定情况。</p></div><div class="pharmacy-heading-actions"><span class="resource-demo-chip"><i></i>{{ demoMode ? '演示数据 · 不连接真实业务接口' : '真实业务接口' }}</span><button type="button" class="admin-primary pharmacy-add" @click="openNew">＋新增药品</button></div></div>
       <section class="resource-summary pharmacy-summary" aria-label="药品库存摘要"><article v-for="item in summary" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>{{ item.note }}</small></article></section>
       <p v-if="notice" class="pharmacy-feedback" role="status">{{ notice }}</p><p v-if="error && !profileModal && !stockModal && !deleteModal" class="pharmacy-error" role="alert">{{ error }}</p>
       <section class="pharmacy-toolbar" aria-label="药品筛选"><label class="pharmacy-search"><span>搜索药品</span><input v-model="keyword" aria-label="搜索药品" placeholder="名称、规格或药品编号"></label><label><span>药品状态</span><select v-model="statusFilter" aria-label="药品状态"><option value="ACTIVE">启用药品</option><option value="INACTIVE">停用药品</option><option value="ALL">全部状态</option></select></label><label><span>库存状态</span><select v-model="warningFilter" aria-label="库存状态"><option value="ALL">全部库存</option><option value="LOW">仅看库存预警</option></select></label><button type="button" class="pharmacy-reset" @click="resetFilters">重置筛选</button></section>
