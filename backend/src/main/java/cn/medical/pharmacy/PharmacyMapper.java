@@ -14,6 +14,7 @@ public interface PharmacyMapper {
  @Select("SELECT id,name,spec,fee_minor,stock,threshold,active,created_at,updated_at FROM pharmacy_medicine WHERE id=#{id} FOR UPDATE") Medicine lockMedicine(String id);
  @Insert("INSERT INTO pharmacy_medicine(id,name,spec,fee_minor,stock,threshold,active,created_at,updated_at) VALUES(#{id},#{name},#{spec},#{feeMinor},#{stock},#{threshold},#{active},#{createdAt},#{updatedAt})") void insertMedicine(Medicine m);
  @Update("UPDATE pharmacy_medicine SET name=#{name},spec=#{spec},fee_minor=#{feeMinor},stock=#{stock},threshold=#{threshold},active=#{active},updated_at=#{updatedAt} WHERE id=#{id}") int updateMedicine(Medicine m);
+ @Delete("DELETE FROM pharmacy_medicine WHERE id=#{id}") int deleteMedicine(@Param("id") String id);
  @Select("SELECT id,appointment_id,patient_id,doctor_id,state,total_minor,expires_at,medicine_payment_hours,created_at,paid_at FROM pharmacy_order WHERE id=#{id}") Order order(String id);
  @Select("SELECT id,appointment_id,patient_id,doctor_id,state,total_minor,expires_at,medicine_payment_hours,created_at,paid_at FROM pharmacy_order WHERE appointment_id=#{id}") Order orderForAppointment(String id);
  @Select("SELECT id,appointment_id,patient_id,doctor_id,state,total_minor,expires_at,medicine_payment_hours,created_at,paid_at FROM pharmacy_order WHERE patient_id=#{patient} ORDER BY created_at DESC") List<Order> ordersForPatient(String patient);

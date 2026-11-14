@@ -32,6 +32,8 @@ class PharmacyHttpTest extends HttpFixture {
         assertThat(updated.status()).isEqualTo(200); assertThat(updated.body().path("name").asText()).isEqualTo("演示维生素升级"); assertThat(updated.body().path("stock").asInt()).isEqualTo(6);
         assertThat(admin.call("GET", "/api/v1/admin/pharmacy/medicines/" + id + "/history", null).body()).isEmpty();
         assertThat(admin.call("DELETE", "/api/v1/admin/pharmacy/medicines/" + id, null).status()).isEqualTo(200);
+        var afterDelete = admin.call("GET", "/api/v1/admin/pharmacy/medicines", null);
+        assertThat(java.util.stream.StreamSupport.stream(afterDelete.body().spliterator(), false).noneMatch(value -> value.path("id").asText().equals(id))).isTrue();
         var patient = new Browser(port); String patientName = identifier(); patient.register(patientName, "PATIENT"); assertThat(patient.login(patientName, PASSWORD).status()).isEqualTo(200);
         assertThat(patient.call("GET", "/api/v1/admin/pharmacy/medicines", null).status()).isEqualTo(403);
     }

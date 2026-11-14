@@ -41,7 +41,7 @@ public class PharmacyService {
    if(id==null||id.isBlank()) pharmacy.insertMedicine(m); else { var old=pharmacy.lockMedicine(id); if(old==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在"); if(stock<pharmacy.held(id)) throw new ApiFailure(409,"STOCK_BELOW_HELD","库存不能低于已锁定库存"); pharmacy.updateMedicine(m); }
    return pharmacy.medicine(m.id());
  }
- @Transactional public void deleteMedicine(String id){ var m=pharmacy.lockMedicine(id); if(m==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在"); if(!m.active()) return; if(pharmacy.history(id)>0) throw new ApiFailure(409,"PRESCRIPTION_HISTORY_EXISTS","已有处方历史的药品不可删除"); pharmacy.updateMedicine(new PharmacyMapper.Medicine(id,m.name(),m.spec(),m.feeMinor(),m.stock(),m.threshold(),false,m.createdAt(),clock.millis())); }
+ @Transactional public void deleteMedicine(String id){ var m=pharmacy.lockMedicine(id); if(m==null) throw new ApiFailure(404,"NOT_FOUND","药品不存在"); if(pharmacy.history(id)>0) throw new ApiFailure(409,"PRESCRIPTION_HISTORY_EXISTS","已有处方历史的药品不可删除"); pharmacy.deleteMedicine(id); }
  @Transactional public OrderView reservePrescription(String doctor,String appointmentId,List<PrescriptionLineInput> inputs){
    if(inputs==null||inputs.isEmpty()) return null; booking.lockCareScope(appointmentId); var scope=booking.careScope(appointmentId);
    if(scope==null||!scope.doctorId().equals(doctor)) throw new ApiFailure(404,"NOT_FOUND","问诊不存在"); var queue=reception.queueForAppointment(appointmentId);
