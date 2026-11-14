@@ -1,6 +1,6 @@
 # 医疗访问审核原型验收
 
-关联总需求 #1，用户已确认设计。公开入口为 `/prototype/admin-home?module=医疗访问审核`；正式 `/admin/medical` 保留。
+关联总需求 #1，用户已确认设计。原型深链接为 `/prototype/admin-home?module=医疗访问审核`；正式 `/admin/medical` 保留。用户后续要求隐藏常规入口，以下原型功能验收作为保留功能的回归记录。
 
 | 验收项 | 公开测试入口 | 观察结果 | 限制 |
 | --- | --- | --- | --- |
@@ -14,3 +14,14 @@
 | 桌面/手机布局、按钮样式、键盘弹窗行为 | 同上：布局与键盘验收 | 通过 | 非像素级视觉回归 |
 
 2026-11-14 验证结果：专属浏览器验收 10/10 通过，Vue 类型检查及生产构建通过；桌面与手机截图已检查。完整 `scripts/verify.ps1` 退出码为 0：文档校验通过、142 个浏览器用例通过（无失败、无跳过）、96 个后端测试通过，输出 `All required verification passed.`。
+
+## 暂时隐藏入口
+
+| 验收项 | 测试入口 | 观察结果 | 限制 |
+| --- | --- | --- | --- |
+| 各管理员页面桌面及手机导航均无医疗访问审核入口 | `frontend/tests/admin-medical-hidden.spec.ts`、`frontend/tests/admin-pharmacy.spec.ts` | 通过 | 保留旧深链接 |
+| 首页无医疗访问待办，摘要移除该项及其紧急计数 | `frontend/tests/admin-home-prototype.spec.ts` | 通过 | 首页为演示指标 |
+| 正式管理员首页无医疗内容审核入口，原鉴权流程继续有效 | `frontend/tests/workflows.spec.ts` | 通过 | 不停用真实接口 |
+| 保留原型深链接和既有医疗访问权限边界 | `frontend/tests/admin-medical-prototype.spec.ts`、`frontend/tests/workflows.spec.ts` | 通过 | 非功能下线 |
+
+2026-11-14 隐藏入口验证：完整 `scripts/verify.ps1` 退出码为 0，输出 `All required verification passed.`。文档校验、Vue 类型检查及生产构建通过；150 个浏览器用例通过（无失败、无跳过、无重试通过），96 个后端测试通过（无失败、无跳过）。

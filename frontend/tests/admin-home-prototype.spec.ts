@@ -6,11 +6,17 @@ test('管理员首页展示运营驾驶舱与完整管理导航', async ({ page 
   await page.goto('/prototype/admin-home?variant=A')
   await expect(page.getByRole('heading', { name: '早上好，管理员。' })).toBeVisible()
   const navigation = page.getByRole('navigation', { name: '管理员功能导航' })
-  for (const label of ['运营总览', '预约与订单', '退款 / 异常', '患者', '医生', '科室', '排班', '号源', '药品与库存', '药费订单', '审批与替诊', '新闻通知', '医疗访问审核', '审计日志', '全局规则', 'AI 配置', '管理员账户']) {
+  for (const label of ['运营总览', '预约与订单', '退款 / 异常', '患者', '医生', '科室', '排班', '号源', '药品与库存', '药费订单', '审批与替诊', '新闻通知', '审计日志', '全局规则', 'AI 配置', '管理员账户']) {
     await expect(navigation.getByRole('button', { name: label, exact: true })).toBeVisible()
   }
   await expect(page.getByText('医疗内容权限')).toBeVisible()
   await expect(page.getByText('默认未开启')).toBeVisible()
+  await expect(navigation.getByRole('button', { name: '医疗访问审核', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '医疗访问审核详情', exact: true })).toHaveCount(0)
+  await expect(page.getByText('审批、退款、访问审核')).toHaveCount(0)
+  await expect(page.locator('.admin-stat').filter({ hasText: '待处理事项' }).locator('strong')).toHaveText('12')
+  await expect(page.locator('.admin-stat').filter({ hasText: '待处理事项' })).toContainText('2 项紧急')
+  await expect(page.getByRole('heading', { name: '今天有 6 项运营事项需要关注' })).toBeVisible()
   await expect(page.getByText('演示数据 · 不连接真实业务接口')).toBeVisible()
   expect(apiRequests).toEqual([])
 })

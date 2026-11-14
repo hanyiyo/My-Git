@@ -26,13 +26,12 @@ const groups = [
   { name: '运营', items: [{ label: '运营总览', icon: 'grid', active: true }, { label: '预约与订单', icon: 'calendar' }, { label: '退款 / 异常', icon: 'warning', badge: '3' }] },
   { name: '资源', items: [{ label: '患者', icon: 'user' }, { label: '医生', icon: 'doctor' }, { label: '科室', icon: 'hospital' }, { label: '排班', icon: 'calendar' }, { label: '号源', icon: 'grid' }] },
   { name: '药品', items: [{ label: '药品与库存', icon: 'heart', badge: '4' }, { label: '药费订单', icon: 'wallet' }] },
-  { name: '治理', items: [{ label: '审批与替诊', icon: 'file', badge: '6' }, { label: '新闻通知', icon: 'bell' }, { label: '医疗访问审核', icon: 'lock', badge: '1' }, { label: '审计日志', icon: 'scan' }] },
+  { name: '治理', items: [{ label: '审批与替诊', icon: 'file', badge: '6' }, { label: '新闻通知', icon: 'bell' }, { label: '审计日志', icon: 'scan' }] },
   { name: '系统', items: [{ label: '全局规则', icon: 'settings' }, { label: 'AI 配置', icon: 'sparkles' }, { label: '管理员账户', icon: 'user' }] },
 ]
 const todos: Todo[] = [
   { id: 'approval', title: '停诊替诊终审', detail: '6 条申请 · 其中 2 条将在 24 小时内截止', priority: 'urgent', action: '去处理', module: '审批与替诊' },
   { id: 'refund', title: '退款失败待处理', detail: '3 笔退款需要重新发起或人工核对', priority: 'urgent', action: '查看异常', module: '退款 / 异常' },
-  { id: 'medical', title: '医疗访问审核', detail: '核对审核资格，按预约登记访问理由和范围', priority: 'urgent', action: '进入审核', module: '医疗访问审核' },
   { id: 'schedule', title: '今日即将开诊', detail: '上午 08:00 · 4 个科室 · 12 位医生', priority: 'today', action: '查看排班', module: '排班' },
   { id: 'hold', title: '未支付占号', detail: '18 个临时占号将在 10 分钟内到期', priority: 'today', action: '查看订单', module: '预约与订单' },
   { id: 'stock', title: '库存预警', detail: '4 个药品低于预警阈值，其中 1 个已缺货', priority: 'today', action: '补充库存', module: '药品与库存' },
@@ -43,7 +42,7 @@ const priorityLabel: Record<Priority, string> = { urgent: '需要马上处理', 
 const stats = [
   { label: '今日挂号', value: '286', change: '+12.6%', note: '较昨日同期', icon: 'calendar', tone: 'blue' },
   { label: '今日完成接诊', value: '198', change: '+8.4%', note: '线上 76 · 线下 122', icon: 'heart', tone: 'teal' },
-  { label: '待处理事项', value: '13', change: '3 项紧急', note: '审批、退款、访问审核', icon: 'file', tone: 'purple' },
+  { label: '待处理事项', value: '12', change: '2 项紧急', note: '审批、退款、运营提醒', icon: 'file', tone: 'purple' },
   { label: '库存预警', value: '4', change: '1 个缺货', note: '药品品类共 128 个', icon: 'warning', tone: 'amber' },
 ]
 const trend = [72, 86, 66, 94, 82, 108, 116]

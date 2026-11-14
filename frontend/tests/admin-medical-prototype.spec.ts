@@ -23,9 +23,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto(url)
 })
 
-test('医疗访问入口显示业务目录，支持简化筛选与空列表，不提前展示医疗内容', async ({ page }) => {
-  await page.goto('/prototype/admin-home')
-  await page.getByRole('button', { name: '医疗访问审核', exact: true }).click()
+test('保留的医疗访问深链接显示业务目录，支持筛选且不提前展示医疗内容', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '医疗访问审核', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: '预约目录' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByLabel('开始日期')).toHaveValue('2026-10-16')

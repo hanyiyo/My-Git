@@ -14,6 +14,7 @@ test('正式管理员药品工作台展示库存口径、筛选和详情抽屉',
   await login(page)
   await page.goto('/admin/pharmacy')
   await expect(page.getByRole('heading', { name: '药品与库存工作台' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '管理员功能导航' }).getByRole('button', { name: '医疗访问审核', exact: true })).toHaveCount(0)
   await expect(page.getByRole('region', { name: '药品库存摘要' })).toBeVisible()
   await expect(page.getByRole('region', { name: '药品库存表' })).toBeVisible()
   await expect(page.getByLabel('搜索药品')).toBeVisible()
