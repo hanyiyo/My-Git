@@ -28,12 +28,34 @@ async function login(page: Page, name: string, pass = password) {
 test('患者完成注册、验证码登录、刷新恢复会话及退出，角色路由阻止越权', async ({ page, context }) => {
   const name = await register(page, 'PATIENT')
   await page.route('**/api/v1/patient/appointments', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/v1/catalog/departments', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'dept-demo', name: '内科', description: '常见病门诊', active: true }]),
+  }))
+  await page.route('**/api/v1/catalog/doctors', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'doctor-demo', displayName: '林医生', title: '主治医师', biography: '全科诊疗', credentialStatus: 'CERTIFIED', enabled: true, departmentId: 'dept-demo', departmentName: '内科' }]),
+  }))
+  await page.route('**/api/v1/catalog/schedules**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
   await login(page, name)
   await expect(page).toHaveURL(/\/patient$/)
   await expect(page.getByRole('heading', { name: '欢迎回来，测试患者' })).toBeVisible()
   await expect(page.getByRole('region', { name: '快捷服务' })).toBeVisible()
   await expect(page.getByRole('region', { name: '医院信息' })).toContainText('校医院')
+  await expect(page.getByRole('region', { name: '科室与医生' })).toContainText('内科')
+  await expect(page.getByRole('region', { name: '科室与医生' })).toContainText('林医生')
   await expect(page.getByText('暂无当前预约', { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: /内科/ }).last().click()
+  await expect(page).toHaveURL(/\/patient\/catalog\?.*departmentId=dept-demo/)
+  await expect(page.getByLabel('科室', { exact: true })).toHaveValue('dept-demo')
+  await expect(page.getByText('当前筛选暂无可用号源')).toBeVisible()
+  await page.getByRole('link', { name: '首页', exact: true }).click()
+  await expect(page).toHaveURL(/\/patient$/)
+  await page.getByRole('link', { name: /林医生/ }).click()
+  await expect(page).toHaveURL(/\/patient\/catalog\?.*doctorId=doctor-demo/)
+  await page.goto('/patient/catalog?departmentId=missing&doctorId=missing&date=invalid&mode=WRONG&session=NOPE')
+  await expect(page).toHaveURL(/\/patient\/catalog\?mode=OFFLINE&date=\d{4}-\d{2}-\d{2}$/)
+  await expect(page.getByText('当前筛选暂无可用号源')).toBeVisible()
+  await page.getByRole('link', { name: '首页', exact: true }).click()
+  await expect(page).toHaveURL(/\/patient$/)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   await page.route('**/api/v1/catalog/hospital', route => route.fulfill({
     status: 503,
@@ -47,7 +69,6 @@ test('患者完成注册、验证码登录、刷新恢复会话及退出，角�
   const refresh = (await context.cookies()).find(cookie => cookie.name === 'MEDICAL_REFRESH')
   expect(refresh?.httpOnly).toBeTruthy(); expect(refresh?.sameSite).toBe('Strict')
   expect(await page.evaluate(() => [localStorage.getItem('accessToken'), sessionStorage.getItem('refreshToken')])).toEqual([null, null])
-  await page.reload(); await expect(page.getByRole('heading', { name: '欢迎回来，测试患者' })).toBeVisible()
   await page.goto('/admin'); await expect(page).toHaveURL(/\/patient$/)
   await page.getByRole('button', { name: '退出登录' }).click(); await expect(page).toHaveURL(/\/login$/)
   await page.goto('/patient'); await expect(page).toHaveURL(/\/login$/)

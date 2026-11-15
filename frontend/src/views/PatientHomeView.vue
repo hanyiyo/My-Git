@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useSession, type Profile } from '../session'
-import type { Hospital } from '../catalog'
+import type { Department, Doctor, Hospital } from '../catalog'
 
 interface AppointmentSummary {
   id: string
@@ -22,6 +22,8 @@ const session = useSession()
 const router = useRouter()
 const profile = ref<Profile | null>(null)
 const hospital = ref<Hospital | null>(null)
+const departments = ref<Department[]>([])
+const doctors = ref<Doctor[]>([])
 const appointments = ref<AppointmentSummary[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -29,6 +31,9 @@ const appointmentsError = ref('')
 
 const displayName = computed(() => profile.value?.displayName || profile.value?.identifier || session.account?.displayName || session.account?.identifier || '患者')
 const currentAppointment = computed(() => appointments.value[0] ?? null)
+const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+const today = `${todayParts.find(part => part.type === 'year')?.value}-${todayParts.find(part => part.type === 'month')?.value}-${todayParts.find(part => part.type === 'day')?.value}`
+const catalogQuery = (key: string, value: string) => ({ path: '/patient/catalog', query: { [key]: value, date: today, mode: 'OFFLINE' } })
 const appointmentStatus = computed(() => {
   const item = currentAppointment.value
   if (!item) return ''
@@ -55,12 +60,16 @@ async function load() {
   error.value = ''
   appointmentsError.value = ''
   try {
-    const [home, information] = await Promise.all([
+    const [home, information, units, people] = await Promise.all([
       api<Profile>('/patient/home'),
       api<Hospital>('/catalog/hospital'),
+      api<Department[]>('/catalog/departments'),
+      api<Doctor[]>('/catalog/doctors'),
     ])
     profile.value = home
     hospital.value = information
+    departments.value = units
+    doctors.value = people
     try {
       appointments.value = await api<AppointmentSummary[]>('/patient/appointments')
     } catch (failure) {
@@ -127,6 +136,32 @@ async function logout() {
           <RouterLink to="/patient/orders"><strong>我的挂号</strong><small>支付、签到和候诊状态</small></RouterLink>
           <RouterLink to="/assistant/business"><strong>AI 导诊助手</strong><small>咨询医院流程和科室信息</small></RouterLink>
           <RouterLink to="/notifications"><strong>站内通知</strong><small>查看预约和就诊提醒</small></RouterLink>
+        </div>
+      </section>
+
+      <section class="patient-home-section" aria-labelledby="patient-home-catalog-title">
+        <div class="patient-home-section-heading">
+          <div>
+            <p class="patient-home-eyebrow">真实目录</p>
+            <h3 id="patient-home-catalog-title">科室与医生</h3>
+          </div>
+          <RouterLink to="/patient/catalog">查看完整排班</RouterLink>
+        </div>
+        <div class="patient-home-directory-grid">
+          <div class="patient-home-directory-block">
+            <h4>热门科室</h4>
+            <p v-if="!departments.length" class="patient-home-directory-empty">暂无可用科室，请稍后再试。</p>
+            <RouterLink v-for="item in departments.slice(0, 4)" :key="item.id" :to="catalogQuery('departmentId', item.id)" class="patient-home-directory-link">
+              <span><strong>{{ item.name }}</strong><small>{{ item.description || '查看该科室的有效排班' }}</small></span><b aria-hidden="true">→</b>
+            </RouterLink>
+          </div>
+          <div class="patient-home-directory-block">
+            <h4>认证医生</h4>
+            <p v-if="!doctors.length" class="patient-home-directory-empty">暂无可见医生，请稍后再试。</p>
+            <RouterLink v-for="item in doctors.slice(0, 4)" :key="item.id" :to="catalogQuery('doctorId', item.id)" class="patient-home-directory-link">
+              <span><strong>{{ item.displayName }}</strong><small>{{ item.title }} · {{ item.departmentName || '查看医生排班' }}</small></span><b aria-hidden="true">→</b>
+            </RouterLink>
+          </div>
         </div>
       </section>
 
