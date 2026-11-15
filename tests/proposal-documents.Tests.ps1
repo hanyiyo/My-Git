@@ -1,6 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$path = Join-Path $root '开题报告/余蕊艳_智能医疗问诊预约系统_任务书与开题报告.docx'
+$path = Join-Path $root '开题报告/余蕊艳_智能医疗问诊预约系统_任务书与开题报告_近五年文献修订版.docx'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 function Get-TextHash([string]$value) {
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -72,6 +72,17 @@ try {
     }
     $english = @($taskRefs | Where-Object { $_.InnerText -match '^\[\d+\][A-Z]' })
     Assert-True ($english.Count -eq 6) 'Expected nine Chinese and six English references.'
+    foreach ($reference in $taskRefs) {
+        $year = [regex]::Match($reference.InnerText, '[,.]\s*(20\d{2})[,:]')
+        Assert-True ($year.Success) ('Reference publication year missing: '+$reference.InnerText)
+        Assert-True ([int]$year.Groups[1].Value -ge 2022 -and [int]$year.Groups[1].Value -le 2026) 'References must be published in 2022-2026.'
+    }
+    foreach ($outdated in @('ZHAO P','VERREYDT','张锦红','石秀金','CTM模型','UCON')) {
+        Assert-True (-not $text.Contains($outdated)) ('Outdated reference or review claim remains: '+$outdated)
+    }
+    foreach ($current in @('巫朝霞','吴性丽','MANARTE L','SCHMIDT R','Manarte','Schmidt')) {
+        Assert-True ($text.Contains($current)) ('Replacement reference or supporting discussion missing: '+$current)
+    }
     Assert-True ($taskRefs[8].InnerText.Contains('17(10):69-72')) 'Use verified reference 9 pagination.'
     $plan = $tables[1].SelectSingleNode('./w:tr[5]/w:tc[2]',$ns).InnerText
     foreach ($date in @('2026年10月8日～2026年10月30日','2026年10月31日～2026年11月18日','2026年11月19日～2027年1月9日','2027年1月10日～2027年1月15日','2027年1月16日～2027年4月30日','2027年5月1日～2027年5月10日','2027年7月  12 日')) {
