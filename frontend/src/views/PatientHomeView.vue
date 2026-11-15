@@ -13,9 +13,12 @@ interface AppointmentSummary {
   session: string
   serviceMode: string
   state: string
+  startsAt: number
+  endsAt: number
+  serverNow: number
   credential: string | null
   payment: { state: string } | null
-  reception: { state: string } | null
+  reception: { state: string; calledAt: number | null; restorationCount: number } | null
 }
 
 const session = useSession()
@@ -28,24 +31,44 @@ const appointments = ref<AppointmentSummary[]>([])
 const loading = ref(true)
 const error = ref('')
 const appointmentsError = ref('')
+const appointmentsLoading = ref(false)
+let appointmentsLoadVersion = 0
 
 const displayName = computed(() => profile.value?.displayName || profile.value?.identifier || session.account?.displayName || session.account?.identifier || '患者')
 const currentAppointment = computed(() => appointments.value[0] ?? null)
 const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
 const today = `${todayParts.find(part => part.type === 'year')?.value}-${todayParts.find(part => part.type === 'month')?.value}-${todayParts.find(part => part.type === 'day')?.value}`
 const catalogQuery = (key: string, value: string) => ({ path: '/patient/catalog', query: { [key]: value, date: today, mode: 'OFFLINE' } })
+const appointmentNow = computed(() => currentAppointment.value?.serverNow || Date.now())
+const checkInAvailable = computed(() => {
+  const item = currentAppointment.value
+  if (!item || item.state !== 'CONFIRMED' || item.reception) return false
+  return appointmentNow.value >= item.startsAt - 30 * 60 * 1000 && appointmentNow.value < item.endsAt - 15 * 60 * 1000
+})
 const appointmentStatus = computed(() => {
   const item = currentAppointment.value
   if (!item) return ''
   if (item.state === 'PENDING_PAYMENT') return '待支付'
   if (item.state === 'CANCELLED') return '已取消'
   if (item.state === 'EXPIRED') return '已过期'
+  if (item.state === 'COMPLETED') return '已完成'
   if (item.reception?.state === 'WAITING') return '候诊中'
   if (item.reception?.state === 'CALLED') return '已叫号'
   if (item.reception?.state === 'IN_CONSULTATION') return '接诊中'
   if (item.reception?.state === 'MISSED') return '已过号'
   if (item.reception?.state === 'COMPLETED') return '已完成'
   return item.state === 'CONFIRMED' ? '待签到' : item.state
+})
+const appointmentAction = computed(() => {
+  const item = currentAppointment.value
+  if (!item) return null
+  if (item.state === 'PENDING_PAYMENT') return { label: '去我的挂号完成支付', to: '/patient/orders?state=PENDING_PAYMENT' }
+  if (item.state === 'COMPLETED') return { label: '查看问诊材料与结果', to: `/patient/orders/${item.id}/clinical` }
+  if (item.reception?.state === 'MISSED' && item.reception.calledAt != null && item.reception.restorationCount === 0 && appointmentNow.value >= item.startsAt && appointmentNow.value < item.endsAt)
+    return { label: '进入我的挂号恢复排队', to: '/patient/orders' }
+  if (checkInAvailable.value) return { label: '进入我的挂号签到', to: '/patient/orders' }
+  if (item.reception?.state === 'CALLED' || item.reception?.state === 'IN_CONSULTATION') return { label: '查看当前接诊状态', to: '/patient/orders' }
+  return { label: '进入我的挂号', to: '/patient/orders' }
 })
 const appointmentHint = computed(() => {
   if (!currentAppointment.value) return '从真实号源中选择合适的医生和时段。'
@@ -71,7 +94,7 @@ async function load() {
     departments.value = units
     doctors.value = people
     try {
-      appointments.value = await api<AppointmentSummary[]>('/patient/appointments')
+      await loadAppointments()
     } catch (failure) {
       appointments.value = []
       appointmentsError.value = failure instanceof Error ? failure.message : '当前预约暂不可用'
@@ -80,6 +103,22 @@ async function load() {
     error.value = failure instanceof Error ? failure.message : '患者首页暂不可用，请重试'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadAppointments() {
+  const version = ++appointmentsLoadVersion
+  appointmentsLoading.value = true
+  appointmentsError.value = ''
+  try {
+    appointments.value = await api<AppointmentSummary[]>('/patient/appointments')
+  } catch (failure) {
+    if (version === appointmentsLoadVersion) {
+      appointments.value = []
+      appointmentsError.value = failure instanceof Error ? failure.message : '当前预约暂不可用'
+    }
+  } finally {
+    if (version === appointmentsLoadVersion) appointmentsLoading.value = false
   }
 }
 
@@ -173,7 +212,7 @@ async function logout() {
           </div>
           <RouterLink to="/patient/orders">查看全部</RouterLink>
         </div>
-        <p v-if="appointmentsError" class="patient-home-inline-error" role="status">{{ appointmentsError }}，可进入“我的挂号”重试。</p>
+        <div v-if="appointmentsError" class="patient-home-inline-error" role="alert"><span>{{ appointmentsError }}</span><button type="button" :disabled="appointmentsLoading" @click="loadAppointments">{{ appointmentsLoading ? '重试中…' : '重试加载预约' }}</button></div>
         <div v-else-if="!currentAppointment" class="patient-home-empty">
           <strong>暂无当前预约</strong>
           <p>{{ appointmentHint }}</p>
@@ -186,7 +225,7 @@ async function logout() {
             <p>{{ currentAppointment.clinicDate }} · {{ currentAppointment.session === 'AM' ? '上午' : '下午' }} · {{ currentAppointment.serviceMode === 'ONLINE' ? '线上问诊' : '线下面诊' }}</p>
             <small>{{ appointmentHint }}</small>
           </div>
-          <RouterLink class="patient-home-primary" to="/patient/orders">进入我的挂号</RouterLink>
+          <RouterLink v-if="appointmentAction" class="patient-home-primary" :to="appointmentAction.to">{{ appointmentAction.label }}</RouterLink>
         </div>
       </section>
 

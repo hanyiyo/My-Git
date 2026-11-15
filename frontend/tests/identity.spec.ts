@@ -84,6 +84,35 @@ test('医生注册进入待审核工作台，错误验证码后保留账号并�
   await expect(page).toHaveURL(/\/doctor$/)
   await expect(page.getByText('医生资质：待审核')).toBeVisible()
 })
+test('患者首页预约摘要按状态提供下一步入口', async ({ page }) => {
+  const name = await register(page, 'PATIENT')
+  const now = Date.now()
+  let state = 'PENDING_PAYMENT'
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([{
+      id: 'appointment-demo', doctorName: '林医生', departmentName: '内科', clinicDate: '2099-01-01', session: 'AM',
+      serviceMode: 'OFFLINE', state, startsAt: now + 3600000, endsAt: now + 7200000,
+      serverNow: now, credential: null, payment: null, reception: null,
+    }]),
+  }))
+  await login(page, name)
+  await expect(page.getByText('待支付', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '去我的挂号完成支付' })).toHaveAttribute('href', '/patient/orders?state=PENDING_PAYMENT')
+  state = 'COMPLETED'
+  await page.reload()
+  await expect(page.getByText('已完成', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '查看问诊材料与结果' })).toHaveAttribute('href', '/patient/orders/appointment-demo/clinical')
+})
+test('患者首页预约加载失败显示重试并恢复为空状态', async ({ page }) => {
+  const name = await register(page, 'PATIENT')
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: '预约服务暂不可用' } }),
+  }), { times: 1 })
+  await login(page, name)
+  await expect(page.getByRole('alert')).toContainText('预约服务暂不可用')
+  await page.getByRole('button', { name: '重试加载预约' }).click()
+  await expect(page.getByText('暂无当前预约', { exact: true })).toBeVisible()
+})
 test('管理员使用配置的引导账户登录并刷新会话', async ({ page }) => {
   await page.goto('/login'); await login(page, 'admin-foundation-test', 'fictional-test-administrator-password')
   await expect(page).toHaveURL(/\/admin$/)
