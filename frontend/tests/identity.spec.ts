@@ -27,13 +27,27 @@ async function login(page: Page, name: string, pass = password) {
 }
 test('患者完成注册、验证码登录、刷新恢复会话及退出，角色路由阻止越权', async ({ page, context }) => {
   const name = await register(page, 'PATIENT')
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
   await login(page, name)
   await expect(page).toHaveURL(/\/patient$/)
-  await expect(page.getByText('欢迎，测试患者')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '欢迎回来，测试患者' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '快捷服务' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '医院信息' })).toContainText('校医院')
+  await expect(page.getByText('暂无当前预约', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await page.route('**/api/v1/catalog/hospital', route => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: '医院信息暂不可用' } }),
+  }), { times: 1 })
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('医院信息暂不可用')
+  await page.getByRole('button', { name: '重试加载' }).click()
+  await expect(page.getByRole('region', { name: '医院信息' })).toContainText('校医院')
   const refresh = (await context.cookies()).find(cookie => cookie.name === 'MEDICAL_REFRESH')
   expect(refresh?.httpOnly).toBeTruthy(); expect(refresh?.sameSite).toBe('Strict')
   expect(await page.evaluate(() => [localStorage.getItem('accessToken'), sessionStorage.getItem('refreshToken')])).toEqual([null, null])
-  await page.reload(); await expect(page.getByText('欢迎，测试患者')).toBeVisible()
+  await page.reload(); await expect(page.getByRole('heading', { name: '欢迎回来，测试患者' })).toBeVisible()
   await page.goto('/admin'); await expect(page).toHaveURL(/\/patient$/)
   await page.getByRole('button', { name: '退出登录' }).click(); await expect(page).toHaveURL(/\/login$/)
   await page.goto('/patient'); await expect(page).toHaveURL(/\/login$/)

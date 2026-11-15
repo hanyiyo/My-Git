@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from './views/LoginView.vue'
 import HomeView from './views/HomeView.vue'
+import PatientHomeView from './views/PatientHomeView.vue'
 import DoctorGovernanceView from './views/DoctorGovernanceView.vue'
 import AdminGovernanceView from './views/AdminGovernanceView.vue'
 import AdminAiView from './views/AdminAiView.vue'
@@ -55,7 +56,8 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/doctor/catalog', component: DoctorCatalogView, meta: { role: 'DOCTOR' } },
   { path: '/doctor/reception', component: DoctorReceptionView, meta: { role: 'DOCTOR' } },
   { path: '/doctor/clinical/:id', component: DoctorClinicalView, meta: { role: 'DOCTOR' } },
-  ...['patient', 'doctor', 'admin'].map(role => ({ path: '/' + role, component: HomeView, meta: { role: role.toUpperCase() } }))
+  { path: '/patient', component: PatientHomeView, meta: { role: 'PATIENT' } },
+  ...['doctor', 'admin'].map(role => ({ path: '/' + role, component: HomeView, meta: { role: role.toUpperCase() } }))
   ,{ path: '/notifications', component: HomeView, meta: { role: 'PATIENT' } }
   ,{ path: '/profile', component: HomeView, meta: { role: 'PATIENT' } }
 ] })

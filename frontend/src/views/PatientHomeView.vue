@@ -1,0 +1,173 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { api } from '../api'
+import { useSession, type Profile } from '../session'
+import type { Hospital } from '../catalog'
+
+interface AppointmentSummary {
+  id: string
+  doctorName: string
+  departmentName: string
+  clinicDate: string
+  session: string
+  serviceMode: string
+  state: string
+  credential: string | null
+  payment: { state: string } | null
+  reception: { state: string } | null
+}
+
+const session = useSession()
+const router = useRouter()
+const profile = ref<Profile | null>(null)
+const hospital = ref<Hospital | null>(null)
+const appointments = ref<AppointmentSummary[]>([])
+const loading = ref(true)
+const error = ref('')
+const appointmentsError = ref('')
+
+const displayName = computed(() => profile.value?.displayName || profile.value?.identifier || session.account?.displayName || session.account?.identifier || '患者')
+const currentAppointment = computed(() => appointments.value[0] ?? null)
+const appointmentStatus = computed(() => {
+  const item = currentAppointment.value
+  if (!item) return ''
+  if (item.state === 'PENDING_PAYMENT') return '待支付'
+  if (item.state === 'CANCELLED') return '已取消'
+  if (item.state === 'EXPIRED') return '已过期'
+  if (item.reception?.state === 'WAITING') return '候诊中'
+  if (item.reception?.state === 'CALLED') return '已叫号'
+  if (item.reception?.state === 'IN_CONSULTATION') return '接诊中'
+  if (item.reception?.state === 'MISSED') return '已过号'
+  if (item.reception?.state === 'COMPLETED') return '已完成'
+  return item.state === 'CONFIRMED' ? '待签到' : item.state
+})
+const appointmentHint = computed(() => {
+  if (!currentAppointment.value) return '从真实号源中选择合适的医生和时段。'
+  if (appointmentStatus.value === '待支付') return '号源已暂时保留，请尽快完成支付。'
+  if (appointmentStatus.value === '待签到') return '进入签到窗口后，可从我的挂号完成签到。'
+  if (appointmentStatus.value === '候诊中') return '你已进入候诊队列，请留意叫号提醒。'
+  return '进入我的挂号查看完整业务时间线。'
+})
+
+async function load() {
+  loading.value = true
+  error.value = ''
+  appointmentsError.value = ''
+  try {
+    const [home, information] = await Promise.all([
+      api<Profile>('/patient/home'),
+      api<Hospital>('/catalog/hospital'),
+    ])
+    profile.value = home
+    hospital.value = information
+    try {
+      appointments.value = await api<AppointmentSummary[]>('/patient/appointments')
+    } catch (failure) {
+      appointments.value = []
+      appointmentsError.value = failure instanceof Error ? failure.message : '当前预约暂不可用'
+    }
+  } catch (failure) {
+    error.value = failure instanceof Error ? failure.message : '患者首页暂不可用，请重试'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
+async function logout() {
+  await session.logout()
+  await router.push('/login')
+}
+</script>
+
+<template>
+  <section class="patient-home-page" aria-labelledby="patient-home-title">
+    <div v-if="loading" class="patient-home-state" role="status">正在加载你的患者服务…</div>
+    <div v-else-if="error" class="patient-home-state patient-home-error" role="alert">
+      <strong>{{ error }}</strong>
+      <button type="button" @click="load">重试加载</button>
+    </div>
+    <template v-else>
+      <header class="patient-home-heading">
+        <div>
+          <p class="patient-home-eyebrow">患者服务 / 今日概览</p>
+          <h2 id="patient-home-title">欢迎回来，{{ displayName }}</h2>
+          <p>从这里开始安排今天的就诊计划。</p>
+        </div>
+        <div class="patient-home-heading-actions">
+          <RouterLink class="patient-home-primary" to="/patient/catalog">立即挂号</RouterLink>
+          <button class="patient-home-logout" type="button" @click="logout">退出登录</button>
+        </div>
+      </header>
+
+      <section class="patient-home-hero" aria-label="医院信息">
+        <div>
+          <p class="patient-home-eyebrow">你的就诊服务台</p>
+          <h3>{{ hospital?.name || '医院信息暂缺' }}</h3>
+          <p>{{ hospital?.description || '医院服务说明暂缺，请稍后重试。' }}</p>
+          <small v-if="hospital?.address">{{ hospital.address }}</small>
+        </div>
+        <div class="patient-home-hero-actions">
+          <RouterLink class="patient-home-soft" to="/assistant/business">打开 AI 助手</RouterLink>
+          <RouterLink class="patient-home-soft" to="/patient/orders">查看我的预约</RouterLink>
+        </div>
+      </section>
+
+      <section class="patient-home-section" aria-labelledby="patient-home-services-title">
+        <div class="patient-home-section-heading">
+          <div>
+            <p class="patient-home-eyebrow">快捷入口</p>
+            <h3 id="patient-home-services-title">快捷服务</h3>
+          </div>
+          <span>选择你现在需要的服务</span>
+        </div>
+        <div class="patient-home-service-grid">
+          <RouterLink to="/patient/catalog"><strong>查询科室、医生与排班</strong><small>查看有效排班和剩余号源</small></RouterLink>
+          <RouterLink to="/patient/orders"><strong>我的挂号</strong><small>支付、签到和候诊状态</small></RouterLink>
+          <RouterLink to="/assistant/business"><strong>AI 导诊助手</strong><small>咨询医院流程和科室信息</small></RouterLink>
+          <RouterLink to="/notifications"><strong>站内通知</strong><small>查看预约和就诊提醒</small></RouterLink>
+        </div>
+      </section>
+
+      <section class="patient-home-section patient-home-appointment" aria-labelledby="patient-home-appointment-title">
+        <div class="patient-home-section-heading">
+          <div>
+            <p class="patient-home-eyebrow">我的就诊</p>
+            <h3 id="patient-home-appointment-title">当前预约</h3>
+          </div>
+          <RouterLink to="/patient/orders">查看全部</RouterLink>
+        </div>
+        <p v-if="appointmentsError" class="patient-home-inline-error" role="status">{{ appointmentsError }}，可进入“我的挂号”重试。</p>
+        <div v-else-if="!currentAppointment" class="patient-home-empty">
+          <strong>暂无当前预约</strong>
+          <p>{{ appointmentHint }}</p>
+          <RouterLink class="patient-home-soft" to="/patient/catalog">去查询号源</RouterLink>
+        </div>
+        <div v-else class="patient-home-appointment-card">
+          <div>
+            <span class="patient-home-status">{{ appointmentStatus }}</span>
+            <h4>{{ currentAppointment.doctorName }} · {{ currentAppointment.departmentName }}</h4>
+            <p>{{ currentAppointment.clinicDate }} · {{ currentAppointment.session === 'AM' ? '上午' : '下午' }} · {{ currentAppointment.serviceMode === 'ONLINE' ? '线上问诊' : '线下面诊' }}</p>
+            <small>{{ appointmentHint }}</small>
+          </div>
+          <RouterLink class="patient-home-primary" to="/patient/orders">进入我的挂号</RouterLink>
+        </div>
+      </section>
+
+      <section class="patient-home-process" aria-label="就诊流程">
+        <div>
+          <p class="patient-home-eyebrow">就诊流程</p>
+          <h3>一看就懂</h3>
+        </div>
+        <ol>
+          <li><strong>1</strong><span>选择号源</span></li>
+          <li><strong>2</strong><span>确认挂号</span></li>
+          <li><strong>3</strong><span>完成支付</span></li>
+          <li><strong>4</strong><span>签到候诊</span></li>
+          <li><strong>5</strong><span>进入接诊</span></li>
+        </ol>
+      </section>
+    </template>
+  </section>
+</template>
