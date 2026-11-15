@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useSession, type Profile } from '../session'
+import { useNotificationRefresh } from '../useNotificationRefresh'
 import type { Department, Doctor, Hospital } from '../catalog'
 
 interface AppointmentSummary {
@@ -33,6 +34,8 @@ const error = ref('')
 const appointmentsError = ref('')
 const appointmentsLoading = ref(false)
 let appointmentsLoadVersion = 0
+const notificationUnread = ref<number | null>(null)
+const notificationError = ref('')
 
 const displayName = computed(() => profile.value?.displayName || profile.value?.identifier || session.account?.displayName || session.account?.identifier || '患者')
 const currentAppointment = computed(() => appointments.value[0] ?? null)
@@ -122,7 +125,17 @@ async function loadAppointments() {
   }
 }
 
-onMounted(load)
+async function loadNotifications() {
+  try {
+    notificationUnread.value = await api<number>('/notifications/unread')
+    notificationError.value = ''
+  } catch (failure) {
+    notificationError.value = failure instanceof Error ? failure.message : '通知暂时不可用'
+  }
+}
+
+useNotificationRefresh(loadNotifications)
+onMounted(() => { void load(); void loadNotifications() })
 async function logout() {
   await session.logout()
   await router.push('/login')
@@ -174,7 +187,7 @@ async function logout() {
           <RouterLink to="/patient/catalog"><strong>查询科室、医生与排班</strong><small>查看有效排班和剩余号源</small></RouterLink>
           <RouterLink to="/patient/orders"><strong>我的挂号</strong><small>支付、签到和候诊状态</small></RouterLink>
           <RouterLink to="/assistant/business"><strong>AI 导诊助手</strong><small>咨询医院流程和科室信息</small></RouterLink>
-          <RouterLink to="/notifications"><strong>站内通知</strong><small>查看预约和就诊提醒</small></RouterLink>
+          <RouterLink to="/notifications"><strong>站内通知</strong><small v-if="notificationError">通知暂时不可用，不影响预约</small><small v-else>未读提醒：{{ notificationUnread === null ? '加载中…' : notificationUnread }} · 查看预约和就诊提醒</small></RouterLink>
         </div>
       </section>
 

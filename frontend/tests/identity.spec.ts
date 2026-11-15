@@ -113,6 +113,24 @@ test('患者首页预约加载失败显示重试并恢复为空状态', async ({
   await page.getByRole('button', { name: '重试加载预约' }).click()
   await expect(page.getByText('暂无当前预约', { exact: true })).toBeVisible()
 })
+test('患者首页显示通知未读数并在新通知和已读事件后刷新', async ({ page }) => {
+  const name = await register(page, 'PATIENT')
+  let unread = 3
+  await page.route('**/api/v1/notifications/unread', route => route.fulfill({ status: 200, contentType: 'application/json', body: String(unread) }))
+  await page.route('**/api/v1/notifications?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/v1/notifications/stream', route => route.abort())
+  await login(page, name)
+  const notificationLink = page.locator('a').filter({ hasText: '未读提醒' }).first()
+  await expect(notificationLink).toContainText('未读提醒：3')
+  unread = 4
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('medical-notification')))
+  await expect(notificationLink).toContainText('未读提醒：4')
+  unread = 2
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('medical-notification-read')))
+  await expect(notificationLink).toContainText('未读提醒：2')
+  await notificationLink.click()
+  await expect(page).toHaveURL(/\/notifications$/)
+})
 test('管理员使用配置的引导账户登录并刷新会话', async ({ page }) => {
   await page.goto('/login'); await login(page, 'admin-foundation-test', 'fictional-test-administrator-password')
   await expect(page).toHaveURL(/\/admin$/)

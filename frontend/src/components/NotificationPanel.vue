@@ -36,7 +36,7 @@ async function connect(current: number) {
 const polling = setInterval(() => { if (session.account) void sync(generation) }, 2000)
 function stop() { generation++; controller?.abort(); if (timer) clearTimeout(timer); cursor = 0; messages.value = []; unread.value = 0; syncing = null }
 watch(() => session.account?.id, () => { stop(); if (session.account) { const current = generation; void sync(current); void connect(current) } }, { immediate: true })
-async function mark(item: Notification) { try { await api(`/notifications/${item.id}/read`, 'POST'); item.readAt = Date.now(); await sync(generation) } catch (e) { error.value = e instanceof Error ? e.message : '标记失败' } }
+async function mark(item: Notification) { try { await api(`/notifications/${item.id}/read`, 'POST'); item.readAt = Date.now(); window.dispatchEvent(new CustomEvent('medical-notification-read', { detail: item })); await sync(generation) } catch (e) { error.value = e instanceof Error ? e.message : '标记失败' } }
 onUnmounted(() => { stop(); clearInterval(polling) })
 </script>
 <template><section v-if="session.account" class="card" aria-label="站内通知"><h2>站内通知</h2><p>未读提醒：{{ unread }} · {{ state }}</p><p v-if="error" role="alert">{{ error }}</p>
