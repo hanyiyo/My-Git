@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $path = Join-Path $root '开题报告/智能医疗问诊预约系统开题报告文献检索指南.docx'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$archive = [System.IO.Compression.ZipFile]::OpenRead($path)
+$fileStream = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+$archive = [System.IO.Compression.ZipArchive]::new($fileStream, [System.IO.Compression.ZipArchiveMode]::Read)
 try {
     $entry = $archive.GetEntry('word/document.xml')
     if (-not $entry) { throw 'The guide must be a readable Word document.' }
@@ -37,4 +38,4 @@ try {
         throw 'The guide title must not inherit a decorative paragraph border.'
     }
     Write-Output 'Literature guide content and scope checks passed.'
-} finally { $archive.Dispose() }
+} finally { $archive.Dispose(); $fileStream.Dispose() }
