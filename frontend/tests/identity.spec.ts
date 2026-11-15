@@ -42,7 +42,16 @@ test('患者完成注册、验证码登录、刷新恢复会话及退出，角�
       ? { mode: 'TRIAGE_ASSISTANCE', answer: '我可以协助查找科室，但不能提供诊断或处方。', sources: [] }
       : { mode: 'LOCAL_FACTS', answer: '校医院地址：虚构路1号', sources: ['hospital.address'] }) })
   })
-  await page.route('**/api/v1/assistant/triage', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ mode: 'TRIAGE_ASSISTANCE', answer: '这是辅助结果，不是诊断或处方。', departmentHint: '内科', imageReceived: false, sources: ['configured-departments'] }) }))
+  let triageRequests = 0
+  await page.route('**/api/v1/assistant/triage', route => {
+    triageRequests += 1
+    if (triageRequests > 1) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: '导诊助手暂不可用' } }) })
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ mode: 'TRIAGE_ASSISTANCE', answer: '这是辅助结果，不是诊断或处方。', departmentHint: '内科', imageReceived: false, sources: ['configured-departments'] }) })
+  })
+  let appointmentWrites = 0
+  page.on('request', request => {
+    if (request.method() !== 'GET' && new URL(request.url()).pathname.endsWith('/appointments')) appointmentWrites += 1
+  })
   await login(page, name)
   await expect(page).toHaveURL(/\/patient$/)
   await expect(page.getByRole('heading', { name: '欢迎回来，测试患者' })).toBeVisible()
@@ -77,9 +86,12 @@ test('患者完成注册、验证码登录、刷新恢复会话及退出，角�
   const refresh = (await context.cookies()).find(cookie => cookie.name === 'MEDICAL_REFRESH')
   expect(refresh?.httpOnly).toBeTruthy(); expect(refresh?.sameSite).toBe('Strict')
   expect(await page.evaluate(() => [localStorage.getItem('accessToken'), sessionStorage.getItem('refreshToken')])).toEqual([null, null])
-  await page.route('**/api/v1/catalog/schedules?*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
-    { doctorId: 'doctor-demo', doctorName: '林医生', departmentId: 'dept-demo', departmentName: '内科', scheduleId: 'schedule-demo', id: 'schedule-demo', clinicDate: '2099-01-01', session: 'AM', serviceMode: 'ONLINE', advanceAvailable: true, walkInAvailable: false },
-  ]) }))
+  await page.route('**/api/v1/catalog/schedules?*', route => {
+    expect(new URL(route.request().url()).searchParams.get('departmentId')).toBe('dept-demo')
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+      { doctorId: 'doctor-demo', doctorName: '林医生', departmentId: 'dept-demo', departmentName: '内科', scheduleId: 'schedule-demo', id: 'schedule-demo', clinicDate: '2099-01-01', session: 'AM', serviceMode: 'ONLINE', advanceAvailable: true, walkInAvailable: false },
+    ]) })
+  })
   await page.setViewportSize({ width: 375, height: 812 })
   await page.getByRole('button', { name: '打开导诊助手' }).click()
   const drawer = page.locator('.assistant-drawer')
@@ -94,6 +106,7 @@ test('患者完成注册、验证码登录、刷新恢复会话及退出，角�
   await expect(drawer).toContainText('提交症状前请确认授权范围')
   await drawer.getByRole('button', { name: '拒绝授权，继续自行查询' }).click()
   await expect(drawer).toContainText('已拒绝本次授权，不影响你自行查询科室和挂号')
+  expect(triageRequests).toBe(0)
   await drawer.getByRole('button', { name: '获取辅助建议' }).click()
   await drawer.getByRole('checkbox', { name: /我已阅读并同意/ }).check()
   await drawer.getByRole('button', { name: '同意授权并获取建议' }).click()
@@ -107,12 +120,22 @@ test('患者完成注册、验证码登录、刷新恢复会话及退出，角�
   expect(recommendationQuery.get('date')).toBe('2099-01-01')
   expect(recommendationQuery.get('mode')).toBe('ONLINE')
   expect(recommendationQuery.get('session')).toBe('AM')
+  expect(triageRequests).toBe(1)
+  expect(appointmentWrites).toBe(0)
   expect((await page.locator('.assistant-drawer').boundingBox())?.width).toBe(375)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   await page.locator('.assistant-drawer').getByRole('button', { name: '关闭' }).click()
   await page.getByRole('button', { name: '展开导航' }).click()
   await page.getByRole('link', { name: '首页', exact: true }).click()
   await expect(page).toHaveURL(/\/patient$/)
+  await page.getByRole('button', { name: '打开导诊助手' }).click()
+  const failedDrawer = page.locator('.assistant-drawer')
+  await failedDrawer.getByLabel('描述问题或症状').fill('我最近咳嗽')
+  await failedDrawer.getByRole('button', { name: '获取辅助建议' }).click()
+  await failedDrawer.getByRole('checkbox', { name: /我已阅读并同意/ }).check()
+  await failedDrawer.getByRole('button', { name: '同意授权并获取建议' }).click()
+  await expect(failedDrawer.getByRole('alert')).toHaveText('导诊助手暂不可用')
+  await expect(failedDrawer.locator('.assistant-result')).toHaveCount(0)
   await page.goto('/admin'); await expect(page).toHaveURL(/\/patient$/)
   await page.getByRole('button', { name: '退出登录' }).click(); await expect(page).toHaveURL(/\/login$/)
   await page.goto('/patient'); await expect(page).toHaveURL(/\/login$/)

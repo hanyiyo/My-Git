@@ -363,6 +363,21 @@ class WorkflowHttpTest extends HttpFixture {
         var symptom = admin().call("GET", "/api/v1/assistant/business?question=" + java.net.URLEncoder.encode("我胸痛，医院地址在哪", StandardCharsets.UTF_8), null).body();
         assertThat(symptom.path("mode").asText()).isEqualTo("TRIAGE_ASSISTANCE"); assertThat(symptom.path("answer").asText()).contains("急救");
     }
+    @Test void patientAssistantTriageUsesRealHttpBoundaryWithoutCreatingPreconsultationTask() throws Exception {
+        var patient = actor("PATIENT").browser();
+        String boundary = "Assistant" + UUID.randomUUID();
+        String payload = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"question\"\r\n\r\n我最近咳嗽\r\n--" + boundary + "--\r\n";
+        String csrf = patient.call("GET", "/api/v1/auth/csrf", null).body().path("token").asText();
+        var response = patient.http.send(HttpRequest.newBuilder(URI.create(patient.base + "/api/v1/assistant/triage"))
+            .header("Authorization", "Bearer " + patient.access).header("X-XSRF-TOKEN", csrf)
+            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+            .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8)).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(200);
+        var result = JSON.readTree(response.body());
+        assertThat(result.path("mode").asText()).isEqualTo("TRIAGE_ASSISTANCE");
+        assertThat(result.path("departmentHint").asText()).isNotBlank();
+        assertThat(patient.call("GET", "/api/v1/patient/ai/results", null).body()).isEmpty();
+    }
     String submitSuspension(Scenario s) throws Exception {
         var reply = s.doctor().browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "虚构停诊理由"));
         assertThat(reply.status()).isEqualTo(201); return reply.body().path("id").asText();

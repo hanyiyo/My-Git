@@ -14,6 +14,7 @@ interface Recommendation {
   session: string
   serviceMode: string
 }
+interface DepartmentOption { id: string; name: string }
 interface TriageAnswer { mode: string; answer: string; departmentHint: string; imageReceived: boolean; sources: string[] }
 
 const open = ref(false)
@@ -61,7 +62,10 @@ async function analyzeSymptoms() {
     const form = new FormData(); form.append('question', question.value.trim())
     result.value = await upload<TriageAnswer>('/assistant/triage', form)
     if (result.value.departmentHint) {
-      const schedules = await api<Array<Recommendation & { advanceAvailable: boolean; walkInAvailable: boolean }>>('/catalog/schedules?departmentId=' + encodeURIComponent(result.value.departmentHint))
+      const departments = await api<DepartmentOption[]>('/catalog/departments')
+      const department = departments.find(item => item.id === result.value?.departmentHint || item.name === result.value?.departmentHint)
+      if (!department) return
+      const schedules = await api<Array<Recommendation & { advanceAvailable: boolean; walkInAvailable: boolean }>>('/catalog/schedules?departmentId=' + encodeURIComponent(department.id))
       recommendations.value = schedules.filter(item => item.advanceAvailable || item.walkInAvailable).slice(0, 5).map(item => ({ ...item, scheduleId: item.scheduleId || item.id || '' }))
     }
   } catch (failure) {
@@ -93,7 +97,7 @@ function recommendationPath(item: Recommendation) {
     </section>
     <section v-if="consentRequired" class="assistant-consent" aria-label="症状授权边界">
       <strong>提交症状前请确认授权范围</strong>
-      <p>本次只将你填写的症状文字用于辅助导诊，不生成诊断、处方或预约前病历。你可以拒绝授权，继续自行查询科室和挂号。</p>
+      <p>提供方：医院配置的 AI 导诊服务；用途：根据本次症状文字辅助推荐科室与排班；范围：仅本次症状文字。本次不生成诊断、处方或预约前病历。你可以拒绝授权，继续自行查询科室和挂号。</p>
       <label><input v-model="consentAccepted" type="checkbox"> 我已阅读并同意本次症状文字用于辅助导诊</label>
       <div class="assistant-consent-actions"><button type="button" :disabled="busy || !consentAccepted" @click="analyzeSymptoms">同意授权并获取建议</button><button type="button" class="secondary" @click="refuseConsent">拒绝授权，继续自行查询</button></div>
     </section>
