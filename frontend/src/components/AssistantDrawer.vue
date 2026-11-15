@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { api, upload } from '../api'
 
 interface BusinessAnswer { mode: string; answer: string; sources: string[] }
@@ -18,6 +18,8 @@ interface DepartmentOption { id: string; name: string }
 interface TriageAnswer { mode: string; answer: string; departmentHint: string; imageReceived: boolean; sources: string[] }
 
 const open = ref(false)
+const dialog = ref<HTMLDialogElement | null>(null)
+const trigger = ref<HTMLButtonElement | null>(null)
 const question = ref('')
 const answer = ref<BusinessAnswer | null>(null)
 const result = ref<TriageAnswer | null>(null)
@@ -37,9 +39,17 @@ function resetResult() {
   consentAccepted.value = false
   consentRefused.value = false
 }
-function close() {
+async function show() {
+  open.value = true
+  await nextTick()
+  dialog.value?.showModal()
+}
+async function close() {
+  dialog.value?.close()
   open.value = false
   resetResult()
+  await nextTick()
+  trigger.value?.focus()
 }
 async function ask() {
   busy.value = true; resetResult()
@@ -79,14 +89,14 @@ function recommendationPath(item: Recommendation) {
 </script>
 
 <template>
-  <button v-if="!open" class="assistant-fab" type="button" aria-label="打开导诊助手" @click="open = true">AI 导诊</button>
-  <aside v-else class="assistant-drawer" aria-label="导诊助手">
+  <button v-show="!open" ref="trigger" class="assistant-fab" type="button" aria-label="打开导诊助手" @click="show">AI 导诊</button>
+  <dialog v-if="open" ref="dialog" class="assistant-drawer" aria-label="导诊助手" @cancel.prevent="close">
     <button class="secondary" type="button" @click="close">关闭</button>
     <h2>导诊助手</h2>
     <p class="hint">可咨询医院流程和科室，也可描述症状获得辅助导诊；不提供诊断或处方。</p>
     <form @submit.prevent="ask">
       <label for="assistant-question">描述问题或症状</label>
-      <textarea id="assistant-question" v-model="question" maxlength="500" required placeholder="例如：医院地址在哪里？最近咳嗽挂什么科？"></textarea>
+      <textarea id="assistant-question" v-model="question" maxlength="500" required autofocus placeholder="例如：医院地址在哪里？最近咳嗽挂什么科？"></textarea>
       <button :disabled="busy">{{ busy ? '查询中…' : '获取辅助建议' }}</button>
     </form>
     <p v-if="error" role="alert" class="notice notice-error">{{ error }}</p>
@@ -101,18 +111,18 @@ function recommendationPath(item: Recommendation) {
       <label><input v-model="consentAccepted" type="checkbox"> 我已阅读并同意本次症状文字用于辅助导诊</label>
       <div class="assistant-consent-actions"><button type="button" :disabled="busy || !consentAccepted" @click="analyzeSymptoms">同意授权并获取建议</button><button type="button" class="secondary" @click="refuseConsent">拒绝授权，继续自行查询</button></div>
     </section>
-    <p v-if="consentRefused" class="notice">已拒绝本次授权，不影响你自行查询科室和挂号。<RouterLink to="/patient/catalog">查看真实科室与排班</RouterLink></p>
+    <p v-if="consentRefused" class="notice">已拒绝本次授权，不影响你自行查询科室和挂号。<RouterLink to="/patient/catalog" @click="close">查看真实科室与排班</RouterLink></p>
     <section v-if="result && !error" class="assistant-result" aria-label="AI辅助导诊结果">
       <h3>AI 辅助导诊结果</h3>
       <p>{{ result.answer }}</p>
       <p v-if="result.departmentHint"><strong>建议了解：</strong>{{ result.departmentHint }}</p>
       <div v-if="recommendations.length" class="assistant-recommendations">
         <h4>真实可用号源</h4>
-        <RouterLink v-for="item in recommendations" :key="item.scheduleId" :to="recommendationPath(item)" class="assistant-recommendation">
+        <RouterLink v-for="item in recommendations" :key="item.scheduleId" :to="recommendationPath(item)" class="assistant-recommendation" @click="close">
           <span><strong>{{ item.doctorName }}</strong><small>{{ item.departmentName }} · {{ item.clinicDate }} · {{ item.session === 'AM' ? '上午' : '下午' }} · {{ item.serviceMode === 'ONLINE' ? '线上' : '线下' }}</small></span><b aria-hidden="true">查看号源 →</b>
         </RouterLink>
       </div>
       <p v-else class="hint">暂无符合条件的有效号源，可以进入目录调整日期或服务方式。</p>
     </section>
-  </aside>
+  </dialog>
 </template>

@@ -20,7 +20,7 @@ function navigate(label: string) {
   if (label === '运营总览') return void router.push('/admin')
   if (label === '目录与排班' || label === '排班') return void router.push('/admin/catalog')
   if (label === '患者') return void router.push('/admin/accounts')
-  if (label === '号源') return void router.push('/prototype/admin-slots')
+  if (label === '号源') return void router.push(import.meta.env.DEV ? '/prototype/admin-slots' : '/admin/catalog')
   if (label === 'AI 配置' || label === '全局规则') return void router.push('/admin/settings')
   void router.push('/admin')
 }

@@ -15,14 +15,13 @@ import PatientClinicalView from './views/PatientClinicalView.vue'
 import DoctorClinicalView from './views/DoctorClinicalView.vue'
 import BusinessAssistantView from './views/BusinessAssistantView.vue'
 import PatientSubstitutionView from './views/PatientSubstitutionView.vue'
-import LoginRegisterPrototypeView from './views/LoginRegisterPrototypeView.vue'
 import AdminPharmacyView from './views/AdminPharmacyView.vue'
 import AdminAccountsView from './views/AdminAccountsView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
-  { path: '/prototype/auth', component: LoginRegisterPrototypeView },
   ...(import.meta.env.DEV ? [
+    { path: '/prototype/auth', component: () => import('./views/LoginRegisterPrototypeView.vue'), meta: { prototypeAuth: true } },
     { path: '/prototype/admin-home', component: () => import('./views/AdminHomePrototypeView.vue'), meta: { prototypeWorkspace: true } },
     { path: '/prototype/admin-orders', component: () => import('./views/AdminOrdersPrototypeView.vue'), meta: { prototypeWorkspace: true } },
     { path: '/prototype/admin-schedules', component: () => import('./views/AdminSchedulePrototypeView.vue'), meta: { prototypeWorkspace: true } },
@@ -62,7 +61,7 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   ,{ path: '/profile', component: HomeView, meta: { role: 'PATIENT' } }
 ] })
 router.beforeEach(async to => {
-  if (import.meta.env.DEV && (to.meta.prototypeWorkspace || to.path === '/prototype/auth')) return
+  if (import.meta.env.DEV && (to.meta.prototypeWorkspace || to.meta.prototypeAuth)) return
   const session = useSession(); await session.restore()
   if (to.meta.role && !session.account) return '/login'
   if (to.meta.role && !session.account?.roles.includes(String(to.meta.role))) return '/' + session.account!.roles[0]!.toLowerCase()

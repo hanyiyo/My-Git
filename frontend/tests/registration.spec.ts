@@ -40,6 +40,60 @@ async function fixture(page: Page) {
   return { requests, submissions, errors }
 }
 
+test('患者手机导航和导诊抽屉支持键盘打开、焦点约束及 Escape 返回入口', async ({ page }) => {
+  await fixture(page)
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto('/patient/catalog')
+  const menu = page.getByRole('button', { name: '展开导航' })
+  await menu.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('navigation', { name: '侧栏导航' })).toBeVisible()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeFocused()
+  await expect(menu).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('navigation', { name: '侧栏导航' })).toBeHidden()
+
+  for (const width of [375, 1280]) {
+    await page.setViewportSize({ width, height: 812 })
+    const trigger = page.getByRole('button', { name: '打开导诊助手' })
+    await trigger.focus()
+    await page.keyboard.press('Enter')
+    const drawer = page.getByRole('dialog', { name: '导诊助手', exact: true })
+    await expect(drawer.getByLabel('描述问题或症状')).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(drawer.getByRole('button', { name: '获取辅助建议' })).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(drawer.getByLabel('描述问题或症状')).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(drawer.getByRole('button', { name: '关闭', exact: true })).toBeFocused()
+    // Native modal dialogs keep the page behind them inert, including programmatic focus.
+    await page.locator('.registration-fab').focus()
+    await expect(drawer.getByRole('button', { name: '关闭', exact: true })).toBeFocused()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+    await page.keyboard.press('Escape')
+    await expect(drawer).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+    await trigger.click()
+    await drawer.getByRole('button', { name: '关闭', exact: true }).click()
+    await expect(trigger).toBeFocused()
+  }
+  await page.route('**/api/v1/assistant/business?*', route => route.fulfill({ json: {
+    mode: 'TRIAGE_ASSISTANCE', answer: '辅助建议不能替代医生', sources: [],
+  } }))
+  await page.getByRole('button', { name: '打开导诊助手' }).click()
+  const drawer = page.getByRole('dialog', { name: '导诊助手', exact: true })
+  await drawer.getByLabel('描述问题或症状').fill('咳嗽三天')
+  await drawer.getByRole('button', { name: '获取辅助建议' }).click()
+  await drawer.getByRole('button', { name: '拒绝授权，继续自行查询' }).click()
+  await drawer.getByRole('link', { name: '查看真实科室与排班' }).click()
+  await expect(drawer).toHaveCount(0)
+  await page.getByLabel('科室', { exact: true }).selectOption('internal')
+  await expect(page.getByLabel('医生', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: '线上问诊', exact: true }).click()
+  await expect(page.getByRole('list', { name: '号源列表' })).toContainText('许知遥')
+})
+
 test('默认筛选、日期快捷键、科室医生联动、URL前进后退和刷新恢复', async ({ page }) => {
   const state = await fixture(page)
   await page.goto('/patient/catalog')
