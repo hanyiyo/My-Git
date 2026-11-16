@@ -632,6 +632,25 @@ class BookingHttpTest extends HttpFixture {
         assertThat(patient.call("GET", "/api/v1/patient/appointments", null).body().get(0).path("reception").path("state").asText()).isEqualTo("COMPLETED");
     }
 
+    @Test void doctorCannotCallNextPatientWhileAnotherEncounterIsActive() throws Exception {
+        var schedule = published("ONLINE", "AM", 2);
+        var first = patient(); var second = patient();
+        var firstId = first.call("POST", "/api/v1/patient/appointments", command(schedule, identifier())).body().path("id").asText();
+        var secondId = second.call("POST", "/api/v1/patient/appointments", command(schedule, identifier())).body().path("id").asText();
+        assertThat(first.call("POST", "/api/v1/patient/appointments/" + firstId + "/simulate-payment", null).status()).isEqualTo(200);
+        assertThat(second.call("POST", "/api/v1/patient/appointments/" + secondId + "/simulate-payment", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt() - Duration.ofMinutes(29).toMillis());
+        assertThat(first.call("POST", "/api/v1/patient/appointments/" + firstId + "/check-in", null).status()).isEqualTo(200);
+        assertThat(second.call("POST", "/api/v1/patient/appointments/" + secondId + "/check-in", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(schedule.startsAt());
+        var doctor = new Browser(port);
+        assertThat(doctor.login(schedule.doctorIdentifier(), PASSWORD).status()).isEqualTo(200);
+        assertThat(doctor.call("POST", "/api/v1/doctor/reception/" + firstId + "/call", null).status()).isEqualTo(200);
+        var rejected = doctor.call("POST", "/api/v1/doctor/reception/" + secondId + "/call", null);
+        assertThat(rejected.status()).isEqualTo(409);
+        assertThat(rejected.body().path("error").path("code").asText()).isEqualTo("ACTIVE_ENCOUNTER");
+    }
+
     @Test void missedPatientCanRestoreQueueOnlyOnceToOriginalGroup() throws Exception {
         var schedule = published("ONLINE", "AM", 1); var patient = patient();
         var created = patient.call("POST", "/api/v1/patient/appointments", command(schedule, identifier()));

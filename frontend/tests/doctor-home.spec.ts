@@ -59,3 +59,30 @@ test('正式医生首页失败后可以重试且不显示演示数据', async ({
   await page.getByRole('button', { name: '重试加载' }).click()
   await expect(page.getByRole('heading', { name: '您好，林医生。' })).toBeVisible()
 })
+
+test('正式接诊工作台支持上下文筛选、只读预览和移动端操作', async ({ page }) => {
+  const name = await registerDoctor(page)
+  const entries = [
+    { appointmentId: 'appointment-a', scheduleId: 'schedule-a', doctorId: 'doctor-1', patientIdentifier: '患者甲', clinicDate: '2099-01-01', session: 'AM', serviceMode: 'ONLINE', source: 'ADVANCE', queueGroup: 1, queuedAt: 1, checkedInAt: 1, restorationCount: 0, state: 'WAITING' },
+    { appointmentId: 'appointment-b', scheduleId: 'schedule-a', doctorId: 'doctor-1', patientIdentifier: '患者乙', clinicDate: '2099-01-01', session: 'AM', serviceMode: 'OFFLINE', source: 'WALK_IN', queueGroup: 2, queuedAt: 2, checkedInAt: 2, restorationCount: 0, state: 'WAITING' },
+  ]
+  await page.route('**/api/v1/doctor/home', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(home) }))
+  await page.route('**/api/v1/doctor/reception**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(entries) }))
+  await page.route('**/api/v1/notifications/unread', route => route.fulfill({ status: 200, contentType: 'application/json', body: '0' }))
+  await page.route('**/api/v1/notifications?*', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/v1/notifications/stream', route => route.abort())
+  let writes = 0
+  page.on('request', request => { if (request.method() === 'POST' && request.url().includes('/doctor/reception/')) writes += 1 })
+  await login(page, name)
+  await page.getByRole('button', { name: '接诊工作台', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '候诊与接诊' })).toBeVisible()
+  await page.getByLabel('搜索患者或预约').fill('患者甲')
+  await expect(page.getByText('患者甲', { exact: true })).toBeVisible()
+  await expect(page.getByText('患者乙', { exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '查看患者', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '患者候诊预览' })).toContainText('患者甲')
+  expect(writes).toBe(0)
+  await page.getByRole('button', { name: '关闭患者候诊预览', exact: true }).click()
+  await page.setViewportSize({ width: 375, height: 812 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
+})

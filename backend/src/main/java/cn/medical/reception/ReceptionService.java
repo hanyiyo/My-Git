@@ -87,6 +87,9 @@ public class ReceptionService {
     @Transactional
     public ReceptionMapper.QueueEntry call(String doctor, String id) {
         var entry = requireDoctorQueue(doctor, id);
+        var active = reception.activeEncounter(doctor);
+        if (active != null && !active.appointmentId().equals(id))
+            throw new ApiFailure(409, "ACTIVE_ENCOUNTER", "请先完成当前接诊，再叫下一位患者");
         var appointment = reception.appointment(id);
         var next = reception.nextWaiting(entry.scheduleId());
         if (next == null || !next.appointmentId().equals(id)) throw new ApiFailure(409, "QUEUE_ORDER", "请先叫号当前候诊队列的下一位患者");
@@ -115,6 +118,9 @@ public class ReceptionService {
 
     private ReceptionMapper.QueueEntry transition(String doctor, String id, String action) {
         var entry = requireDoctorQueue(doctor, id);
+        var active = reception.activeEncounter(doctor);
+        if (active != null && !active.appointmentId().equals(id) && action.equals("start"))
+            throw new ApiFailure(409, "ACTIVE_ENCOUNTER", "请先完成当前接诊，再开始下一位患者");
         var appointment = reception.appointment(id);
         long now = clock.millis();
         if (action.equals("start") && entry.state().equals("IN_CONSULTATION")) return entry;
