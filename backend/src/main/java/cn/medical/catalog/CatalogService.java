@@ -18,7 +18,8 @@ public class CatalogService {
     public record DoctorView(String id, String displayName, String title, String biography, String credentialStatus, boolean enabled, String departmentId, String departmentName) {}
     public record ScheduleView(String id, String doctorId, String doctorName, String departmentId, String departmentName, LocalDate clinicDate,
         String session, String serviceMode, long startsAt, long endsAt, String zoneId, int capacity, long feeMinor, String state,
-        int availableSlots, boolean advanceAvailable, boolean walkInAvailable) {}
+        int availableSlots, int confirmedAppointments, int pendingHolds, int waitingPatients, int calledPatients,
+        int inConsultationPatients, int completedPatients, boolean advanceAvailable, boolean walkInAvailable) {}
     private final CatalogMapper catalog;
     private final IdentityService identity;
     private final Clock clock;
@@ -203,6 +204,7 @@ public class CatalogService {
             && schedule.state().equals("PUBLISHED") && schedule.availableSlots() > 0;
         return new ScheduleView(schedule.id(), schedule.doctorId(), doctor == null ? "" : doctor.displayName(), schedule.departmentId(), department == null ? "" : department.name(),
             schedule.clinicDate(), schedule.session(), schedule.serviceMode(), schedule.startsAt(), schedule.endsAt(), schedule.zoneId(), schedule.capacity(), schedule.feeMinor(), schedule.state(), schedule.availableSlots(),
+            schedule.confirmedAppointments(), schedule.pendingHolds(), schedule.waitingPatients(), schedule.calledPatients(), schedule.inConsultationPatients(), schedule.completedPatients(),
             valid && registrationOpen(schedule, "ADVANCE", now), valid && registrationOpen(schedule, "WALK_IN", now));
     }
     @Transactional

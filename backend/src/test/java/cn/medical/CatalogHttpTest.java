@@ -185,4 +185,29 @@ class CatalogHttpTest extends HttpFixture {
         assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + doctor.id() + "&date=" + today.plusDays(7), null).body().toString()).contains(excluded);
         assertThat(doctor.browser().call("GET", "/api/v1/doctor/catalog/schedules", null).body().toString()).contains(included, excluded);
     }
+
+    @Test void scheduleMetricsExposeConfirmedAndTemporaryOccupancyForDoctorWorkspace() throws Exception {
+        var admin = admin(); String department = department(admin); var doctor = doctor(admin, department, "CERTIFIED");
+        var date = LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(3);
+        var created = admin.call("POST", "/api/v1/admin/catalog/schedules", schedule(doctor.id(), department, date, "AM", "ONLINE", 3));
+        assertThat(created.status()).isEqualTo(201);
+        String scheduleId = created.body().path("id").asText();
+        var pendingPatient = new Browser(port); String pendingName = identifier(); pendingPatient.register(pendingName, "PATIENT"); pendingPatient.login(pendingName, PASSWORD);
+        var pending = pendingPatient.call("POST", "/api/v1/patient/appointments", Map.of("scheduleId", scheduleId, "source", "ADVANCE", "idempotencyKey", identifier()));
+        assertThat(pending.status()).isEqualTo(201);
+        var confirmedPatient = new Browser(port); String confirmedName = identifier(); confirmedPatient.register(confirmedName, "PATIENT"); confirmedPatient.login(confirmedName, PASSWORD);
+        var confirmed = confirmedPatient.call("POST", "/api/v1/patient/appointments", Map.of("scheduleId", scheduleId, "source", "ADVANCE", "idempotencyKey", identifier()));
+        assertThat(confirmed.status()).isEqualTo(201);
+        String paymentPath = "/api/v1/patient/appointments/" + confirmed.body().path("id").asText() + "/simulate-payment";
+        assertThat(confirmedPatient.call("POST", paymentPath, null).status()).isEqualTo(200);
+        var doctorSchedule = doctor.browser().call("GET", "/api/v1/doctor/catalog/schedules", null).body().get(0);
+        assertThat(doctorSchedule.path("id").asText()).isEqualTo(scheduleId);
+        assertThat(doctorSchedule.path("capacity").asInt()).isEqualTo(3);
+        assertThat(doctorSchedule.path("confirmedAppointments").asInt()).isEqualTo(1);
+        assertThat(doctorSchedule.path("pendingHolds").asInt()).isEqualTo(1);
+        assertThat(doctorSchedule.path("availableSlots").asInt()).isEqualTo(1);
+        assertThat(doctorSchedule.path("waitingPatients").asInt()).isZero();
+        assertThat(doctorSchedule.path("completedPatients").asInt()).isZero();
+        assertThat(doctor.browser().call("GET", "/api/v1/doctor/catalog/schedules", null).body().toString()).contains("confirmedAppointments", "pendingHolds", "inConsultationPatients");
+    }
 }
