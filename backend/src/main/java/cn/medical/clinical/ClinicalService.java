@@ -30,6 +30,8 @@ public class ClinicalService {
         List<ClinicalMapper.Message> messages, ClinicalMapper.Result result, List<ClinicalMapper.Correction> corrections,
         String serviceMode) {}
     public record DraftPrescription(String medicineId, int quantity, String usage) {}
+    public record StructuredResult(String chiefComplaint, String presentIllness, String historyAllergy,
+        String diagnosis, String treatmentPlan) {}
     public record DraftView(String appointmentId, int versionNo, String chiefComplaint, String presentIllness,
         String historyAllergy, String diagnosis, String treatmentPlan, List<DraftPrescription> prescriptions, Long savedAt) {}
     public record Download(ByteArrayResource resource, String mediaType, String originalName) {}
@@ -166,20 +168,36 @@ public class ClinicalService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ClinicalView submitResult(String doctor, String id, String body) {
-        return submitResult(doctor, id, body, List.of());
+        return submitResult(doctor, id, body, null, List.of());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ClinicalView submitResult(String doctor, String id, String body, List<PharmacyService.PrescriptionLineInput> prescriptions) {
+        return submitResult(doctor, id, body, null, prescriptions);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ClinicalView submitResult(String doctor, String id, String body, StructuredResult structured,
+        List<PharmacyService.PrescriptionLineInput> prescriptions) {
         booking.lockCareScope(id);
         var appointment = requireDoctor(doctor, id);
         var queue = reception.queueForAppointment(id);
         if (queue == null || !queue.state().equals("IN_CONSULTATION")) throw new ApiFailure(409, "ENCOUNTER_NOT_OPEN", "只有接诊中的预约可以提交结果");
-        if (body == null || body.isBlank() || body.length() > 20000) throw new ApiFailure(400, "INVALID_INPUT", "问诊结果不能为空且不能超过20000字");
+        if (body != null && body.length() > 20000) throw new ApiFailure(400, "INVALID_INPUT", "问诊结果不能超过20000字");
+        if (structured != null) validateStructuredResult(structured);
+        if (structured == null && (body == null || body.isBlank())) throw new ApiFailure(400, "INVALID_INPUT", "问诊结果不能为空且不能超过20000字");
         pharmacy.reservePrescription(doctor, id, prescriptions);
         long now = clock.millis(); ensureConsultation(id, now);
         String type = appointment.serviceMode().equals("ONLINE") ? "ONLINE_CHAT" : "OFFLINE_RESULT";
-        clinical.insertResult(new ClinicalMapper.Result(UUID.randomUUID().toString(), id, clinical.nextResultVersion(id) + 1, doctor, type, body.trim(), now));
+        String chiefComplaint = structured == null ? "" : trim(structured.chiefComplaint());
+        String presentIllness = structured == null ? "" : trim(structured.presentIllness());
+        String historyAllergy = structured == null ? "" : trim(structured.historyAllergy());
+        String diagnosis = structured == null ? "" : trim(structured.diagnosis());
+        String treatmentPlan = structured == null ? "" : trim(structured.treatmentPlan());
+        String storedBody = trim(body);
+        if (storedBody.isEmpty()) storedBody = treatmentPlan;
+        clinical.insertResult(new ClinicalMapper.Result(UUID.randomUUID().toString(), id, clinical.nextResultVersion(id) + 1, doctor, type,
+            storedBody, chiefComplaint, presentIllness, historyAllergy, diagnosis, treatmentPlan, now));
         clinical.markReplied(id); clinical.closeConsultation(id, now);
         reception.completeEncounter(doctor, id); booking.completeAfterEncounter(id);
         audit.record(doctor, "CLINICAL_RESULT_SUBMITTED", "APPOINTMENT", id, "提交结果并结束接诊");
@@ -225,7 +243,13 @@ public class ClinicalService {
             policy.limited(id, "MATERIAL", material.id()) ? List.of() : attachmentViews(material.id(), true))).toList();
         List<ClinicalMapper.Message> messages = appointment != null && appointment.serviceMode().equals("ONLINE") ? clinical.messages(id).stream().map(m -> new ClinicalMapper.Message(m.id(), m.appointmentId(), m.authorId(), m.authorRole(), policy.display(id,"MESSAGE",m.id(),m.body()),m.createdAt())).toList() : List.of();
         var result = clinical.latestResult(id);
-        if (result != null) result = new ClinicalMapper.Result(result.id(), id, result.versionNo(), result.authorId(), result.encounterType(), policy.display(id,"RESULT",result.id(),result.body()),result.createdAt());
+        if (result != null) result = new ClinicalMapper.Result(result.id(), id, result.versionNo(), result.authorId(), result.encounterType(),
+            policy.display(id,"RESULT",result.id(),result.body()),
+            policy.display(id,"RESULT",result.id(),result.chiefComplaint()),
+            policy.display(id,"RESULT",result.id(),result.presentIllness()),
+            policy.display(id,"RESULT",result.id(),result.historyAllergy()),
+            policy.display(id,"RESULT",result.id(),result.diagnosis()),
+            policy.display(id,"RESULT",result.id(),result.treatmentPlan()), result.createdAt());
         var corrections = clinical.corrections(id).stream().map(c -> new ClinicalMapper.Correction(c.id(),c.resultId(),id,c.authorId(),
             policy.limited(id,"CORRECTION",c.id()) || policy.limited(id,"RESULT",c.resultId()) ? ReviewPolicyService.LIMITED : c.reason(),
             policy.limited(id,"RESULT",c.resultId()) ? ReviewPolicyService.LIMITED : policy.display(id,"CORRECTION",c.id(),c.body()),c.createdAt())).toList();
@@ -243,7 +267,7 @@ public class ClinicalService {
         if (input.chiefComplaint() == null || input.presentIllness() == null || input.historyAllergy() == null
             || input.diagnosis() == null || input.treatmentPlan() == null)
             throw new ApiFailure(400, "INVALID_INPUT", "病历草稿字段不能为空");
-        for (String value : List.of(input.chiefComplaint(), input.presentIllness(), input.historyAllergy(), input.diagnosis(), input.treatmentPlan()))
+        for (String value : new String[] { input.chiefComplaint(), input.presentIllness(), input.historyAllergy(), input.diagnosis(), input.treatmentPlan() })
             if (value.length() > 4000) throw new ApiFailure(400, "INVALID_INPUT", "病历草稿字段不能超过4000字");
         if (input.prescriptions() == null || input.prescriptions().size() > 50) throw new ApiFailure(400, "INVALID_INPUT", "草稿最多保存50项药品");
         for (var line : input.prescriptions()) {
@@ -251,6 +275,17 @@ public class ClinicalService {
                 throw new ApiFailure(400, "INVALID_INPUT", "药品草稿字段无效");
         }
     }
+
+    private void validateStructuredResult(StructuredResult input) {
+        for (String value : new String[] { input.chiefComplaint(), input.presentIllness(), input.historyAllergy(), input.diagnosis(), input.treatmentPlan() })
+            if (value != null && value.length() > 4000) throw new ApiFailure(400, "INVALID_INPUT", "结构化病历字段不能超过4000字");
+        if (input.chiefComplaint() == null || input.chiefComplaint().isBlank()
+            || input.diagnosis() == null || input.diagnosis().isBlank()
+            || input.treatmentPlan() == null || input.treatmentPlan().isBlank())
+            throw new ApiFailure(400, "INVALID_INPUT", "主诉、诊断和处理建议不能为空");
+    }
+
+    private String trim(String value) { return value == null ? "" : value.trim(); }
 
     private String encodePrescriptions(List<DraftPrescription> prescriptions) {
         try { return json.writeValueAsString(prescriptions == null ? List.of() : prescriptions); }

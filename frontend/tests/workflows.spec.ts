@@ -45,6 +45,45 @@ test('患者与医生双向图文接诊、结束只读并追加更正', async ({
   }
 })
 
+test('医生提交结构化病历并让患者独立支付药费', async ({ browser }) => {
+  test.setTimeout(180000)
+  const admin = await agent(browser, 'ADMIN'), doctor = await agent(browser, 'DOCTOR'), patient = await agent(browser, 'PATIENT')
+  try {
+    const department = await call(admin, '/admin/catalog/departments', 'POST', { name: `结构化科室-${crypto.randomUUID().slice(0, 8)}`, description: '虚构结构化接诊', active: true })
+    await call(admin, `/admin/catalog/doctors/${doctor.id}`, 'PUT', { displayName: '虚构结构化医生', title: '主治医师', biography: '虚构资料', departmentId: department.id, credentialStatus: 'CERTIFIED' })
+    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'OFFLINE', capacity: 1, feeMinor: 1000 })
+    const medicine = await call(admin, '/admin/pharmacy/medicines', 'POST', { name: '浏览器结构化药', spec: '10片/盒', feeMinor: 900, stock: 2, threshold: 1, active: true })
+    const appointment = await call(patient, '/patient/appointments', 'POST', { scheduleId: schedule.id, source: 'ADVANCE', idempotencyKey: crypto.randomUUID() })
+    await call(patient, `/patient/appointments/${appointment.id}/simulate-payment`, 'POST')
+    await call(admin, '/admin/test-clock', 'POST', { millis: schedule.startsAt as number })
+    await call(patient, `/patient/appointments/${appointment.id}/check-in`, 'POST')
+    await call(doctor, `/doctor/reception/${appointment.id}/call`, 'POST')
+    await call(doctor, `/doctor/reception/${appointment.id}/start`, 'POST')
+    await doctor.page.goto(`/doctor/clinical/${appointment.id}`)
+    await doctor.page.getByLabel('主诉', { exact: true }).fill('浏览器咳嗽')
+    await doctor.page.getByLabel('现病史', { exact: true }).fill('三天')
+    await doctor.page.getByLabel('既往史/过敏史', { exact: true }).fill('无')
+    await doctor.page.getByLabel('诊断', { exact: true }).fill('上呼吸道感染')
+    await doctor.page.getByLabel('处理建议', { exact: true }).fill('口服并复诊')
+    await doctor.page.getByRole('button', { name: '添加药品输入' }).click()
+    await doctor.page.getByLabel('药品1', { exact: true }).selectOption(medicine.id as string)
+    await expect(doctor.page.getByLabel('药品1', { exact: true }).locator('option:checked')).toHaveText('浏览器结构化药 · 10片/盒 · 9.00 元')
+    await doctor.page.getByLabel('药品1数量').fill('1')
+    await doctor.page.getByLabel('药品1用法用量').fill('每日一次，每次一片')
+    await doctor.page.getByRole('button', { name: '提交病历并结束接诊' }).click()
+    await expect(doctor.page.getByText('已提交病历（只读）')).toBeVisible()
+    await expect(doctor.page.getByText('上呼吸道感染', { exact: true })).toBeVisible()
+    await patient.page.goto(`/patient/orders/${appointment.id}/clinical`)
+    await expect(patient.page.getByText('医生结果（只读）')).toBeVisible()
+    await expect(patient.page.getByText('模拟支付药费')).toBeVisible()
+    await patient.page.getByRole('button', { name: '模拟支付药费' }).click()
+    await expect(patient.page.getByText('药费订单：已支付')).toBeVisible()
+  } finally {
+    await call(admin, '/admin/test-clock', 'POST', {})
+    await Promise.all([admin.page.context().close(), doctor.page.context().close(), patient.page.context().close()])
+  }
+})
+
 test('患者先使用导诊，再选真实排班并独立挂号', async ({ browser }) => {
   test.setTimeout(180000)
   const admin = await agent(browser, 'ADMIN'), doctor = await agent(browser, 'DOCTOR'), patient = await agent(browser, 'PATIENT')

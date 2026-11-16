@@ -183,6 +183,73 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(foreign.call("GET", draftPath, null).status()).isEqualTo(404);
         assertThat(foreign.call("PUT", draftPath, body).status()).isEqualTo(404);
     }
+
+    @Test void structuredClinicalResultPersistsRequiredFieldsAndPharmacySnapshot() throws Exception {
+        var scenario = scenario("ONLINE"); start(scenario);
+        var medicine = admin().call("POST", "/api/v1/admin/pharmacy/medicines", Map.of(
+            "name", "结构化测试药", "spec", "10片/盒", "feeMinor", 1250, "stock", 3, "threshold", 1, "active", true));
+        assertThat(medicine.status()).isEqualTo(201);
+        String medicineId = medicine.body().path("id").asText();
+        var invalid = new HashMap<String, Object>();
+        invalid.put("body", ""); invalid.put("chiefComplaint", ""); invalid.put("presentIllness", "三天");
+        invalid.put("historyAllergy", "无"); invalid.put("diagnosis", ""); invalid.put("treatmentPlan", "");
+        invalid.put("prescriptions", List.of());
+        assertThat(scenario.doctor().browser().call("POST", doctorPath(scenario) + "/result", invalid).status()).isEqualTo(400);
+
+        var submitted = new HashMap<String, Object>();
+        submitted.put("body", "补充观察说明"); submitted.put("chiefComplaint", "持续咳嗽"); submitted.put("historyAllergy", "青霉素过敏");
+        submitted.put("diagnosis", "上呼吸道感染"); submitted.put("treatmentPlan", "口服并复诊");
+        submitted.put("prescriptions", List.of(Map.of("medicineId", medicineId, "quantity", 2, "usage", "每日两次，每次一片")));
+        var finished = scenario.doctor().browser().call("POST", doctorPath(scenario) + "/result", submitted);
+        assertThat(finished.status()).withFailMessage(finished.body().toString()).isEqualTo(200);
+        assertThat(finished.body().path("result").path("chiefComplaint").asText()).isEqualTo("持续咳嗽");
+        assertThat(finished.body().path("result").path("presentIllness").asText()).isEmpty();
+        assertThat(finished.body().path("result").path("diagnosis").asText()).isEqualTo("上呼吸道感染");
+        assertThat(finished.body().path("result").path("treatmentPlan").asText()).isEqualTo("口服并复诊");
+        var order = scenario.doctor().browser().call("GET", "/api/v1/doctor/pharmacy/appointments/" + scenario.appointmentId() + "/prescriptions", null);
+        assertThat(order.status()).withFailMessage(order.body().toString()).isEqualTo(200); assertThat(order.body().path("state").asText()).isEqualTo("PENDING_PAYMENT");
+        assertThat(order.body().path("totalMinor").asLong()).isEqualTo(2500);
+        assertThat(order.body().path("lines").get(0).path("usage").asText()).isEqualTo("每日两次，每次一片");
+        String orderId = order.body().path("id").asText();
+        var patientClinical = scenario.patient().browser().call("GET", patientPath(scenario) + "/clinical", null);
+        assertThat(patientClinical.body().path("result").path("historyAllergy").asText()).isEqualTo("青霉素过敏");
+        var paid = scenario.patient().browser().call("POST", "/api/v1/patient/pharmacy/orders/" + orderId + "/pay", null);
+        assertThat(paid.status()).isEqualTo(200); assertThat(paid.body().path("state").asText()).isEqualTo("PAID");
+        assertThat(scenario.patient().browser().call("GET", patientPath(scenario) + "/clinical", null).body().path("result").path("diagnosis").asText()).isEqualTo("上呼吸道感染");
+    }
+
+    @Test void expiredPharmacyPaymentReleasesStockWithoutRemovingClinicalResult() throws Exception {
+        var scenario = scenario("OFFLINE"); start(scenario);
+        var medicine = admin().call("POST", "/api/v1/admin/pharmacy/medicines", Map.of(
+            "name", "超时测试药", "spec", "5片/盒", "feeMinor", 800, "stock", 2, "threshold", 1, "active", true));
+        String medicineId = medicine.body().path("id").asText();
+        var submitted = Map.of("body", "观察说明", "chiefComplaint", "头痛", "presentIllness", "今天", "historyAllergy", "无",
+            "diagnosis", "偏头痛", "treatmentPlan", "休息", "prescriptions", List.of(Map.of("medicineId", medicineId, "quantity", 1, "usage", "必要时一次一片")));
+        assertThat(scenario.doctor().browser().call("POST", doctorPath(scenario) + "/result", submitted).status()).isEqualTo(200);
+        var orders = scenario.patient().browser().call("GET", "/api/v1/patient/pharmacy/orders", null).body();
+        var order = java.util.stream.StreamSupport.stream(orders.spliterator(), false)
+            .filter(value -> value.path("appointmentId").asText().equals(scenario.appointmentId())).findFirst().orElseThrow();
+        String orderId = order.path("id").asText();
+        long expiresAt = order.path("expiresAt").asLong();
+        clock.now = Instant.ofEpochMilli(expiresAt + 1);
+        var expired = scenario.patient().browser().call("POST", "/api/v1/patient/pharmacy/orders/" + orderId + "/pay", null);
+        assertThat(expired.status()).isEqualTo(409);
+        assertThat(scenario.patient().browser().call("GET", patientPath(scenario) + "/clinical", null).body().path("result").path("diagnosis").asText()).isEqualTo("偏头痛");
+        var medicines = admin().call("GET", "/api/v1/admin/pharmacy/medicines", null).body();
+        var restored = java.util.stream.StreamSupport.stream(medicines.spliterator(), false)
+            .filter(value -> value.path("id").asText().equals(medicineId)).findFirst().orElseThrow();
+        assertThat(restored.path("availableStock").asInt()).withFailMessage(restored.toString()).isEqualTo(2);
+    }
+    @Test void legacyPrescriptionPayloadWithoutUsageRemainsAccepted() throws Exception {
+        var scenario = scenario("OFFLINE"); start(scenario);
+        var medicine = admin().call("POST", "/api/v1/admin/pharmacy/medicines", Map.of(
+            "name", "兼容旧处方药", "spec", "6片/盒", "feeMinor", 600, "stock", 2, "threshold", 1, "active", true));
+        String medicineId = medicine.body().path("id").asText();
+        var response = scenario.doctor().browser().call("POST", "/api/v1/doctor/pharmacy/appointments/" + scenario.appointmentId() + "/prescriptions",
+            Map.of("lines", List.of(Map.of("medicineId", medicineId, "quantity", 1))));
+        assertThat(response.status()).withFailMessage(response.body().toString()).isEqualTo(200);
+        assertThat(response.body().path("lines").get(0).path("usage").asText()).isEqualTo("未指定");
+    }
     @Test void concurrentCompletionSerializesTheReadOnlyBoundary() throws Exception {
         var scenario = scenario("ONLINE"); start(scenario);
         var ready = new java.util.concurrent.CountDownLatch(2); var go = new java.util.concurrent.CountDownLatch(1);
@@ -591,7 +658,7 @@ class WorkflowHttpTest extends HttpFixture {
         String material = uploaded.path("materials").get(0).path("id").asText(), attachment = uploaded.path("materials").get(0).path("attachments").get(0).path("id").asText();
         start(s);
         assertThat(s.patient().browser().call("POST",patientPath(s)+"/clinical/messages",Map.of("body","受限消息原文")).status()).isEqualTo(200);
-        var completed = s.doctor().browser().call("POST",doctorPath(s)+"/result",Map.of("body","受限结果原文")).body();
+        var completed = s.doctor().browser().call("POST",doctorPath(s)+"/result",Map.of("body","受限结果原文", "chiefComplaint", "受限主诉字段", "presentIllness", "受限现病史字段", "historyAllergy", "受限既往史字段", "diagnosis", "受限诊断字段", "treatmentPlan", "受限处理建议字段")).body();
         var corrected = s.doctor().browser().call("POST",doctorPath(s)+"/corrections",Map.of("reason","受限更正理由","body","受限更正原文")).body();
         var reviewer = reviewer(); String review = review(reviewer,s,"ALL");
         assertThat(flag(reviewer,review,s,"MATERIAL",generated.path("materialId").asText(),"LIMITED").status()).isEqualTo(200);
@@ -605,7 +672,7 @@ class WorkflowHttpTest extends HttpFixture {
             assertThat(flag(reviewer,review,s,target[0],target[1],"LIMITED").status()).isEqualTo(200);
         for (Browser reader : List.of(s.patient().browser(),s.doctor().browser())) {
             String path = reader == s.patient().browser() ? patientPath(s)+"/clinical" : doctorPath(s);
-            assertThat(reader.call("GET",path,null).body().toString()).doesNotContain("另一份受限材料","受限消息原文","受限结果原文","受限更正原文","受限更正理由");
+            assertThat(reader.call("GET",path,null).body().toString()).doesNotContain("另一份受限材料","受限消息原文","受限结果原文","受限主诉字段","受限现病史字段","受限既往史字段","受限诊断字段","受限处理建议字段","受限更正原文","受限更正理由");
         }
         var originals = reviewer.browser().call("GET","/api/v1/admin/medical/reviews/"+review+"/content",null).body().toString();
         assertThat(originals).contains("另一份受限材料","受限消息原文","受限结果原文","受限更正原文");

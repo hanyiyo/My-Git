@@ -11,7 +11,8 @@ public interface ClinicalMapper {
     record Material(String id, String appointmentId, int versionNo, String symptomText, boolean shared, long createdAt) {}
     record Attachment(String id, String materialId, String appointmentId, String originalName, String mediaType, long sizeBytes, String storageKey, long createdAt) {}
     record Message(String id, String appointmentId, String authorId, String authorRole, String body, long createdAt) {}
-    record Result(String id, String appointmentId, int versionNo, String authorId, String encounterType, String body, long createdAt) {}
+    record Result(String id, String appointmentId, int versionNo, String authorId, String encounterType, String body,
+        String chiefComplaint, String presentIllness, String historyAllergy, String diagnosis, String treatmentPlan, long createdAt) {}
     record Correction(String id, String resultId, String appointmentId, String authorId, String reason, String body, long createdAt) {}
     record Draft(String appointmentId, String doctorId, int versionNo, String chiefComplaint, String presentIllness,
         String historyAllergy, String diagnosis, String treatmentPlan, String prescriptionsJson, long updatedAt) {}
@@ -46,13 +47,13 @@ public interface ClinicalMapper {
     void insertMessage(Message message);
     @Select("SELECT id, appointment_id, author_id, author_role, body, created_at FROM consultation_message WHERE appointment_id=#{id} ORDER BY created_at, id")
     List<Message> messages(@Param("id") String id);
-    @Select("SELECT id, appointment_id, version_no, author_id, encounter_type, body, created_at FROM clinical_result WHERE appointment_id=#{id} ORDER BY version_no DESC LIMIT 1")
+    @Select("SELECT id, appointment_id, version_no, author_id, encounter_type, body, chief_complaint, present_illness, history_allergy, diagnosis, treatment_plan, created_at FROM clinical_result WHERE appointment_id=#{id} ORDER BY version_no DESC LIMIT 1")
     Result latestResult(@Param("id") String id);
-    @Select("SELECT id, appointment_id, version_no, author_id, encounter_type, body, created_at FROM clinical_result WHERE appointment_id=#{id} ORDER BY version_no, id")
+    @Select("SELECT id, appointment_id, version_no, author_id, encounter_type, body, chief_complaint, present_illness, history_allergy, diagnosis, treatment_plan, created_at FROM clinical_result WHERE appointment_id=#{id} ORDER BY version_no, id")
     List<Result> results(@Param("id") String id);
     @Select("SELECT COALESCE(MAX(version_no), 0) FROM clinical_result WHERE appointment_id=#{id}")
     int nextResultVersion(@Param("id") String id);
-    @Insert("INSERT INTO clinical_result (id, appointment_id, version_no, author_id, encounter_type, body, created_at) VALUES (#{id}, #{appointmentId}, #{versionNo}, #{authorId}, #{encounterType}, #{body}, #{createdAt})")
+    @Insert("INSERT INTO clinical_result (id, appointment_id, version_no, author_id, encounter_type, body, chief_complaint, present_illness, history_allergy, diagnosis, treatment_plan, created_at) VALUES (#{id}, #{appointmentId}, #{versionNo}, #{authorId}, #{encounterType}, #{body}, #{chiefComplaint}, #{presentIllness}, #{historyAllergy}, #{diagnosis}, #{treatmentPlan}, #{createdAt})")
     void insertResult(Result result);
     @Insert("INSERT INTO clinical_correction (id, result_id, appointment_id, author_id, reason, body, created_at) VALUES (#{id}, #{resultId}, #{appointmentId}, #{authorId}, #{reason}, #{body}, #{createdAt})")
     void insertCorrection(Correction correction);

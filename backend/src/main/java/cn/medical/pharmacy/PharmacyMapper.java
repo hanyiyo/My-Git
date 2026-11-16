@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.*;
 public interface PharmacyMapper {
  record Medicine(String id,String name,String spec,long feeMinor,int stock,int threshold,boolean active,long createdAt,long updatedAt) {}
  record Order(String id,String appointmentId,String patientId,String doctorId,String state,long totalMinor,long expiresAt,int medicinePaymentHours,long createdAt,Long paidAt) {}
- record Line(long id,String orderId,String medicineId,String medicineName,String medicineSpec,long feeMinor,int quantity) {}
+ record Line(long id,String orderId,String medicineId,String medicineName,String medicineSpec,long feeMinor,int quantity,String usage) {}
  record Consumption(String id,String state,int quantity,long createdAt,Long paidAt) {}
  @Select("SELECT id,name,spec,fee_minor,stock,threshold,active,created_at,updated_at FROM pharmacy_medicine ORDER BY active DESC,name,id") List<Medicine> medicines();
  @Select("SELECT id,name,spec,fee_minor,stock,threshold,active,created_at,updated_at FROM pharmacy_medicine WHERE id=#{id}") Medicine medicine(String id);
@@ -20,8 +20,13 @@ public interface PharmacyMapper {
  @Select("SELECT id,appointment_id,patient_id,doctor_id,state,total_minor,expires_at,medicine_payment_hours,created_at,paid_at FROM pharmacy_order WHERE patient_id=#{patient} ORDER BY created_at DESC") List<Order> ordersForPatient(String patient);
  @Select("SELECT id,appointment_id,patient_id,doctor_id,state,total_minor,expires_at,medicine_payment_hours,created_at,paid_at FROM pharmacy_order WHERE state='PENDING_PAYMENT' AND expires_at<=#{now} ORDER BY expires_at,id LIMIT 100 FOR UPDATE") List<Order> dueOrders(long now);
  @Insert("INSERT INTO pharmacy_order(id,appointment_id,patient_id,doctor_id,state,total_minor,expires_at,medicine_payment_hours,created_at) VALUES(#{id},#{appointmentId},#{patientId},#{doctorId},'PENDING_PAYMENT',#{totalMinor},#{expiresAt},#{medicinePaymentHours},#{createdAt})") void insertOrder(Order o);
- @Insert("<script>INSERT INTO pharmacy_order_line(order_id,medicine_id,medicine_name,medicine_spec,fee_minor,quantity) VALUES <foreach collection='lines' item='l' separator=','>(#{l.orderId},#{l.medicineId},#{l.medicineName},#{l.medicineSpec},#{l.feeMinor},#{l.quantity})</foreach></script>") void insertLines(@Param("lines") List<Line> lines);
- @Select("SELECT id,order_id,medicine_id,medicine_name,medicine_spec,fee_minor,quantity FROM pharmacy_order_line WHERE order_id=#{orderId} ORDER BY id") List<Line> lines(String orderId);
+ @Insert("<script>INSERT INTO pharmacy_order_line(order_id,medicine_id,medicine_name,medicine_spec,fee_minor,quantity,usage_text) VALUES <foreach collection='lines' item='l' separator=','>(#{l.orderId},#{l.medicineId},#{l.medicineName},#{l.medicineSpec},#{l.feeMinor},#{l.quantity},#{l.usage})</foreach></script>") void insertLines(@Param("lines") List<Line> lines);
+ @Select("SELECT id,order_id,medicine_id,medicine_name,medicine_spec,fee_minor,quantity,usage_text FROM pharmacy_order_line WHERE order_id=#{orderId} ORDER BY id")
+ @ConstructorArgs({@Arg(column="id", javaType=long.class), @Arg(column="order_id", javaType=String.class),
+     @Arg(column="medicine_id", javaType=String.class), @Arg(column="medicine_name", javaType=String.class),
+     @Arg(column="medicine_spec", javaType=String.class), @Arg(column="fee_minor", javaType=long.class),
+     @Arg(column="quantity", javaType=int.class), @Arg(column="usage_text", javaType=String.class)})
+ List<Line> lines(String orderId);
  @Select("SELECT COALESCE(SUM(l.quantity),0) FROM pharmacy_order_line l JOIN pharmacy_order o ON o.id=l.order_id WHERE l.medicine_id=#{id} AND o.state='PENDING_PAYMENT'") int held(String id);
  @Select("SELECT COUNT(*) FROM pharmacy_order_line WHERE medicine_id=#{id}") int history(String id);
  @Select("SELECT DISTINCT o.id,o.appointment_id,o.patient_id,o.doctor_id,o.state,o.total_minor,o.expires_at,o.medicine_payment_hours,o.created_at,o.paid_at FROM pharmacy_order o JOIN pharmacy_order_line l ON l.order_id=o.id WHERE l.medicine_id=#{id} ORDER BY o.created_at DESC") List<Order> ordersForMedicine(String id);
