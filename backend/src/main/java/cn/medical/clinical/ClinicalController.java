@@ -18,6 +18,8 @@ public class ClinicalController {
     public record MessageInput(@NotBlank @Size(max=10000) String body) {}
     public record ResultInput(@NotBlank @Size(max=20000) String body, List<PharmacyService.PrescriptionLineInput> prescriptions) {}
     public record CorrectionInput(@NotBlank @Size(max=500) String reason, @NotBlank @Size(max=20000) String body) {}
+    public record DraftInput(@NotNull @Min(0) Integer version, String chiefComplaint, String presentIllness,
+        String historyAllergy, String diagnosis, String treatmentPlan, List<ClinicalService.DraftPrescription> prescriptions) {}
 
     @GetMapping("/patient/appointments/{id}/clinical")
     ClinicalService.ClinicalView patientView(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.patientView(auth.getName(), id); }
@@ -34,6 +36,13 @@ public class ClinicalController {
 
     @GetMapping("/doctor/clinical/{id}")
     ClinicalService.ClinicalView doctorView(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.doctorView(auth.getName(), id); }
+    @GetMapping("/doctor/clinical/{id}/draft")
+    ClinicalService.DraftView doctorDraft(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.draft(auth.getName(), id); }
+    @PutMapping("/doctor/clinical/{id}/draft")
+    ClinicalService.DraftView saveDoctorDraft(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody DraftInput input) {
+        return clinical.saveDraft(auth.getName(), id, new ClinicalService.DraftView(id, input.version(), input.chiefComplaint(), input.presentIllness(),
+            input.historyAllergy(), input.diagnosis(), input.treatmentPlan(), input.prescriptions(), null));
+    }
     @PostMapping("/doctor/clinical/{id}/messages")
     ClinicalService.ClinicalView doctorMessage(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody MessageInput input) { return clinical.message(auth.getName(), id, "DOCTOR", input.body()); }
     @PostMapping("/doctor/clinical/{id}/result")

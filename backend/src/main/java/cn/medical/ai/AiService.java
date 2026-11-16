@@ -197,6 +197,7 @@ public class AiService {
     @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public List<ResultView> doctorResults(String doctor, String id) {
         var view = clinical.doctorView(doctor, id);
+        if ("OFFLINE".equals(view.serviceMode())) return List.of();
         return appointmentResults(id, view);
     }
     @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
@@ -262,9 +263,10 @@ public class AiService {
             analysis.departmentHint(), imageReceived, List.of("configured-departments"));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ConversationSummary summarizeConversation(String doctor, String id) {
         var view = clinical.doctorView(doctor, id);
+        if ("OFFLINE".equals(view.serviceMode())) throw new ApiFailure(409, "OFFLINE_NO_CHAT", "线下面诊不提供医患图文摘要");
         if (view.materials().stream().noneMatch(ClinicalService.MaterialView::shared))
             throw new ApiFailure(403, "SHARING_REQUIRED", "患者尚未授权共享医疗材料");
         var text = view.messages().stream().map(message -> message.authorRole() + "：" + message.body()).reduce("", (a,b) -> a + "\n" + b);

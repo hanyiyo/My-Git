@@ -13,6 +13,8 @@ public interface ClinicalMapper {
     record Message(String id, String appointmentId, String authorId, String authorRole, String body, long createdAt) {}
     record Result(String id, String appointmentId, int versionNo, String authorId, String encounterType, String body, long createdAt) {}
     record Correction(String id, String resultId, String appointmentId, String authorId, String reason, String body, long createdAt) {}
+    record Draft(String appointmentId, String doctorId, int versionNo, String chiefComplaint, String presentIllness,
+        String historyAllergy, String diagnosis, String treatmentPlan, String prescriptionsJson, long updatedAt) {}
 
     @Select("SELECT id, patient_id, doctor_id, service_mode, state FROM appointment WHERE id=#{id}")
     Appointment appointment(@Param("id") String id);
@@ -56,4 +58,14 @@ public interface ClinicalMapper {
     void insertCorrection(Correction correction);
     @Select("SELECT id, result_id, appointment_id, author_id, reason, body, created_at FROM clinical_correction WHERE appointment_id=#{id} ORDER BY created_at, id")
     List<Correction> corrections(@Param("id") String id);
+    @Select("SELECT appointment_id, doctor_id, version_no, chief_complaint, present_illness, history_allergy, diagnosis, treatment_plan, prescriptions_json, updated_at FROM clinical_draft WHERE appointment_id=#{id} FOR UPDATE")
+    Draft lockDraft(@Param("id") String id);
+    @Insert("INSERT INTO clinical_draft (appointment_id, doctor_id, version_no, chief_complaint, present_illness, history_allergy, diagnosis, treatment_plan, prescriptions_json, updated_at) VALUES (#{appointmentId}, #{doctorId}, #{versionNo}, #{chiefComplaint}, #{presentIllness}, #{historyAllergy}, #{diagnosis}, #{treatmentPlan}, #{prescriptionsJson}, #{updatedAt})")
+    void insertDraft(Draft draft);
+    @Update("UPDATE clinical_draft SET version_no=#{versionNo}, chief_complaint=#{chiefComplaint}, present_illness=#{presentIllness}, history_allergy=#{historyAllergy}, diagnosis=#{diagnosis}, treatment_plan=#{treatmentPlan}, prescriptions_json=#{prescriptionsJson}, updated_at=#{updatedAt} WHERE appointment_id=#{appointmentId} AND version_no=#{expectedVersion}")
+    int updateDraft(@Param("appointmentId") String appointmentId, @Param("versionNo") int versionNo,
+        @Param("chiefComplaint") String chiefComplaint, @Param("presentIllness") String presentIllness,
+        @Param("historyAllergy") String historyAllergy, @Param("diagnosis") String diagnosis,
+        @Param("treatmentPlan") String treatmentPlan, @Param("prescriptionsJson") String prescriptionsJson,
+        @Param("updatedAt") long updatedAt, @Param("expectedVersion") int expectedVersion);
 }

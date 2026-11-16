@@ -134,9 +134,18 @@ class WorkflowHttpTest extends HttpFixture {
             assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "过早消息")).status()).isEqualTo(409);
             var consent = patient.call("POST", patientPath(scenario) + "/ai/consents", Map.of("accepted", true, "provider", "LOCAL_MOCK", "purpose", "PRECONSULTATION_SUMMARY", "scope", "SYMPTOM_TEXT", "symptomText", "结束后 AI 材料")).body();
             start(scenario);
-            assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "患者图文消息")).status()).isEqualTo(200);
-            assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "医生回复")).status()).isEqualTo(200);
-            assertThat(patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("messages")).hasSize(2);
+            if (mode.equals("ONLINE")) {
+                assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "患者图文消息")).status()).isEqualTo(200);
+                assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "医生回复")).status()).isEqualTo(200);
+                assertThat(patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("messages")).hasSize(2);
+            } else {
+                assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "患者图文消息")).status()).isEqualTo(409);
+                assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "医生回复")).status()).isEqualTo(409);
+                assertThat(doctor.call("GET", doctorPath(scenario), null).body().path("messages")).isEmpty();
+                assertThat(doctor.call("GET", doctorPath(scenario) + "/ai", null).body()).isEmpty();
+                var offlineSummary = doctor.call("POST", doctorPath(scenario) + "/ai/summarize", null);
+                assertThat(offlineSummary.status()).withFailMessage(offlineSummary.body().toString()).isEqualTo(409);
+            }
             assertThat(patient.call("POST", patientPath(scenario) + "/clinical/sharing/revoke", null).status()).isEqualTo(200);
             assertThat(download(doctor, "/api/v1/doctor/clinical/attachments/" + attachment).statusCode()).isEqualTo(403);
             assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "撤回后回复")).body().path("materials")).isEmpty();
@@ -158,6 +167,21 @@ class WorkflowHttpTest extends HttpFixture {
             assertThat(patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("result")).isEqualTo(result);
             clock.now = Instant.now();
         }
+    }
+    @Test void clinicalDraftsPersistByAppointmentAndRejectStaleVersions() throws Exception {
+        var scenario = scenario("ONLINE"); start(scenario); var doctor = scenario.doctor().browser();
+        var draftPath = doctorPath(scenario) + "/draft";
+        var initial = doctor.call("GET", draftPath, null);
+        assertThat(initial.status()).withFailMessage(initial.body().toString()).isEqualTo(200); assertThat(initial.body().path("versionNo").asInt()).isZero();
+        var body = Map.of("version", 0, "chiefComplaint", "持续咳嗽", "presentIllness", "三天", "historyAllergy", "无", "diagnosis", "", "treatmentPlan", "", "prescriptions", List.of(Map.of("medicineId", "demo-medicine", "quantity", 0, "usage", "")));
+        var saved = doctor.call("PUT", draftPath, body);
+        assertThat(saved.status()).isEqualTo(200); assertThat(saved.body().path("versionNo").asInt()).isEqualTo(1);
+        assertThat(doctor.call("GET", draftPath, null).body().path("chiefComplaint").asText()).isEqualTo("持续咳嗽");
+        var stale = doctor.call("PUT", draftPath, body);
+        assertThat(stale.status()).isEqualTo(409); assertThat(stale.body().path("error").path("code").asText()).isEqualTo("DRAFT_CONFLICT");
+        var foreign = actor("DOCTOR").browser();
+        assertThat(foreign.call("GET", draftPath, null).status()).isEqualTo(404);
+        assertThat(foreign.call("PUT", draftPath, body).status()).isEqualTo(404);
     }
     @Test void concurrentCompletionSerializesTheReadOnlyBoundary() throws Exception {
         var scenario = scenario("ONLINE"); start(scenario);
