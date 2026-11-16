@@ -478,6 +478,45 @@ class WorkflowHttpTest extends HttpFixture {
         var symptom = admin().call("GET", "/api/v1/assistant/business?question=" + java.net.URLEncoder.encode("我胸痛，医院地址在哪", StandardCharsets.UTF_8), null).body();
         assertThat(symptom.path("mode").asText()).isEqualTo("TRIAGE_ASSISTANCE"); assertThat(symptom.path("answer").asText()).contains("急救");
     }
+    @Test void doctorSummaryRequiresExactPatientScopeKeepsVersionsAndHonorsRevocation() throws Exception {
+        var s = scenario("ONLINE"); start(s);
+        var firstMessage = s.patient().browser().call("POST", patientPath(s) + "/clinical/messages", Map.of("body", "首条授权症状消息")).body();
+        var material = materials(s.patient().browser(), s.appointmentId(), true, "授权症状材料", PDF).body();
+        String firstMessageId = firstMessage.path("messages").get(0).path("id").asText();
+        String materialId = material.path("materials").get(0).path("id").asText();
+        var consent = s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents", Map.of(
+            "accepted", true, "provider", "LOCAL_MOCK", "purpose", "DOCTOR_SYMPTOM_SUMMARY", "scope", "EXACT_MESSAGES_AND_MATERIALS",
+            "messageIds", List.of(firstMessageId), "materialIds", List.of(materialId)));
+        assertThat(consent.status()).isEqualTo(200);
+        String firstConsent = consent.body().path("id").asText();
+        long firstConsentCreatedAt = consent.body().path("createdAt").asLong();
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body()).isEmpty();
+        assertThat(s.doctor().browser().call("POST", doctorPath(s) + "/ai/summarize", null).status()).isEqualTo(200);
+        var first = s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body();
+        assertThat(first).hasSize(1); assertThat(first.get(0).path("purpose").asText()).isEqualTo("DOCTOR_SYMPTOM_SUMMARY");
+        assertThat(first.get(0).path("analysis").path("summary").asText()).contains("首条授权症状消息");
+        var secondMessage = s.patient().browser().call("POST", patientPath(s) + "/clinical/messages", Map.of("body", "未授权新增症状消息")).body();
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body().toString()).doesNotContain("未授权新增症状消息");
+        String secondMessageId = secondMessage.path("messages").get(1).path("id").asText();
+        var expanded = s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents", Map.of(
+            "accepted", true, "provider", "LOCAL_MOCK", "purpose", "DOCTOR_SYMPTOM_SUMMARY", "scope", "EXACT_MESSAGES_AND_MATERIALS",
+            "messageIds", List.of(firstMessageId, secondMessageId), "materialIds", List.of(materialId)));
+        assertThat(expanded.status()).isEqualTo(200);
+        assertThat(expanded.body().path("createdAt").asLong()).isGreaterThan(firstConsentCreatedAt);
+        assertThat(s.doctor().browser().call("POST", doctorPath(s) + "/ai/summarize", null).status()).isEqualTo(200);
+        var second = s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body();
+        assertThat(second).hasSize(1); assertThat(second.get(0).path("versionNo").asInt()).isEqualTo(2);
+        String activeConsent = expanded.body().path("id").asText();
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents/" + activeConsent + "/revoke", null).status()).isEqualTo(204);
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents/" + firstConsent + "/revoke", null).status()).isEqualTo(204);
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body()).isEmpty();
+        var failedConsent = s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents", Map.of(
+            "accepted", true, "provider", "EXTERNAL_TEXT", "purpose", "DOCTOR_SYMPTOM_SUMMARY", "scope", "EXACT_MESSAGES_AND_MATERIALS",
+            "messageIds", List.of(firstMessageId, secondMessageId), "materialIds", List.of(materialId)));
+        assertThat(failedConsent.status()).isEqualTo(200);
+        assertThat(s.doctor().browser().call("POST", doctorPath(s) + "/ai/summarize", null).status()).isEqualTo(503);
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body().get(0).path("analysis").isNull()).isTrue();
+    }
     @Test void patientAssistantTriageUsesRealHttpBoundaryWithoutCreatingPreconsultationTask() throws Exception {
         var patient = actor("PATIENT").browser();
         String boundary = "Assistant" + UUID.randomUUID();

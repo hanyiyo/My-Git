@@ -1,0 +1,40 @@
+CREATE TABLE ai_summary_consent (
+    id VARCHAR(36) PRIMARY KEY,
+    appointment_id VARCHAR(36) NOT NULL,
+    patient_id VARCHAR(36) NOT NULL,
+    provider VARCHAR(40) NOT NULL,
+    purpose VARCHAR(60) NOT NULL,
+    scope VARCHAR(120) NOT NULL,
+    message_ids TEXT NOT NULL,
+    material_ids TEXT NOT NULL,
+    accepted BOOLEAN NOT NULL,
+    created_at BIGINT NOT NULL,
+    revoked_at BIGINT NULL,
+    FOREIGN KEY (appointment_id) REFERENCES appointment(id),
+    FOREIGN KEY (patient_id) REFERENCES account(id),
+    INDEX ai_summary_consent_appointment (appointment_id, created_at)
+);
+
+CREATE TABLE ai_doctor_summary (
+    id VARCHAR(36) PRIMARY KEY,
+    appointment_id VARCHAR(36) NOT NULL,
+    doctor_id VARCHAR(36) NOT NULL,
+    consent_id VARCHAR(36) NOT NULL,
+    version_no INT NOT NULL,
+    input_hash VARCHAR(64) NOT NULL,
+    provider VARCHAR(40) NOT NULL,
+    state VARCHAR(16) NOT NULL,
+    error_code VARCHAR(80) NULL,
+    body TEXT NULL,
+    message_count INT NOT NULL,
+    created_at BIGINT NOT NULL,
+    finished_at BIGINT NULL,
+    model_version VARCHAR(80) NOT NULL,
+    prompt_version VARCHAR(80) NOT NULL,
+    FOREIGN KEY (appointment_id) REFERENCES appointment(id),
+    FOREIGN KEY (doctor_id) REFERENCES account(id),
+    FOREIGN KEY (consent_id) REFERENCES ai_summary_consent(id),
+    UNIQUE (appointment_id, version_no),
+    CHECK (state IN ('SUCCEEDED', 'FAILED')),
+    INDEX ai_doctor_summary_appointment (appointment_id, created_at)
+);

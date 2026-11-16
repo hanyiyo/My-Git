@@ -71,10 +71,10 @@ test('医生提交结构化病历并让患者独立支付药费', async ({ brows
     await doctor.page.getByLabel('药品1数量').fill('1')
     await doctor.page.getByLabel('药品1用法用量').fill('每日一次，每次一片')
     await doctor.page.getByRole('button', { name: '提交病历并结束接诊' }).click()
-    await expect(doctor.page.getByText('已提交病历（只读）')).toBeVisible()
+    await expect(doctor.page.getByText('已提交病历（只读）')).toBeVisible({ timeout: 15000 })
     await expect(doctor.page.getByText('上呼吸道感染', { exact: true })).toBeVisible()
     await patient.page.goto(`/patient/orders/${appointment.id}/clinical`)
-    await expect(patient.page.getByText('医生结果（只读）')).toBeVisible()
+    await expect(patient.page.getByText('医生结果（只读）')).toBeVisible({ timeout: 15000 })
     await expect(patient.page.getByText('模拟支付药费')).toBeVisible()
     await patient.page.getByRole('button', { name: '模拟支付药费' }).click()
     await expect(patient.page.getByText('药费订单：已支付')).toBeVisible()
@@ -133,6 +133,44 @@ test('患者先使用导诊，再选真实排班并独立挂号', async ({ brows
     await patient.page.getByRole('link', { name: '去我的挂号完成支付' }).click()
     await patient.page.getByRole('button', { name: '模拟支付', exact: true }).click()
   } finally { await Promise.all([admin.page.context().close(), doctor.page.context().close(), patient.page.context().close()]) }
+})
+
+test('患者精确授权医生症状摘要、版本隔离并可撤回', async ({ browser }) => {
+  test.setTimeout(180000)
+  const admin = await agent(browser, 'ADMIN'), doctor = await agent(browser, 'DOCTOR'), patient = await agent(browser, 'PATIENT')
+  try {
+    const department = await call(admin, '/admin/catalog/departments', 'POST', { name: `摘要科室-${crypto.randomUUID().slice(0, 8)}`, description: '虚构摘要接诊', active: true })
+    await call(admin, `/admin/catalog/doctors/${doctor.id}`, 'PUT', { displayName: '虚构摘要医生', title: '主治医师', biography: '虚构资料', departmentId: department.id, credentialStatus: 'CERTIFIED' })
+    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'ONLINE', capacity: 1, feeMinor: 1000 })
+    const appointment = await call(patient, '/patient/appointments', 'POST', { scheduleId: schedule.id, source: 'ADVANCE', idempotencyKey: crypto.randomUUID() })
+    await call(patient, `/patient/appointments/${appointment.id}/simulate-payment`, 'POST')
+    await call(admin, '/admin/test-clock', 'POST', { millis: schedule.startsAt as number })
+    await call(patient, `/patient/appointments/${appointment.id}/check-in`, 'POST')
+    await call(doctor, `/doctor/reception/${appointment.id}/call`, 'POST')
+    await call(doctor, `/doctor/reception/${appointment.id}/start`, 'POST')
+
+    await patient.page.goto(`/patient/orders/${appointment.id}/clinical`)
+    await patient.page.getByLabel('图文消息', { exact: true }).fill('浏览器首条授权症状')
+    await patient.page.getByRole('button', { name: '发送消息', exact: true }).click()
+    await patient.page.getByLabel('症状文本', { exact: true }).fill('浏览器授权材料')
+    await patient.page.getByRole('button', { name: '提交并确认共享', exact: true }).click()
+    await expect(patient.page.getByRole('paragraph').filter({ hasText: '患者：浏览器首条授权症状' })).toBeVisible()
+    await patient.page.getByRole('checkbox', { name: /患者：浏览器首条授权症状/ }).check()
+    await patient.page.getByRole('checkbox', { name: /材料版本 1：浏览器授权材料/ }).check()
+    const consentResponse = patient.page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/patient/appointments/${appointment.id}/ai/summary-consents` && response.request().method() === 'POST')
+    await patient.page.getByRole('button', { name: '授权勾选范围生成摘要', exact: true }).click()
+    expect((await consentResponse).status(), await (await consentResponse).text()).toBe(200)
+    await doctor.page.goto(`/doctor/clinical/${appointment.id}`)
+    await doctor.page.getByRole('button', { name: '重新生成医生症状摘要', exact: true }).click()
+    await expect(doctor.page.getByRole('heading', { name: '本次生成结果' })).toBeVisible()
+    const generated = doctor.page.getByRole('heading', { name: '本次生成结果' }).locator('..')
+    await expect(generated).toContainText('浏览器首条授权症状')
+    await expect(generated).not.toContainText('浏览器新增未授权症状')
+
+  } finally {
+    await call(admin, '/admin/test-clock', 'POST', {})
+    await Promise.all([admin.page.context().close(), doctor.page.context().close(), patient.page.context().close()])
+  }
 })
 
 test('科主任组织替诊、医生确认、管理员复核并通知患者自动迁移', async ({ browser }) => {

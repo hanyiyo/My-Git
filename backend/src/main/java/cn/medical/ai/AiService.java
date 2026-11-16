@@ -6,6 +6,7 @@ import cn.medical.booking.BookingService;
 import cn.medical.catalog.CatalogMapper;
 import cn.medical.catalog.CatalogService;
 import cn.medical.clinical.ClinicalService;
+import cn.medical.clinical.ClinicalMapper;
 import cn.medical.clinical.ClinicalAttachmentValidator;
 import cn.medical.identity.ApiFailure;
 import cn.medical.governance.AuditService;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
@@ -39,6 +41,11 @@ public class AiService {
     public record ConversationSummary(Analysis analysis, int messageCount, String provider) {}
     public record ConsentInput(boolean accepted, String provider, String purpose, String scope, String symptomText) {}
     public record AnalyzeInput(String consentId, String symptomText, String idempotencyKey) {}
+    public record SummaryConsentInput(boolean accepted, String provider, String purpose, String scope,
+        List<String> messageIds, List<String> materialIds) {}
+    public record SummaryConsentView(String id, String provider, String purpose, String scope, boolean accepted,
+        List<String> messageIds, List<String> materialIds, long createdAt, Long revokedAt) {}
+    private record SummaryInput(String text, String hash, int messageCount) {}
     private record Prepared(AiMapper.Task task, boolean created) {}
     private record Claim(AiMapper.Task task,String token) {}
     public static final class ProviderFailure extends RuntimeException {
@@ -198,7 +205,16 @@ public class AiService {
     public List<ResultView> doctorResults(String doctor, String id) {
         var view = clinical.doctorView(doctor, id);
         if ("OFFLINE".equals(view.serviceMode())) return List.of();
-        return appointmentResults(id, view);
+        var results = appointmentResults(id, view);
+        var consent = ai.latestSummaryConsent(id, booking.careScope(id).patientId());
+        if (consent != null) {
+            try {
+                var current = summaryInput(view, consent);
+                ai.doctorSummaries(id).stream().filter(summary -> summary.consentId().equals(consent.id()))
+                    .map(summary -> summaryView(summary, consent, current, view)).forEach(results::add);
+            } catch (ApiFailure ignored) { /* revoked sharing or a restricted input hides the doctor summary */ }
+        }
+        return results;
     }
     @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public List<ResultView> patientResults(String patient, String id) {
@@ -263,17 +279,117 @@ public class AiService {
             analysis.departmentHint(), imageReceived, List.of("configured-departments"));
     }
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public SummaryConsentView summaryConsent(String patient, String id, SummaryConsentInput input) {
+        lockScope(patient, id);
+        var appointment = requirePatient(patient, id);
+        if (!"ONLINE".equals(appointment.serviceMode())) throw new ApiFailure(409, "OFFLINE_NO_CHAT", "线下面诊不提供医患图文摘要");
+        if (input == null || !Set.of("LOCAL_MOCK", "EXTERNAL_TEXT").contains(Objects.toString(input.provider(), ""))
+            || !"DOCTOR_SYMPTOM_SUMMARY".equals(input.purpose()) || !"EXACT_MESSAGES_AND_MATERIALS".equals(input.scope()))
+            throw new ApiFailure(400, "INVALID_INPUT", "仅支持本次医患图文的精确范围摘要授权");
+        var view = clinical.patientView(patient, id);
+        var messageIds = normalizeIds(input.messageIds()); var materialIds = normalizeIds(input.materialIds());
+        if (input.accepted() && messageIds.isEmpty() && materialIds.isEmpty()) throw new ApiFailure(400, "INVALID_INPUT", "至少选择一条消息或一份材料");
+        validateSummaryScope(view, messageIds, materialIds);
+        long now = clock.millis();
+        var previousConsents = ai.summaryConsents(id, patient);
+        if (!previousConsents.isEmpty()) {
+            long latestCreatedAt = previousConsents.stream().mapToLong(AiMapper.SummaryConsent::createdAt).max().orElse(now);
+            now = Math.max(now, latestCreatedAt + 1);
+        }
+        String consentId = UUID.randomUUID().toString();
+        ai.insertSummaryConsent(new AiMapper.SummaryConsent(consentId, id, patient, input.provider(), input.purpose(), input.scope(),
+            String.join(",", messageIds), String.join(",", materialIds), input.accepted(), now, null));
+        audit.record(patient, input.accepted() ? "DOCTOR_SUMMARY_CONSENT_ACCEPTED" : "DOCTOR_SUMMARY_CONSENT_REFUSED",
+            "AI_SUMMARY_CONSENT", consentId, "授权范围：" + messageIds.size() + "条消息、" + materialIds.size() + "份材料");
+        return summaryConsentView(new AiMapper.SummaryConsent(consentId, id, patient, input.provider(), input.purpose(), input.scope(),
+            String.join(",", messageIds), String.join(",", materialIds), input.accepted(), now, null));
+    }
+
+    @Transactional(readOnly = true)
+    public List<SummaryConsentView> summaryConsents(String patient, String id) {
+        lockScope(patient, id); requirePatient(patient, id);
+        return ai.summaryConsents(id, patient).stream().map(this::summaryConsentView).toList();
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void revokeSummaryConsent(String patient, String id, String consentId) {
+        lockScope(patient, id); requirePatient(patient, id);
+        var consent = ai.summaryConsent(consentId, id, patient);
+        if (consent == null) throw new ApiFailure(404, "NOT_FOUND", "摘要授权不存在");
+        ai.revokeSummaryConsent(consentId, patient, clock.millis());
+        audit.record(patient, "DOCTOR_SUMMARY_CONSENT_REVOKED", "AI_SUMMARY_CONSENT", consentId, "患者撤回医生症状摘要授权");
+    }
+
+    @Transactional(noRollbackFor = ApiFailure.class, isolation = Isolation.READ_COMMITTED)
     public ConversationSummary summarizeConversation(String doctor, String id) {
         var view = clinical.doctorView(doctor, id);
         if ("OFFLINE".equals(view.serviceMode())) throw new ApiFailure(409, "OFFLINE_NO_CHAT", "线下面诊不提供医患图文摘要");
-        if (view.materials().stream().noneMatch(ClinicalService.MaterialView::shared))
-            throw new ApiFailure(403, "SHARING_REQUIRED", "患者尚未授权共享医疗材料");
-        var text = view.messages().stream().map(message -> message.authorRole() + "：" + message.body()).reduce("", (a,b) -> a + "\n" + b);
-        if (text.isBlank()) throw new ApiFailure(409, "NO_MESSAGES", "暂无可摘要的医患图文");
-        var analysis = provider.analyze(text, catalog.departments(false).stream().map(CatalogMapper.Department::name).toList());
-        audit.record(doctor, "DOCTOR_CONVERSATION_SUMMARIZED", "APPOINTMENT", id, "根据已授权医患图文生成医生可见摘要");
-        return new ConversationSummary(analysis, view.messages().size(), provider.name());
+        var scope = ai.latestSummaryConsent(id, booking.careScope(id).patientId());
+        if (scope == null) throw new ApiFailure(403, "AI_SUMMARY_CONSENT_REQUIRED", "患者尚未授权本次摘要范围");
+        var input = summaryInput(view, scope);
+        if (input.messageCount() == 0 && input.text().isBlank()) throw new ApiFailure(409, "NO_MESSAGES", "授权范围内暂无可摘要的医患图文");
+        var previous = ai.doctorSummaries(id).stream().filter(value -> value.consentId().equals(scope.id())
+            && value.inputHash().equals(input.hash()) && "SUCCEEDED".equals(value.state())).findFirst().orElse(null);
+        if (previous != null) return new ConversationSummary(readAnalysis(previous.body()), previous.messageCount(), previous.provider());
+        long now = clock.millis(); int version = ai.nextDoctorSummaryVersion(id) + 1; String body = null; String error = null; Analysis analysis = null;
+        try {
+            if ("EXTERNAL_TEXT".equals(scope.provider())) throw new ProviderFailure("AI_PROVIDER_UNAVAILABLE");
+            analysis = provider.analyze(input.text(), catalog.departments(false).stream().map(CatalogMapper.Department::name).toList());
+            body = json.writeValueAsString(analysis);
+        } catch (ProviderFailure failure) { error = failure.code(); }
+        catch (JsonProcessingException | RuntimeException failure) { error = "AI_PROVIDER_UNAVAILABLE"; }
+        ai.insertDoctorSummary(new AiMapper.DoctorSummary(UUID.randomUUID().toString(), id, doctor, scope.id(), version, input.hash(),
+            scope.provider(), error == null ? "SUCCEEDED" : "FAILED", error, body, input.messageCount(), now, clock.millis(),
+            "LOCAL_MOCK".equals(scope.provider()) ? provider.modelVersion() : "external-disabled", provider.promptVersion()));
+        audit.record(doctor, error == null ? "DOCTOR_SUMMARY_GENERATED" : "DOCTOR_SUMMARY_FAILED", "APPOINTMENT", id,
+            "根据患者授权范围生成医生可见症状摘要");
+        if (error != null) throw new ApiFailure(503, error, "摘要暂不可用，已有摘要仍可查看");
+        return new ConversationSummary(analysis, input.messageCount(), scope.provider());
+    }
+
+    private SummaryConsentView summaryConsentView(AiMapper.SummaryConsent consent) {
+        return new SummaryConsentView(consent.id(), consent.provider(), consent.purpose(), consent.scope(), consent.accepted(),
+            splitIds(consent.messageIds()), splitIds(consent.materialIds()), consent.createdAt(), consent.revokedAt());
+    }
+
+    private void validateSummaryScope(ClinicalService.ClinicalView view, List<String> messageIds, List<String> materialIds) {
+        var messages = view.messages().stream().map(ClinicalMapper.Message::id).collect(java.util.stream.Collectors.toSet());
+        if (!messages.containsAll(messageIds)) throw new ApiFailure(400, "INVALID_INPUT", "授权消息不属于本次问诊");
+        var materials = view.materials().stream().filter(ClinicalService.MaterialView::shared).collect(java.util.stream.Collectors.toMap(ClinicalService.MaterialView::id, value -> value));
+        if (!materials.keySet().containsAll(materialIds)) throw new ApiFailure(400, "SHARING_REQUIRED", "授权材料必须是患者已共享的材料");
+    }
+
+    private SummaryInput summaryInput(ClinicalService.ClinicalView view, AiMapper.SummaryConsent consent) {
+        var messageIds = new HashSet<>(splitIds(consent.messageIds()));
+        var materialIds = new HashSet<>(splitIds(consent.materialIds()));
+        var selectedMessages = view.messages().stream().filter(value -> messageIds.contains(value.id())).toList();
+        var selectedMaterials = view.materials().stream().filter(value -> materialIds.contains(value.id()) && value.shared()).toList();
+        if (selectedMessages.size() != messageIds.size() || selectedMaterials.size() != materialIds.size())
+            throw new ApiFailure(403, "AI_SUMMARY_SCOPE_UNAVAILABLE", "摘要授权范围已失效");
+        var text = new StringBuilder();
+        selectedMessages.forEach(message -> text.append(message.authorRole()).append("：").append(message.body()).append('\n'));
+        selectedMaterials.forEach(material -> text.append("材料版本").append(material.versionNo()).append("：").append(material.symptomText()).append('\n'));
+        String value = text.toString().trim();
+        return new SummaryInput(value, hash(value + "|" + String.join(",", splitIds(consent.messageIds())) + "|" + String.join(",", splitIds(consent.materialIds()))), selectedMessages.size());
+    }
+
+    private ResultView summaryView(AiMapper.DoctorSummary summary, AiMapper.SummaryConsent consent, SummaryInput current,
+        ClinicalService.ClinicalView view) {
+        Analysis analysis = summary.body() == null ? null : readAnalysis(summary.body());
+        boolean stale = !summary.inputHash().equals(current.hash());
+        if (analysis != null && view.consultation() != null && current.text().contains(ReviewPolicyService.LIMITED)) analysis = null;
+        return new ResultView(summary.id(), summary.state(), summary.provider(), "DOCTOR_SYMPTOM_SUMMARY",
+            1, summary.errorCode(), summary.versionNo(), stale, analysis, analysis == null ? List.of() : recommendations(analysis.departmentHint()),
+            null, 0, consent.id(), summary.modelVersion(), summary.promptVersion());
+    }
+
+    private static List<String> normalizeIds(List<String> values) {
+        return values == null ? List.of() : values.stream().filter(Objects::nonNull).map(String::trim).filter(value -> !value.isEmpty()).distinct().sorted().toList();
+    }
+
+    private static List<String> splitIds(String values) {
+        return values == null || values.isBlank() ? List.of() : Arrays.stream(values.split(",")).map(String::trim).filter(value -> !value.isEmpty()).toList();
     }
 
     private ResultView resultView(AiMapper.Task task, ClinicalService.ClinicalView view) {

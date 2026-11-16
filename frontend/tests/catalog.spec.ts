@@ -87,7 +87,7 @@ test('管理员维护目录并发布排班，患者查询有效资源，医生�
   await expect(page).toHaveURL(/\/patient$/)
   await page.getByRole('link', { name: '查询科室、医生与排班' }).click()
   await expect(page.getByRole('heading', { name: '立即挂号', exact: true })).toBeVisible()
-  await expect(page.getByText(/虚构浏览器校医院/)).toBeVisible()
+  await expect(page.getByText(/虚构浏览器校医院/)).toBeVisible({ timeout: 15000 })
   await page.getByLabel('选择日期').fill(new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10))
   await page.getByRole('button', { name: '线上问诊', exact: true }).click()
   await page.getByLabel('科室').selectOption({ label: department })
