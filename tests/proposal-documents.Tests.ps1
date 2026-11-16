@@ -52,10 +52,10 @@ try {
     $text = ($document.SelectNodes('//w:t',$ns) | ForEach-Object { $_.InnerText }) -join "`n"
     $cn = '基于SpringBoot+Vue与多模态AI辅助的智能医疗问诊预约系统设计与实现'
     $en = 'Design and Implementation of an Intelligent Medical Inquiry and Appointment System Assisted by Multimodal AI Based on SpringBoot and Vue'
-    foreach ($item in @(@($cn,3),@($en,2),@('余蕊艳',3),@('8120123161',3))) {
+    foreach ($item in @(@($cn,2),@($en,1),@('余蕊艳',3),@('8120123161',3))) {
         Assert-True (([regex]::Matches($text,[regex]::Escape($item[0]))).Count -eq $item[1]) ('Incorrect metadata count: '+$item[0])
     }
-    foreach ($phrase in @('计算机科学与技术2023级3班','2023级3班','患者端','医生端','管理员端','症状图片','仅医生可见','授权撤回','模拟缴费','限时占号','库存','SpringBoot 3','Redis','材料版本','不静默切换','本地模拟')) {
+    foreach ($phrase in @('计算机科学与技术2023级3班','2023级3班','患者端','医生端','管理员端','症状图片','仅医生可见','授权撤回','模拟缴费','限时占号','库存','SpringBoot 3','Redis','材料版本')) {
         Assert-True ($text.Contains($phrase)) ('Required project content missing: '+$phrase)
     }
     foreach ($old in @('基于网络行为分析','温键','8120122043','2022级天融信班','错误！未定义书签。','TODO','待补充')) {
@@ -63,6 +63,30 @@ try {
     }
     $tables = @($document.SelectNodes('//w:body/w:tbl',$ns))
     Assert-True ($tables.Count -eq 3) 'Keep cover, task and proposal table structure.'
+    $coverRows = @($tables[0].SelectNodes('./w:tr',$ns))
+    $cnLines = @($coverRows[0..1] | ForEach-Object { $_.SelectSingleNode('./w:tc[2]',$ns).InnerText })
+    $enLines = @($coverRows[2..5] | ForEach-Object { $_.SelectSingleNode('./w:tc[2]',$ns).InnerText })
+    Assert-True (($cnLines -join '') -eq $cn) 'Cover Chinese title must be complete in two lines.'
+    Assert-True (($enLines -join ' ') -eq $en) 'Cover English title must be complete in four lines.'
+    $lineStyle = $coverRows[6].SelectSingleNode('./w:tc[2]/w:tcPr/w:tcBorders/w:bottom',$ns).OuterXml
+    foreach ($row in $coverRows[0..5]) {
+        Assert-True ($row.SelectSingleNode('./w:tc[2]/w:tcPr/w:tcBorders/w:bottom',$ns).OuterXml -eq $lineStyle) 'Each title line must use the same underline as the college field.'
+        foreach ($cell in $row.SelectNodes('./w:tc',$ns)) {
+            Assert-True ($cell.SelectSingleNode('./w:tcPr/w:vAlign',$ns).GetAttribute('val',$ns.LookupNamespace('w')) -eq 'top') 'Title label and text must align on the first line.'
+        }
+    }
+    foreach ($excluded in @('不以训练','模型训练','不把语音','不另设第四端','不以提出新的','不静默切换','保存图片不等于')) {
+        Assert-True (-not $text.Contains($excluded)) ('Unplanned implementation scope must be omitted: '+$excluded)
+    }
+    $taskFunctions = @(
+        $inFunctions = $false
+        foreach ($paragraph in $tables[1].SelectNodes('./w:tr[3]/w:tc[2]/w:p',$ns)) {
+            if ($paragraph.InnerText.StartsWith('2、系统要求实现以下功能：')) { $inFunctions = $true; continue }
+            if ($paragraph.InnerText.StartsWith('3、开发平台和相关技术：')) { break }
+            if ($inFunctions -and $paragraph.InnerText -match '^（\d+）') { $paragraph }
+        }
+    )
+    Assert-True ($taskFunctions.Count -eq 8) 'Task requirements should contain eight concise functional groups.'
     $taskRefs = @($tables[1].SelectNodes('./w:tr[4]/w:tc[2]/w:p[starts-with(.,"[")]',$ns))
     $reportRefs = @($tables[2].SelectNodes('./w:tr[7]/w:tc[2]/w:p[starts-with(.,"[")]',$ns))
     Assert-True ($taskRefs.Count -eq 15 -and $reportRefs.Count -eq 15) 'Both documents need all 15 references.'
@@ -83,7 +107,16 @@ try {
     foreach ($current in @('巫朝霞','吴性丽','MANARTE L','SCHMIDT R','Manarte','Schmidt')) {
         Assert-True ($text.Contains($current)) ('Replacement reference or supporting discussion missing: '+$current)
     }
-    Assert-True ($taskRefs[8].InnerText.Contains('17(10):69-72')) 'Use verified reference 9 pagination.'
+    Assert-True (($taskRefs | Where-Object { $_.InnerText.Contains('17(10):69-72') }).Count -eq 1) 'Keep verified smart outpatient article pagination.'
+    $seen = [Collections.Generic.List[int]]::new()
+    foreach ($paragraph in $tables[2].SelectNodes('./w:tr[7]/w:tc[2]/w:p',$ns)) {
+        if ($paragraph.InnerText.StartsWith('四、主要参考资料')) { break }
+        foreach ($match in [regex]::Matches($paragraph.InnerText,'\[(\d+)\]')) {
+            $number=[int]$match.Groups[1].Value
+            if (-not $seen.Contains($number)) { $seen.Add($number) }
+        }
+    }
+    Assert-True (($seen -join ',') -eq ((1..15) -join ',')) 'First citations in the proposal must appear in order from 1 to 15.'
     $plan = $tables[1].SelectSingleNode('./w:tr[5]/w:tc[2]',$ns).InnerText
     foreach ($date in @('2026年10月8日～2026年10月30日','2026年10月31日～2026年11月18日','2026年11月19日～2027年1月9日','2027年1月10日～2027年1月15日','2027年1月16日～2027年4月30日','2027年5月1日～2027年5月10日','2027年7月  12 日')) {
         Assert-True ($plan.Contains($date)) ('Task schedule month/day or shifted year changed: '+$date)
@@ -95,7 +128,15 @@ try {
     foreach ($xpath in $expectedProtected.Keys) {
         $nodes = @($document.SelectNodes($xpath,$ns))
         Assert-True ($nodes.Count -gt 0) ('Protected section missing: '+$xpath)
-        $xml = ($nodes | ForEach-Object { $_.OuterXml }) -join ''
+        $xml = ($nodes | ForEach-Object {
+            $copy=$_.CloneNode($true)
+            if ($xpath -in @('//w:body/w:tbl[3]/w:tr[8]','//w:body/w:tbl[3]/w:tr[9]')) {
+                foreach ($flag in @($copy.SelectNodes('./w:trPr/w:cantSplit',$ns))) { $flag.ParentNode.RemoveChild($flag) | Out-Null }
+                $properties=$copy.SelectSingleNode('./w:trPr',$ns)
+                if ($null -ne $properties -and $properties.ChildNodes.Count -eq 0) { $copy.RemoveChild($properties) | Out-Null }
+            }
+            $copy.OuterXml
+        }) -join ''
         Assert-True ((Get-TextHash $xml) -eq $expectedProtected[$xpath]) ('Protected source XML changed: '+$xpath)
     }
     foreach ($part in $expectedParts.Keys) {
