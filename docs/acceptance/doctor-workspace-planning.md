@@ -34,4 +34,3 @@
 - 原工作区失败日志：`$env:TEMP/medical-doctor-plan-verify.log`；隔离验证完整日志：`$env:TEMP/medical-doctor-plan-isolated-verify.log`。浏览器JSON和逐项进度保存在原工作区 `.runtime/doctor-plan-verified-results.json` 和 `.runtime/doctor-plan-verified-progress.log`；本地诊断产物不纳入Git。
 - 最终验收文字更新后，再次运行隔离副本全部文档检查与差异检查，并按文件哈希核对提交内容和验证副本一致。
 - 既有SSE关闭异常和测试JVM退出清理提示仍在日志中；测试与门禁退出成功，本次不处理该运行时问题。
-

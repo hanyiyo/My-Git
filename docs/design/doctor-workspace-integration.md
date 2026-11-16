@@ -131,4 +131,3 @@
 ## Further Notes
 
 开发原型继续独立保留，正式构建不携带原型路由、演示身份或业务存储键。LOCAL_MOCK是显式的提供方模式，和隔离开发原型是不同要求。D1 的验收记录见 [doctor-workspace-d1.md](../acceptance/doctor-workspace-d1.md)，后续实现仍逐项验证。
-
