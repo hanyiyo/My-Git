@@ -8,6 +8,7 @@ const route = useRoute()
 const prototypeWorkspace = computed(() => import.meta.env.DEV && route.meta.prototypeWorkspace === true)
 const prototypeAuth = computed(() => import.meta.env.DEV && route.meta.prototypeAuth === true)
 const adminWorkspace = computed(() => route.meta.adminWorkspace === true)
+const doctorWorkspace = computed(() => route.meta.doctorWorkspace === true)
 const session = useSession()
 const patientWorkspace = computed(() => session.account?.roles[0] === 'PATIENT' && !prototypeAuth.value)
 const sidebarOpen = ref(false)
@@ -19,7 +20,7 @@ function closeSidebar() {
 const links: Record<string,string[][]> = { PATIENT:[['首页','/patient'],['科室与医生','/patient/catalog'],['我的挂号','/patient/orders'],['站内通知','/notifications'],['个人中心','/profile']], DOCTOR:[['首页','/doctor'],['待接诊','/doctor/reception'],['排班管理','/doctor/catalog'],['申请管理','/doctor/governance']], ADMIN:[['首页','/admin'],['目录与排班','/admin/catalog'],['药品管理','/admin/pharmacy'],['参数配置','/admin/settings']] }
 </script>
 <template>
-  <RouterView v-if="prototypeWorkspace || adminWorkspace"/>
+  <RouterView v-if="prototypeWorkspace || adminWorkspace || doctorWorkspace"/>
   <main v-else :class="{ 'app-shell-wide': prototypeAuth, 'patient-shell': patientWorkspace }">
     <header v-if="!prototypeAuth" :class="{ 'patient-topbar': patientWorkspace }">
       <div><p v-if="!patientWorkspace" class="eyebrow">单医院 · 演示环境</p><h1>智能医疗问诊预约系统</h1><span v-if="patientWorkspace" class="hint">患者服务</span></div>

@@ -1,5 +1,7 @@
 # 医生端总体布局与首页原型
 
+真实接入阶段使用[医生工作区真实接入规格](doctor-workspace-integration.md)及父任务 #23；本文继续保留已确认的原型设计与历史验收。正式 `/doctor` 已开始接入，原型入口仍固定为 `/prototype/doctor-home`，两者不共享演示业务状态。
+
 状态：第一阶段首页与总体框架已完成并通过完整验证。用户已确认整体方案并授权第二阶段页面实现；接诊工作台与医患文字联动已完成并通过完整验证，第三阶段我的排班与停诊申请提交查看亦已完成验证；第二阶段见[第二阶段验收记录](../acceptance/issue-1-doctor-reception-prototype.md)。需求文本与参考图作为设计参考，延续患者端原型风格，优先验证接诊与停诊流程。现行业务边界见[三端修订规格](three-end-requirements.md)、[ADR-0015](../adr/0015-three-end-requirements.md)和[会话工作区决策](../adr/0018-consultation-session-workspace.md)。
 
 ## Q1：首页承担今日任务总览

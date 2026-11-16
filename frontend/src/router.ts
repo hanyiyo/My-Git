@@ -17,6 +17,9 @@ import BusinessAssistantView from './views/BusinessAssistantView.vue'
 import PatientSubstitutionView from './views/PatientSubstitutionView.vue'
 import AdminPharmacyView from './views/AdminPharmacyView.vue'
 import AdminAccountsView from './views/AdminAccountsView.vue'
+import DoctorWorkspaceView from './views/DoctorWorkspaceView.vue'
+import DoctorHomeView from './views/DoctorHomeView.vue'
+import DoctorModulePlaceholderView from './views/DoctorModulePlaceholderView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
@@ -46,17 +49,23 @@ export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/admin/catalog', component: AdminCatalogView, meta: { role: 'ADMIN' } },
   { path: '/admin/pharmacy', component: AdminPharmacyView, meta: { role: 'ADMIN', adminWorkspace: true } },
   { path: '/admin/accounts', component: AdminAccountsView, meta: { role: 'ADMIN' } },
+  { path: '/doctor', component: DoctorWorkspaceView, meta: { role: 'DOCTOR', doctorWorkspace: true }, children: [
+    { path: '', component: DoctorHomeView },
+    { path: 'catalog', component: DoctorCatalogView },
+    { path: 'reception', component: DoctorReceptionView },
+    { path: 'clinical/:id', component: DoctorClinicalView },
+    { path: 'governance', component: DoctorGovernanceView },
+    { path: 'notifications', component: DoctorModulePlaceholderView },
+    { path: 'profile', component: DoctorModulePlaceholderView },
+  ] },
   { path: '/admin/settings', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/patient/preconsultation', redirect: '/assistant/business', meta: { role: 'PATIENT' } },
   { path: '/patient/catalog', component: PatientCatalogView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders', component: PatientOrdersView, meta: { role: 'PATIENT' } },
   { path: '/patient/orders/:id/clinical', component: PatientClinicalView, meta: { role: 'PATIENT' } },
   { path: '/patient/substitutions', component: PatientSubstitutionView, meta: { role: 'PATIENT' } },
-  { path: '/doctor/catalog', component: DoctorCatalogView, meta: { role: 'DOCTOR' } },
-  { path: '/doctor/reception', component: DoctorReceptionView, meta: { role: 'DOCTOR' } },
-  { path: '/doctor/clinical/:id', component: DoctorClinicalView, meta: { role: 'DOCTOR' } },
   { path: '/patient', component: PatientHomeView, meta: { role: 'PATIENT' } },
-  ...['doctor', 'admin'].map(role => ({ path: '/' + role, component: HomeView, meta: { role: role.toUpperCase() } }))
+  { path: '/admin', component: HomeView, meta: { role: 'ADMIN' } }
   ,{ path: '/notifications', component: HomeView, meta: { role: 'PATIENT' } }
   ,{ path: '/profile', component: HomeView, meta: { role: 'PATIENT' } }
 ] })

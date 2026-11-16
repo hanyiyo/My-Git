@@ -69,7 +69,7 @@ public class IdentityController {
         if (!id.equals(authentication.getName()) && authentication.getAuthorities().stream().noneMatch(role -> role.getAuthority().equals("ROLE_ADMIN"))) throw new ApiFailure(403, "FORBIDDEN", "无权查看其他账户");
         return identity.profile(id);
     }
-    @GetMapping({"/patient/home", "/doctor/home", "/admin/home"}) IdentityService.Profile home(JwtAuthenticationToken authentication) { return identity.profile(authentication.getName()); }
+    @GetMapping({"/patient/home", "/admin/home"}) IdentityService.Profile home(JwtAuthenticationToken authentication) { return identity.profile(authentication.getName()); }
     @PostMapping("/admin/accounts") ResponseEntity<?> createAccount(@Valid @RequestBody Registration registration) {
         return ResponseEntity.status(201).body(Map.of("account", identity.register(registration.identifier(), registration.password(), registration.role().toUpperCase(Locale.ROOT), true,
                 registration.displayName(), registration.phoneNumber())));

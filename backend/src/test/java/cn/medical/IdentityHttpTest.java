@@ -109,7 +109,9 @@ class IdentityHttpTest extends HttpFixture {
         assertThat(patient.call("GET", "/api/v1/doctor/home", null).status()).isEqualTo(403);
         assertThat(patient.call("GET", "/api/v1/accounts/another-patient", null).status()).isEqualTo(403);
         var doctor = new Browser(port); String doctorName = identifier(); doctor.register(doctorName, "DOCTOR"); doctor.login(doctorName, PASSWORD);
-        assertThat(doctor.call("GET", "/api/v1/doctor/home", null).body().path("credentialStatus").asText()).isEqualTo("PENDING");
+        var doctorHome = doctor.call("GET", "/api/v1/doctor/home", null);
+        assertThat(doctorHome.status()).withFailMessage(doctorHome.body().toString()).isEqualTo(200);
+        assertThat(doctorHome.body().path("doctor").path("credentialStatus").asText()).isEqualTo("PENDING");
         assertThat(doctor.call("GET", "/api/v1/patient/home", null).status()).isEqualTo(403);
         assertThat(doctor.call("GET", "/api/v1/admin/home", null).status()).isEqualTo(403);
     }

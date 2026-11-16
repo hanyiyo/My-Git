@@ -73,6 +73,30 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(scenario.doctor().browser().call("POST", "/api/v1/doctor/reception/" + scenario.appointmentId() + "/call", null).status()).isEqualTo(200);
         assertThat(scenario.doctor().browser().call("POST", "/api/v1/doctor/reception/" + scenario.appointmentId() + "/start", null).status()).isEqualTo(200);
     }
+
+    @Test void doctorHomeAggregatesOwnScheduleQueueAndActiveEncounterWithoutCrossDoctorData() throws Exception {
+        var scenario = scenario("ONLINE");
+        clock.now = Instant.ofEpochMilli(scenario.schedule().path("startsAt").asLong());
+        assertThat(scenario.patient().browser().call("POST", patientPath(scenario) + "/check-in", null).status()).isEqualTo(200);
+
+        var home = scenario.doctor().browser().call("GET", "/api/v1/doctor/home", null);
+        assertThat(home.status()).withFailMessage(home.body().toString()).isEqualTo(200);
+        assertThat(home.body().path("account").path("id").asText()).isEqualTo(scenario.doctor().id());
+        assertThat(home.body().path("doctor").path("departmentId").asText()).isEqualTo(scenario.departmentId());
+        assertThat(home.body().path("hospitalDate").asText()).isEqualTo(scenario.schedule().path("clinicDate").asText());
+        assertThat(home.body().path("currentSchedule").path("id").asText()).isEqualTo(scenario.schedule().path("id").asText());
+        assertThat(home.body().path("waitingCount").asInt()).isEqualTo(1);
+        assertThat(home.body().path("inConsultationCount").asInt()).isZero();
+        assertThat(home.body().path("activeAppointmentId").isNull()).isTrue();
+
+        var other = doctor(scenario.departmentId());
+        var otherHome = other.browser().call("GET", "/api/v1/doctor/home", null);
+        assertThat(otherHome.status()).isEqualTo(200);
+        assertThat(otherHome.body().path("account").path("id").asText()).isEqualTo(other.id());
+        assertThat(otherHome.body().path("waitingCount").asInt()).isZero();
+        assertThat(otherHome.body().path("currentSchedule").isNull()).isTrue();
+        assertThat(otherHome.body().toString()).doesNotContain(scenario.appointmentId(), scenario.doctor().id());
+    }
     String patientPath(Scenario scenario) { return "/api/v1/patient/appointments/" + scenario.appointmentId(); }
     String doctorPath(Scenario scenario) { return "/api/v1/doctor/clinical/" + scenario.appointmentId(); }
     Reply materials(Browser browser, String appointment, boolean shared, String symptoms, FilePart... parts) throws Exception {
