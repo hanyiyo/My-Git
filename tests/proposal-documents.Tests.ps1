@@ -64,6 +64,8 @@ try {
     $tables = @($document.SelectNodes('//w:body/w:tbl',$ns))
     Assert-True ($tables.Count -eq 3) 'Keep cover, task and proposal table structure.'
     $coverRows = @($tables[0].SelectNodes('./w:tr',$ns))
+    $labelWidth = [int]$tables[0].SelectSingleNode('./w:tblGrid/w:gridCol[1]',$ns).GetAttribute('w',$ns.LookupNamespace('w'))
+    Assert-True ($labelWidth -ge 1900) 'Cover label column must keep field names on one line.'
     $cnLines = @($coverRows[0..1] | ForEach-Object { $_.SelectSingleNode('./w:tc[2]',$ns).InnerText })
     $enLines = @($coverRows[2..5] | ForEach-Object { $_.SelectSingleNode('./w:tc[2]',$ns).InnerText })
     Assert-True (($cnLines -join '') -eq $cn) 'Cover Chinese title must be complete in two lines.'
