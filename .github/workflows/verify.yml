@@ -32,7 +32,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm --prefix frontend ci
-      - run: node frontend/node_modules/@playwright/test/cli.js install --with-deps chromium
+      # ubuntu-latest currently resolves to Ubuntu 26.04, which Playwright 1.56.1
+      # cannot provision with --with-deps. GitHub-hosted runners already provide
+      # the browser system libraries, so install only the pinned Chromium binary.
+      - run: node frontend/node_modules/@playwright/test/cli.js install chromium
       - run: pwsh -NoProfile -File scripts/verify.ps1
       - name: Preserve acceptance failure evidence
         if: failure()
