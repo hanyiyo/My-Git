@@ -17,7 +17,7 @@
 - D1–D7 的公开 HTTP 和浏览器证据分别记录在 `doctor-workspace-d1.md`、`doctor-workspace-d2.md`、`doctor-workspace-d3.md`、`doctor-workspace-d4.md`、`doctor-workspace-d5.md`、`doctor-workspace-d6.md`、`doctor-workspace-d7.md`；本记录只汇总跨任务链路，不替代各子任务边界。
 - `npm --prefix frontend run build` 通过 Vue 类型检查、生产构建和生产资产隔离检查。
 - `MEDICAL_PLAYWRIGHT_GREP='管理员维护目录并发布排班'` 的真实 `BrowserAcceptanceTest` 定向运行通过；D7 正式通知/资料用例也通过。
-- 交付前运行 `pwsh -NoProfile -File scripts/verify.ps1`，未筛选完整浏览器回归 **208 项全部通过**；后端 Maven 门禁 **106 项全部通过**，脚本退出码为 **0**，最终输出为 `All required verification passed.`。
+- 交付前运行 `pwsh -NoProfile -File scripts/verify.ps1`，未筛选完整浏览器回归 **208 项全部通过**（10.1 分钟）；后端 Maven 门禁 **106 项全部通过**，脚本退出码为 **0**，最终输出为 `All required verification passed.`。结构化病历流程曾在通知刷新竞争下超时，现已让诊室在草稿保存/提交期间跳过后台刷新，并由浏览器用例覆盖通知到达时草稿不被清空；定向和完整门禁均复测通过。
 - 完整门禁仍会输出既有 SSE 断线时的 `HttpMessageNotWritableException` 日志，但未造成测试失败；SSE 不可用时的游标补齐与轮询用例已通过。
 
 ## 当前限制

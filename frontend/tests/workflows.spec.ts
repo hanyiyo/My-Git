@@ -76,6 +76,9 @@ test('医生提交结构化病历并让患者独立支付药费', async ({ brows
     await expect(doctor.page.getByLabel('药品1', { exact: true }).locator('option:checked')).toHaveText('浏览器结构化药 · 10片/盒 · 9.00 元')
     await doctor.page.getByLabel('药品1数量').fill('1')
     await doctor.page.getByLabel('药品1用法用量').fill('每日一次，每次一片')
+    await doctor.page.evaluate(appointmentId => window.dispatchEvent(new CustomEvent('medical-notification', { detail: { objectId: appointmentId } })), appointment.id)
+    await doctor.page.waitForTimeout(250)
+    await expect(doctor.page.getByLabel('主诉', { exact: true })).toHaveValue('浏览器咳嗽')
     const resultResponse = doctor.page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/v1/doctor/clinical/${appointment.id}/result`)
     await doctor.page.getByRole('button', { name: '提交病历并结束接诊' }).click()
     const result = await resultResponse
