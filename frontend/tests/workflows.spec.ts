@@ -24,9 +24,10 @@ test('患者与医生双向图文接诊、结束只读并追加更正', async ({
   test.setTimeout(180000)
   const admin = await agent(browser, 'ADMIN'), doctor = await agent(browser, 'DOCTOR'), patient = await agent(browser, 'PATIENT')
   try {
+    await call(admin, '/admin/test-clock', 'POST', {})
     const department = await call(admin, '/admin/catalog/departments', 'POST', { name: `临床演示-${crypto.randomUUID().slice(0, 8)}`, description: '虚构材料', active: true })
     await call(admin, `/admin/catalog/doctors/${doctor.id}`, 'PUT', { displayName: '虚构接诊医生', title: '主治医师', biography: '虚构资料', departmentId: department.id, credentialStatus: 'CERTIFIED' })
-    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'ONLINE', capacity: 1, feeMinor: 1000 })
+    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'ONLINE', capacity: 1, feeMinor: 1000 })
     const appointment = await call(patient, '/patient/appointments', 'POST', { scheduleId: schedule.id, source: 'ADVANCE', idempotencyKey: crypto.randomUUID() })
     await call(patient, `/patient/appointments/${appointment.id}/simulate-payment`, 'POST')
     await call(admin, '/admin/test-clock', 'POST', { millis: schedule.startsAt as number })
@@ -49,9 +50,10 @@ test('医生提交结构化病历并让患者独立支付药费', async ({ brows
   test.setTimeout(180000)
   const admin = await agent(browser, 'ADMIN'), doctor = await agent(browser, 'DOCTOR'), patient = await agent(browser, 'PATIENT')
   try {
+    await call(admin, '/admin/test-clock', 'POST', {})
     const department = await call(admin, '/admin/catalog/departments', 'POST', { name: `结构化科室-${crypto.randomUUID().slice(0, 8)}`, description: '虚构结构化接诊', active: true })
     await call(admin, `/admin/catalog/doctors/${doctor.id}`, 'PUT', { displayName: '虚构结构化医生', title: '主治医师', biography: '虚构资料', departmentId: department.id, credentialStatus: 'CERTIFIED' })
-    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'OFFLINE', capacity: 1, feeMinor: 1000 })
+    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'OFFLINE', capacity: 1, feeMinor: 1000 })
     const medicine = await call(admin, '/admin/pharmacy/medicines', 'POST', { name: '浏览器结构化药', spec: '10片/盒', feeMinor: 900, stock: 2, threshold: 1, active: true })
     const appointment = await call(patient, '/patient/appointments', 'POST', { scheduleId: schedule.id, source: 'ADVANCE', idempotencyKey: crypto.randomUUID() })
     await call(patient, `/patient/appointments/${appointment.id}/simulate-payment`, 'POST')
@@ -95,10 +97,11 @@ test('患者先使用导诊，再选真实排班并独立挂号', async ({ brows
   test.setTimeout(180000)
   const admin = await agent(browser, 'ADMIN'), doctor = await agent(browser, 'DOCTOR'), patient = await agent(browser, 'PATIENT')
   try {
+    await call(admin, '/admin/test-clock', 'POST', {})
     const name = `AI内科-${crypto.randomUUID().slice(0, 8)}`
     const department = await call(admin, '/admin/catalog/departments', 'POST', { name, description: '虚构内科职责', active: true })
     await call(admin, `/admin/catalog/doctors/${doctor.id}`, 'PUT', { displayName: '虚构导诊医生', title: '主治医师', biography: '虚构资料', departmentId: department.id, credentialStatus: 'CERTIFIED' })
-    const date = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10)
+    const date = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
     await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: date, session: 'AM', serviceMode: 'ONLINE', capacity: 2, feeMinor: 1000 })
     expect(await call(patient, '/patient/appointments')).toHaveLength(0)
     let appointmentWrites = 0
@@ -146,9 +149,10 @@ test('患者精确授权医生症状摘要、版本隔离并可撤回', async ({
   test.setTimeout(180000)
   const admin = await agent(browser, 'ADMIN'), doctor = await agent(browser, 'DOCTOR'), patient = await agent(browser, 'PATIENT')
   try {
+    await call(admin, '/admin/test-clock', 'POST', {})
     const department = await call(admin, '/admin/catalog/departments', 'POST', { name: `摘要科室-${crypto.randomUUID().slice(0, 8)}`, description: '虚构摘要接诊', active: true })
     await call(admin, `/admin/catalog/doctors/${doctor.id}`, 'PUT', { displayName: '虚构摘要医生', title: '主治医师', biography: '虚构资料', departmentId: department.id, credentialStatus: 'CERTIFIED' })
-    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'ONLINE', capacity: 1, feeMinor: 1000 })
+    const schedule = await call(admin, '/admin/catalog/schedules', 'POST', { doctorId: doctor.id, departmentId: department.id, clinicDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10), session: 'AM', serviceMode: 'ONLINE', capacity: 1, feeMinor: 1000 })
     const appointment = await call(patient, '/patient/appointments', 'POST', { scheduleId: schedule.id, source: 'ADVANCE', idempotencyKey: crypto.randomUUID() })
     await call(patient, `/patient/appointments/${appointment.id}/simulate-payment`, 'POST')
     await call(admin, '/admin/test-clock', 'POST', { millis: schedule.startsAt as number })
