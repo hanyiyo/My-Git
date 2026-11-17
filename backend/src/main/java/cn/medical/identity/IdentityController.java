@@ -21,7 +21,9 @@ public class IdentityController {
     public IdentityController(IdentityService identity, CaptchaService captchas, IdentitySettings settings) {
         this.identity = identity; this.captchas = captchas; this.settings = settings;
     }
-    public record Registration(@NotBlank @Size(max=190) String identifier, @NotBlank @Size(min=12,max=72) String password, @NotBlank String role) {}
+    public record Registration(@NotBlank @Size(max=190) String identifier, @NotBlank @Size(min=12,max=72) String password,
+                               @NotBlank String role, @Size(max=120) String displayName, @Size(max=32) String phoneNumber,
+                               @Size(max=36) String challengeId, @Size(max=8) String captcha) {}
     public record Login(@NotBlank @Size(max=190) String identifier, @NotBlank @Size(max=72) String password,
                         @NotBlank @Size(max=36) String challengeId, @NotBlank @Size(max=8) String captcha) {}
     public record Enabled(boolean enabled) {}
@@ -35,8 +37,17 @@ public class IdentityController {
         response.setHeader("Cache-Control", "no-store");
         return captchas.issue(browser, request.getRemoteAddr());
     }
-    @PostMapping("/auth/register") ResponseEntity<?> register(@Valid @RequestBody Registration registration) {
-        var profile = identity.register(registration.identifier(), registration.password(), registration.role().toUpperCase(Locale.ROOT), false);
+    @PostMapping("/auth/register") ResponseEntity<?> register(@Valid @RequestBody Registration registration,
+            HttpServletRequest request, @CookieValue(name="MEDICAL_BROWSER", defaultValue="missing") String browser) {
+        String role = registration.role().toUpperCase(Locale.ROOT);
+        if (role.equals("PATIENT")) {
+            if (registration.displayName() == null || registration.displayName().isBlank() || registration.phoneNumber() == null || registration.phoneNumber().isBlank())
+                throw new ApiFailure(400, "INVALID_INPUT", "患者注册需要填写姓名和手机号");
+            if (registration.challengeId() == null || registration.challengeId().isBlank() || registration.captcha() == null || registration.captcha().isBlank())
+                throw new ApiFailure(400, "INVALID_INPUT", "患者注册需要填写图形验证码");
+            captchas.consumeRegistration(browser, registration.challengeId(), registration.captcha(), IdentityService.normalize(registration.identifier()), request.getRemoteAddr());
+        }
+        var profile = identity.register(registration.identifier(), registration.password(), role, false, registration.displayName(), registration.phoneNumber());
         return ResponseEntity.status(201).body(Map.of("account", profile));
     }
     @PostMapping("/auth/login") Map<String, Object> login(@Valid @RequestBody Login login, HttpServletRequest request, HttpServletResponse response,
@@ -58,9 +69,10 @@ public class IdentityController {
         if (!id.equals(authentication.getName()) && authentication.getAuthorities().stream().noneMatch(role -> role.getAuthority().equals("ROLE_ADMIN"))) throw new ApiFailure(403, "FORBIDDEN", "无权查看其他账户");
         return identity.profile(id);
     }
-    @GetMapping({"/patient/home", "/doctor/home", "/admin/home"}) IdentityService.Profile home(JwtAuthenticationToken authentication) { return identity.profile(authentication.getName()); }
+    @GetMapping({"/patient/home", "/admin/home"}) IdentityService.Profile home(JwtAuthenticationToken authentication) { return identity.profile(authentication.getName()); }
     @PostMapping("/admin/accounts") ResponseEntity<?> createAccount(@Valid @RequestBody Registration registration) {
-        return ResponseEntity.status(201).body(Map.of("account", identity.register(registration.identifier(), registration.password(), registration.role().toUpperCase(Locale.ROOT), true)));
+        return ResponseEntity.status(201).body(Map.of("account", identity.register(registration.identifier(), registration.password(), registration.role().toUpperCase(Locale.ROOT), true,
+                registration.displayName(), registration.phoneNumber())));
     }
     @PatchMapping("/admin/accounts/{id}/enabled") ResponseEntity<Void> enabled(@PathVariable String id, @RequestBody Enabled enabled) {
         identity.setEnabled(id, enabled.enabled()); return ResponseEntity.noContent().build();

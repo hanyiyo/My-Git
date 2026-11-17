@@ -1,5 +1,7 @@
 # MVP 附件与后台能力保持受控范围
 
+> R3后续修订：与[ADR-0015](0015-three-end-requirements.md)及[三端规格](../design/three-end-requirements.md)冲突的部分已被替代；本文件保留历史背景。
+
 状态：accepted
 
 附件范围已在 Q59 收窄为 JPEG、PNG、PDF，每份不超过 10 MB、每次提交最多 5 份，不接受下文早期“常见文档”中的 Word 等格式。首版只供医生查看，不自动 OCR 或图片分析；语音和图片 AI 分析后置。现行范围见 [接诊规则](../design/reception-rules.md)。

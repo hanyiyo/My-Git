@@ -35,8 +35,9 @@ public class CatalogController {
         return ResponseEntity.status(201).body(catalog.publish(input.doctorId(), input.departmentId(), input.clinicDate(), input.session(), input.serviceMode(), input.capacity(), input.feeMinor()));
     }
     @GetMapping("/catalog/schedules") List<CatalogService.ScheduleView> schedules(@RequestParam(required=false) String doctorId,
-            @RequestParam(required=false) String departmentId, @RequestParam(required=false) LocalDate date, @RequestParam(required=false) String mode) {
-        return catalog.schedules(false, doctorId, departmentId, date, mode);
+            @RequestParam(required=false) String departmentId, @RequestParam(required=false) LocalDate date, @RequestParam(required=false) String mode,
+            @RequestParam(required=false) String session) {
+        return catalog.schedules(false, doctorId, departmentId, date, mode, session);
     }
     @GetMapping("/admin/catalog/schedules") List<CatalogService.ScheduleView> managedSchedules() { return catalog.schedules(true, null, null, null, null); }
     @GetMapping("/doctor/catalog/schedules") List<CatalogService.ScheduleView> ownSchedules(JwtAuthenticationToken authentication) {

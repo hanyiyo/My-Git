@@ -1,9 +1,11 @@
 package cn.medical.billing;
 
 import cn.medical.identity.ApiFailure;
+import cn.medical.delivery.DeliveryService;
 import java.time.Clock;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -19,10 +21,16 @@ public class RefundProcessor {
     private final BillingMapper billing;
     private final RefundProvider provider;
     private final Clock clock;
+    private final DeliveryService delivery;
     private final TransactionTemplate transaction;
     private record Claim(String id, String paymentId, long amountMinor, String token) {}
     public RefundProcessor(BillingMapper billing, RefundProvider provider, Clock clock, PlatformTransactionManager manager) {
+        this(billing, provider, clock, manager, null);
+    }
+    @Autowired
+    public RefundProcessor(BillingMapper billing, RefundProvider provider, Clock clock, PlatformTransactionManager manager, DeliveryService delivery) {
         this.billing = billing; this.provider = provider; this.clock = clock;
+        this.delivery = delivery;
         transaction = new TransactionTemplate(manager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
@@ -55,6 +63,7 @@ public class RefundProcessor {
             billing.finishAttempt(work.attemptToken(), "ABANDONED", now, error, null);
             if (work.attempts() >= MAX_ATTEMPTS) {
                 billing.finishRefund(id, work.attemptToken(), "REFUND_FAILED", null, error, null);
+                notifyResult(work.paymentId(),id,work.attempts(),"退款最终失败，请联系管理员");
                 return null;
             }
         } else if (work.attempts() >= MAX_ATTEMPTS || (!force && (work.nextAttemptAt() == null || work.nextAttemptAt() > now))) return null;
@@ -73,9 +82,13 @@ public class RefundProcessor {
         Long next = succeeded || work.attempts() >= MAX_ATTEMPTS ? null : now + RETRY_MILLIS;
         billing.finishRefund(claim.id(), claim.token(), succeeded ? "REFUNDED" : "REFUND_FAILED", next, error, succeeded ? reference : null);
         billing.finishAttempt(claim.token(), succeeded ? "SUCCEEDED" : "FAILED", now, error, succeeded ? reference : null);
+        notifyResult(claim.paymentId(),claim.id(),work.attempts(),succeeded?"退款已完成":next==null?"退款最终失败，请联系管理员":"退款处理失败，将按计划重试");
         return billing.refundById(claim.id());
     }
     public void processDue() {
         for (var id : billing.dueRefunds(clock.millis())) process(id);
+    }
+    private void notifyResult(String payment,String id,int attempt,String message) {
+        if(delivery!=null) { String recipient=billing.refundRecipient(payment);if(recipient!=null)delivery.publish(recipient,"REFUND_RESULT",id,message,"refund-result:"+id+":"+attempt); }
     }
 }

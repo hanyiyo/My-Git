@@ -18,16 +18,55 @@ public class CatalogService {
     public record DoctorView(String id, String displayName, String title, String biography, String credentialStatus, boolean enabled, String departmentId, String departmentName) {}
     public record ScheduleView(String id, String doctorId, String doctorName, String departmentId, String departmentName, LocalDate clinicDate,
         String session, String serviceMode, long startsAt, long endsAt, String zoneId, int capacity, long feeMinor, String state,
-        int availableSlots, boolean advanceAvailable, boolean walkInAvailable) {}
+        int availableSlots, int confirmedAppointments, int pendingHolds, int waitingPatients, int calledPatients,
+        int inConsultationPatients, int completedPatients, boolean advanceAvailable, boolean walkInAvailable) {}
     private final CatalogMapper catalog;
     private final IdentityService identity;
     private final Clock clock;
     private static final ZoneId HOSPITAL_ZONE = ZoneId.of("Asia/Shanghai");
     public CatalogService(CatalogMapper catalog, IdentityService identity, Clock clock) { this.catalog = catalog; this.identity = identity; this.clock = clock; }
     public CatalogMapper.Hospital hospital() { return catalog.hospital(); }
+    @Transactional
+    public void lockMutation(String id) {
+        if (catalog.schedule(id) == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
+        if (catalog.lockMutationGuard(id) == null) { catalog.ensureMutationGuard(id); catalog.lockMutationGuard(id); }
+    }
+    @Transactional
+    public CatalogMapper.Schedule governanceSchedule(String id) {
+        var schedule = catalog.schedule(id);
+        if (schedule == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
+        return schedule;
+    }
+    @Transactional
+    public void validateSubstitute(String id, String doctorId) {
+        var schedule = governanceSchedule(id);
+        if (schedule.doctorId().equals(doctorId)) throw new ApiFailure(409, "SUBSTITUTE_INVALID", "原医生不能替诊本人排班");
+        var doctor = identity.lockDoctor(doctorId);
+        var department = catalog.lockDepartment(schedule.departmentId());
+        if (!doctor.enabled() || !doctor.credentialStatus().equals("CERTIFIED") || department == null || !department.active()
+            || catalog.assignments().stream().noneMatch(value -> value.doctorId().equals(doctorId) && value.departmentId().equals(schedule.departmentId()))
+            || catalog.conflictingSchedule(doctorId, schedule.clinicDate(), schedule.session(), id) > 0)
+            throw new ApiFailure(409, "SUBSTITUTE_INVALID", "替诊医生必须同科室、已认证且无排班冲突");
+    }
+    @Transactional
+    public void changeScheduleState(String id, String state) {
+        if (!Set.of("PUBLISHED", "SUSPENSION_PENDING", "CANCELLED").contains(state)) throw new IllegalArgumentException("Invalid schedule state");
+        var schedule = governanceSchedule(id);
+        identity.lockDoctor(schedule.doctorId()); catalog.lockDepartment(schedule.departmentId()); catalog.lockSchedule(id);
+        catalog.setScheduleState(id, state);
+        if (state.equals("CANCELLED")) catalog.deactivateSlots(id);
+    }
+    @Transactional
+    public void substituteSchedule(String id, String doctor) {
+        validateSubstitute(id, doctor);
+        try { catalog.substitute(id, doctor); }
+        catch (DuplicateKeyException error) { throw new ApiFailure(409, "SUBSTITUTE_INVALID", "替诊医生出现排班冲突，请重新安排"); }
+    }
     public record SlotReservation(String slotId, String scheduleId, String doctorId, String departmentId,
         LocalDate clinicDate, String session, String serviceMode, long startsAt, long endsAt, long feeMinor, long createdAt, long holdExpiresAt) {}
     public record RegistrationSession(LocalDate clinicDate, String session) {}
+    @Transactional
+    public void releaseExpiredHold(String schedule,String slot,String appointment) { catalog.lockSchedule(schedule);catalog.lockSlot(slot);catalog.releaseSlot(slot,appointment); }
     public RegistrationSession registrationSession(String id) {
         var schedule = catalog.schedule(id);
         if (schedule == null) throw new ApiFailure(404, "NOT_FOUND", "排班不存在");
@@ -59,7 +98,8 @@ public class CatalogService {
     }
     private boolean registrationOpen(CatalogMapper.Schedule schedule, String source, long now) {
         return source.equals("ADVANCE") ? now < schedule.startsAt()
-            : schedule.serviceMode().equals("OFFLINE") && now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
+            : schedule.clinicDate().equals(Instant.ofEpochMilli(now).atZone(HOSPITAL_ZONE).toLocalDate())
+                && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis();
     }
     public record Confirmation(boolean confirmed, long observedAt) {}
     @Transactional
@@ -130,7 +170,12 @@ public class CatalogService {
     }
     @Transactional(readOnly = true)
     public List<ScheduleView> schedules(boolean management, String doctorId, String departmentId, LocalDate date, String mode) {
+        return schedules(management, doctorId, departmentId, date, mode, null);
+    }
+    @Transactional(readOnly = true)
+    public List<ScheduleView> schedules(boolean management, String doctorId, String departmentId, LocalDate date, String mode, String session) {
         if (mode != null && !Set.of("ONLINE", "OFFLINE").contains(mode)) throw new ApiFailure(400, "INVALID_INPUT", "服务方式无效");
+        if (session != null && !Set.of("AM", "PM").contains(session)) throw new ApiFailure(400, "INVALID_INPUT", "门诊时段无效");
         var doctors = doctors(true, null).stream().collect(Collectors.toMap(DoctorView::id, Function.identity()));
         var departments = catalog.departments().stream().collect(Collectors.toMap(CatalogMapper.Department::id, Function.identity()));
         long now = clock.millis();
@@ -138,6 +183,7 @@ public class CatalogService {
             .filter(schedule -> doctorId == null || doctorId.equals(schedule.doctorId()))
             .filter(schedule -> departmentId == null || departmentId.equals(schedule.departmentId()))
             .filter(schedule -> date == null || date.equals(schedule.clinicDate()))
+            .filter(schedule -> session == null || session.equals(schedule.session()))
             .filter(schedule -> management || date != null || schedule.startsAt() < now + Duration.ofDays(7).toMillis())
             .filter(schedule -> mode == null || mode.equals(schedule.serviceMode()))
             .map(schedule -> scheduleView(schedule, doctors, departments, now))
@@ -158,7 +204,8 @@ public class CatalogService {
             && schedule.state().equals("PUBLISHED") && schedule.availableSlots() > 0;
         return new ScheduleView(schedule.id(), schedule.doctorId(), doctor == null ? "" : doctor.displayName(), schedule.departmentId(), department == null ? "" : department.name(),
             schedule.clinicDate(), schedule.session(), schedule.serviceMode(), schedule.startsAt(), schedule.endsAt(), schedule.zoneId(), schedule.capacity(), schedule.feeMinor(), schedule.state(), schedule.availableSlots(),
-            valid && now < schedule.startsAt(), valid && schedule.serviceMode().equals("OFFLINE") && now >= schedule.startsAt() && now < schedule.endsAt() - Duration.ofMinutes(15).toMillis());
+            schedule.confirmedAppointments(), schedule.pendingHolds(), schedule.waitingPatients(), schedule.calledPatients(), schedule.inConsultationPatients(), schedule.completedPatients(),
+            valid && registrationOpen(schedule, "ADVANCE", now), valid && registrationOpen(schedule, "WALK_IN", now));
     }
     @Transactional
     public ScheduleView publish(String doctorId, String departmentId, LocalDate date, String session, String mode, int capacity, long feeMinor) {
@@ -178,6 +225,7 @@ public class CatalogService {
         String id = UUID.randomUUID().toString();
         try { catalog.insertSchedule(new CatalogMapper.Schedule(id, doctorId, departmentId, date, session, mode, starts, ends, HOSPITAL_ZONE.getId(), capacity, feeMinor, "PUBLISHED", 0)); }
         catch (DuplicateKeyException error) { throw new ApiFailure(409, "SCHEDULE_CONFLICT", "医生在该日期、半天已有排班，线上线下不能重复发布"); }
+        catalog.ensureMutationGuard(id);
         catalog.insertSlots(java.util.stream.IntStream.rangeClosed(1, capacity).mapToObj(position -> new CatalogMapper.Slot(UUID.randomUUID().toString(), id, position)).toList());
         return schedules(true, doctorId, null, date, mode).stream().filter(schedule -> schedule.id().equals(id)).findFirst().orElseThrow();
     }
