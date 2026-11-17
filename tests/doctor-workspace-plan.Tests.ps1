@@ -68,4 +68,7 @@ foreach ($seam in @(
 )) {
     if ($d8 -notmatch $seam) { throw "D8 acceptance record is missing reproducible seam: $seam" }
 }
+$statusLine = ($body -split "`r?`n")[2]
+if ($statusLine -notmatch 'D1–D8 已实现并完成统一验收') { throw 'Doctor workspace integration status must reflect completed D1-D8 acceptance' }
+if ($statusLine -notmatch 'doctor-workspace-d8\.md') { throw 'Doctor workspace integration status must link the D8 acceptance record' }
 Write-Output "Doctor workspace plan validation passed: $($tasks.Count) tasks, $($requirements.Count) requirements, $($apis.Count) existing HTTP seams."
