@@ -97,6 +97,16 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(otherHome.body().path("currentSchedule").isNull()).isTrue();
         assertThat(otherHome.body().toString()).doesNotContain(scenario.appointmentId(), scenario.doctor().id());
     }
+    @Test void doctorReceptionKeepsCheckedInCareAfterEndButRejectsMiss() throws Exception {
+        var s = scenario("OFFLINE");
+        clock.now = Instant.ofEpochMilli(s.schedule().path("startsAt").asLong());
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/check-in", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(s.schedule().path("endsAt").asLong());
+        assertThat(s.doctor().browser().call("POST", "/api/v1/doctor/reception/" + s.appointmentId() + "/call", null).status()).isEqualTo(200);
+        var miss = s.doctor().browser().call("POST", "/api/v1/doctor/reception/" + s.appointmentId() + "/miss", null);
+        assertThat(miss.status()).isEqualTo(409);
+        assertThat(miss.body().path("error").path("code").asText()).isEqualTo("SESSION_CLOSED");
+    }
     String patientPath(Scenario scenario) { return "/api/v1/patient/appointments/" + scenario.appointmentId(); }
     String doctorPath(Scenario scenario) { return "/api/v1/doctor/clinical/" + scenario.appointmentId(); }
     Reply materials(Browser browser, String appointment, boolean shared, String symptoms, FilePart... parts) throws Exception {

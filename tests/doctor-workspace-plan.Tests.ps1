@@ -55,4 +55,17 @@ foreach ($api in $apis) {
     }
     if (-not $found) { throw "Advertised existing API not found: $verb $path ($module)" }
 }
+$d8 = Get-Content -LiteralPath (Join-Path $root 'docs/acceptance/doctor-workspace-d8.md') -Raw
+foreach ($seam in @(
+    'WorkflowHttpTest\.clinicalMessagesResultsAndCorrectionsRespectOwnershipAndReadOnlyBoundary',
+    'WorkflowHttpTest\.structuredClinicalResultPersistsRequiredFieldsAndPharmacySnapshot',
+    'doctorReceptionKeepsCheckedInCareAfterEndButRejectsMiss',
+    'WorkflowHttpTest\.doctorSummaryRequiresExactPatientScopeKeepsVersionsAndHonorsRevocation',
+    'WorkflowHttpTest\.substitutionApprovalMigratesOrderAndPatientMayCancelFromOrders',
+    'WorkflowHttpTest\.notificationCursorPagesAndAuthenticatedSseReplayCatchUpMoreThanOneHundred',
+    'npm --prefix frontend run build',
+    'pwsh -NoProfile -File scripts/verify\.ps1'
+)) {
+    if ($d8 -notmatch $seam) { throw "D8 acceptance record is missing reproducible seam: $seam" }
+}
 Write-Output "Doctor workspace plan validation passed: $($tasks.Count) tasks, $($requirements.Count) requirements, $($apis.Count) existing HTTP seams."

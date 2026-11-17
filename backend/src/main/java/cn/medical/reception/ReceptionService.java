@@ -129,7 +129,8 @@ public class ReceptionService {
             if (entry.calledAt() == null || now < entry.calledAt() + wait * 60_000L || responseObserver.hasPatientReplyAfter(id, entry.calledAt()))
                 throw new ApiFailure(409, "CALL_WAITING", "线上叫号需等待5分钟且患者未回复后才能过号");
         }
-        if (appointment == null || now < appointment.startsAt())
+        if (action.equals("miss")) ensureReceptionWindow(appointment, now);
+        else if (appointment == null || now < appointment.startsAt())
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
         int changed = switch (action) {
             case "start" -> reception.start(id, now);
@@ -162,7 +163,7 @@ public class ReceptionService {
             throw new ApiFailure(409, "CHECK_IN_CLOSED", "当前不在签到时间窗口内");
     }
     private void ensureReceptionWindow(ReceptionMapper.Appointment appointment, long now) {
-        if (appointment == null || now < appointment.startsAt() - 30 * 60_000L || now >= appointment.endsAt())
+        if (appointment == null || now < appointment.startsAt() || now >= appointment.endsAt())
             throw new ApiFailure(409, "SESSION_CLOSED", "当前不在门诊接诊时段内");
     }
     private Summary summary(ReceptionMapper.QueueEntry entry) {

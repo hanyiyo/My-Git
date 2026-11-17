@@ -27,6 +27,11 @@ function notificationRoutes(page: Page, activeAppointmentId: string | null = nul
   page.route('**/api/v1/doctor/home', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ pendingApplicationCount: 1, activeAppointmentId }) }))
   page.route('**/api/v1/notifications/11/read', route => route.fulfill({ status: 204 }))
   page.route('**/api/v1/doctor/catalog/profile', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'doctor-1', displayName: '林知远', title: '主治医师', biography: '虚构资料', credentialStatus: 'CERTIFIED', enabled: true, departmentId: 'dept-1', departmentName: '内科' }) }))
+  page.route('**/api/v1/doctor/catalog/schedules', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  page.route('**/api/v1/catalog/doctors', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  page.route('**/api/v1/doctor/catalog/suspensions', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  page.route('**/api/v1/doctor/catalog/head/suspensions', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  page.route('**/api/v1/doctor/catalog/substitutions', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'request-11', scheduleId: 'schedule-11', doctorId: 'doctor-1', departmentId: 'dept-1', substituteDoctorId: null, state: 'PENDING', reason: '请确认或拒绝替诊邀请' }]) }))
 }
 
 test('正式通知按待处理与普通分区展示，打开即已读并定位申请', async ({ page }) => {
@@ -43,6 +48,7 @@ test('正式通知按待处理与普通分区展示，打开即已读并定位�
   await expect(page.getByText('未读 0')).toBeVisible()
   await page.getByRole('button', { name: '前往处理' }).click()
   await expect(page).toHaveURL(/\/doctor\/governance\?request=request-11$/)
+  await expect(page.locator('[aria-current="location"]')).toContainText('request-11')
   await page.setViewportSize({ width: 375, height: 812 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
 })
