@@ -20,6 +20,8 @@ import AdminAccountsView from './views/AdminAccountsView.vue'
 import DoctorWorkspaceView from './views/DoctorWorkspaceView.vue'
 import DoctorHomeView from './views/DoctorHomeView.vue'
 import DoctorModulePlaceholderView from './views/DoctorModulePlaceholderView.vue'
+import DoctorNotificationsView from './views/DoctorNotificationsView.vue'
+import DoctorProfileView from './views/DoctorProfileView.vue'
 import { useSession } from './session'
 export const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/login' }, { path: '/login', component: LoginView },
@@ -55,8 +57,8 @@ export const router = createRouter({ history: createWebHistory(), routes: [
     { path: 'reception', component: DoctorReceptionView },
     { path: 'clinical/:id', component: DoctorClinicalView },
     { path: 'governance', component: DoctorGovernanceView },
-    { path: 'notifications', component: DoctorModulePlaceholderView },
-    { path: 'profile', component: DoctorModulePlaceholderView },
+    { path: 'notifications', component: DoctorNotificationsView },
+    { path: 'profile', component: DoctorProfileView },
   ] },
   { path: '/admin/settings', component: AdminAiView, meta: { role: 'ADMIN' } },
   { path: '/patient/preconsultation', redirect: '/assistant/business', meta: { role: 'PATIENT' } },

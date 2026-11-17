@@ -35,7 +35,9 @@ function closeTab(key: string) {
   tabs.value = tabs.value.filter(tab => tab !== key)
   if (currentKey.value === key) go('home')
 }
-async function logout() { await session.logout(); await router.push('/login') }
+async function logout() {
+  try { await session.logout(); await router.push('/login') } catch { /* keep the workspace visible when logout cannot complete */ }
+}
 </script>
 
 <template>
@@ -54,7 +56,7 @@ async function logout() { await session.logout(); await router.push('/login') }
       <nav class="doctor-shell-tabs" aria-label="医生临时工作区标签">
         <div v-for="key in tabs" :key="key" :class="{ active: currentKey === key }"><button type="button" @click="go(key)">{{ modules.find(module => module.key === key)?.label }}</button><button v-if="key !== 'home'" type="button" :aria-label="`关闭${modules.find(module => module.key === key)?.label}标签`" @click="closeTab(key)">×</button></div>
       </nav>
-      <main class="doctor-shell-content"><RouterView /><NotificationPanel /></main>
+      <main class="doctor-shell-content"><RouterView /><NotificationPanel v-if="currentKey !== 'notifications' && currentKey !== 'profile'" /></main>
     </section>
   </div>
 </template>
