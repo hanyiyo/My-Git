@@ -102,6 +102,10 @@ test('线上双标签从签到、叫号、文字交流到病历开药和药费�
   const order = patient.getByRole('region', { name: '联动药费订单' })
   await expect(order).toContainText('¥25.00')
   await order.getByRole('button', { name: '模拟缴药费' }).click()
+  await expect.poll(() => patient.evaluate(() => {
+    const raw = localStorage.getItem('medical-reception-prototype-v1')
+    try { return JSON.parse(raw ?? '').visits.find((visit: any) => visit.id === 'today-online-waiting')?.payment?.status ?? 'missing' } catch { return 'invalid' }
+  })).toBe('PAID')
   await patient.goto('/prototype/patient-home/orders?status=全部')
   await expect(patient.getByRole('region', { name: '联动药费订单' })).toContainText('药品已支付')
   const data = await snapshot(page)

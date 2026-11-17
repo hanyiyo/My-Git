@@ -74,8 +74,11 @@ test('医生提交结构化病历并让患者独立支付药费', async ({ brows
     await expect(doctor.page.getByLabel('药品1', { exact: true }).locator('option:checked')).toHaveText('浏览器结构化药 · 10片/盒 · 9.00 元')
     await doctor.page.getByLabel('药品1数量').fill('1')
     await doctor.page.getByLabel('药品1用法用量').fill('每日一次，每次一片')
+    const resultResponse = doctor.page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/v1/doctor/clinical/${appointment.id}/result`)
     await doctor.page.getByRole('button', { name: '提交病历并结束接诊' }).click()
-    await expect(doctor.page.getByText('已提交病历（只读）')).toBeVisible({ timeout: 15000 })
+    const result = await resultResponse
+    expect(result.ok(), `${result.status()} ${await result.text()}`).toBeTruthy()
+    await expect(doctor.page.getByText('已提交病历（只读）')).toBeVisible({ timeout: 30000 })
     await expect(doctor.page.getByText('上呼吸道感染', { exact: true })).toBeVisible()
     await patient.page.goto(`/patient/orders/${appointment.id}/clinical`)
     await expect(patient.page.getByText('医生结果（只读）')).toBeVisible({ timeout: 15000 })
