@@ -1,5 +1,7 @@
 # 双业务线 MVP 使用临时占号与模拟支付确认预约
 
+> R3后续修订：与[ADR-0015](0015-three-end-requirements.md)及[三端规格](../design/three-end-requirements.md)冲突的部分已被替代；本文件保留历史背景。
+
 状态：accepted
 
 用户确认 MVP 同时覆盖线上问诊预约、线下预约和现场挂号，并加入模拟支付、签到候诊和叫号接诊；文本 AI 导诊和停诊审批进入首版，语音、图片 AI 分析、真实支付和检查药房流程后置。当前范围见 [MVP 范围](../design/current-mvp.md)。

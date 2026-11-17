@@ -1,0 +1,103 @@
+import { test, expect } from '@playwright/test'
+
+const profileKey = 'medical-doctor-profile-v1'
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/prototype/doctor-home/profile')
+  await page.evaluate(key => localStorage.removeItem(key), profileKey)
+  await page.reload()
+})
+
+test('医生个人中心沿用患者端双栏结构，资料字段与设置入口完整', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: '个人中心', exact: true })).toHaveCount(1)
+  await expect(page.getByRole('region', { name: '医生资料' })).toContainText('许知遥')
+  await expect(page.getByRole('region', { name: '医生资料' })).toContainText('内科')
+  await expect(page.getByRole('region', { name: '医生资料' })).toContainText('副主任医师')
+  await expect(page.getByRole('region', { name: '医生资料' })).toContainText('138****0628')
+  for (const label of ['通知设置', '修改密码', '隐私与协议', '关于系统', '退出登录']) await expect(page.getByRole('button', { name: new RegExp(label) })).toBeVisible()
+  await expect(page.getByRole('button', { name: '科室审批' })).toHaveCount(0)
+})
+
+test('资料编辑限制执业字段，换手机号需演示验证码并跨刷新保留', async ({ page }) => {
+  await page.getByRole('button', { name: /编辑资料/ }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑医生资料' })
+  await expect(dialog).toContainText('由管理员维护')
+  await expect(dialog.getByLabel('联系手机号')).toHaveValue('13800000628')
+  await dialog.getByLabel('联系手机号').fill('13912345678')
+  await dialog.getByRole('button', { name: '保存资料' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('验证码')
+  await dialog.getByRole('button', { name: '获取演示验证码' }).click()
+  await expect(dialog).toContainText('不会发送真实短信')
+  await dialog.getByLabel('演示验证码').fill('123456')
+  await dialog.getByRole('button', { name: '保存资料' }).click()
+  await expect(page.getByRole('region', { name: '医生资料' })).toContainText('139****5678')
+  await expect(page.getByRole('button', { name: '个人资料' })).toContainText('许知遥')
+  await page.reload()
+  await expect(page.getByRole('region', { name: '医生资料' })).toContainText('139****5678')
+})
+
+test('通知偏好可保存，重要业务通知说明仍保留', async ({ page }) => {
+  await page.getByRole('button', { name: /通知设置/ }).click()
+  const dialog = page.getByRole('dialog', { name: '通知设置' })
+  await expect(dialog).toContainText('审批结果和申请进度始终保留')
+  await dialog.getByLabel('一般接诊提醒').uncheck()
+  await page.reload()
+  await page.getByRole('button', { name: /通知设置/ }).click()
+  await expect(page.getByRole('dialog', { name: '通知设置' }).getByLabel('一般接诊提醒')).not.toBeChecked()
+})
+
+test('资料和偏好在同一浏览器标签同步', async ({ page, context }) => {
+  const other = await context.newPage()
+  await other.goto('/prototype/doctor-home/profile')
+  await page.getByRole('button', { name: /编辑资料/ }).click()
+  const edit = page.getByRole('dialog', { name: '编辑医生资料' })
+  await edit.getByLabel('联系手机号').fill('13912345678')
+  await edit.getByRole('button', { name: '获取演示验证码' }).click()
+  await edit.getByLabel('演示验证码').fill('123456')
+  await edit.getByRole('button', { name: '保存资料' }).click()
+  await expect.poll(async () => (await other.getByRole('region', { name: '医生资料' }).textContent()) || '').toContain('139****5678')
+  await other.getByRole('button', { name: /通知设置/ }).click()
+  await other.getByRole('dialog', { name: '通知设置' }).getByLabel('一般接诊提醒').uncheck()
+  await page.reload()
+  await page.getByRole('button', { name: /通知设置/ }).click()
+  await expect(page.getByRole('dialog', { name: '通知设置' }).getByLabel('一般接诊提醒')).not.toBeChecked()
+})
+
+test('科主任显示审批入口并定位申请处理，手机端无横向溢出', async ({ page }) => {
+  await page.getByRole('button', { name: '演示设置', exact: true }).click()
+  const controls = page.getByRole('dialog', { name: '原型演示设置' })
+  await controls.getByLabel('演示身份').selectOption('head')
+  await controls.getByRole('button', { name: '完成设置' }).click()
+  await expect(page.getByRole('button', { name: '科室审批' })).toBeVisible()
+  await page.getByRole('button', { name: '科室审批' }).click()
+  await expect(page).toHaveURL(/\/applications/)
+  await expect(page.getByRole('tab', { name: '科室审批' })).toHaveAttribute('aria-selected', 'true')
+  await page.goto('/prototype/doctor-home/profile')
+  await page.setViewportSize({ width: 375, height: 812 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await expect(page.getByRole('heading', { name: '个人中心', exact: true })).toBeInViewport()
+})
+
+test('接诊中修改密码和退出均提示，确认离开后保留接诊状态', async ({ page }) => {
+  await page.goto('/prototype/doctor-home/reception')
+  await page.getByRole('button', { name: '叫号并开始接诊' }).click()
+  await page.getByRole('navigation', { name: '医生端导航' }).getByRole('button', { name: '个人中心', exact: true }).click()
+  await page.getByRole('button', { name: /修改密码/ }).click()
+  const password = page.getByRole('dialog', { name: '修改密码' })
+  await password.getByLabel('旧密码').fill('old-password')
+  await password.getByLabel('新密码', { exact: true }).fill('new-password-123')
+  await password.getByLabel('确认新密码').fill('new-password-123')
+  await password.getByRole('button', { name: '确认修改' }).click()
+  const leave = page.getByRole('dialog', { name: '确认离开' })
+  await expect(leave).toContainText('当前接诊尚未结束')
+  await leave.getByRole('button', { name: '确认离开' }).click()
+  await expect(page).toHaveURL(/\/prototype\/auth\?role=doctor/)
+})
+
+test('退出登录始终二次确认', async ({ page }) => {
+  await page.getByRole('button', { name: '退出登录' }).click()
+  const dialog = page.getByRole('dialog', { name: '确认离开' })
+  await expect(dialog).toContainText('确认退出登录')
+  await dialog.getByRole('button', { name: '继续填写' }).click()
+  await expect(page).toHaveURL(/\/doctor-home\/profile/)
+})

@@ -53,9 +53,17 @@ public class CaptchaService {
     }
 
     public void consume(String browser, String challengeId, String answer, String identifier, String source) {
-        rate("login-source:" + source, settings.loginLimit() * 10);
-        rate("login-account:" + identifier, settings.loginLimit());
-        rate("login-browser:" + browser, settings.loginLimit());
+        consume(browser, challengeId, answer, identifier, source, "login");
+    }
+
+    public void consumeRegistration(String browser, String challengeId, String answer, String identifier, String source) {
+        consume(browser, challengeId, answer, identifier, source, "register");
+    }
+
+    private void consume(String browser, String challengeId, String answer, String identifier, String source, String purpose) {
+        rate(purpose + "-source:" + source, settings.loginLimit() * 10);
+        rate(purpose + "-account:" + identifier, settings.loginLimit());
+        rate(purpose + "-browser:" + browser, settings.loginLimit());
         Long consumed = redis.execute(CONSUME, List.of("medical:captcha:" + browser), challengeId, hmac(answer.toUpperCase(Locale.ROOT)));
         if (!Long.valueOf(1).equals(consumed)) throw new ApiFailure(401, "INVALID_CAPTCHA", "验证码无效或已过期，请刷新后重试");
     }

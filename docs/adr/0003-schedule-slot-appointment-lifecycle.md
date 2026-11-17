@@ -1,5 +1,7 @@
 # 由管理员发布号源并控制预约状态
 
+> R3后续修订：与[ADR-0015](0015-three-end-requirements.md)及[三端规格](../design/three-end-requirements.md)冲突的部分已被替代；本文件保留历史背景。
+
 状态：accepted
 
 适用范围更新：本 ADR 描述早期 MVP 的号源和状态模型；[ADR-0011](0011-paid-booking-holds-mvp.md) 已将首版细化为临时占号、模拟支付成功后确认，并加入签到候诊。有效临时占号同样必须保护，不能被其他预约占用。停诊审批职责由 [ADR-0009](0009-suspension-review-chain.md) 细化。

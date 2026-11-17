@@ -6,6 +6,9 @@ import cn.medical.reception.ReceptionService;
 import cn.medical.governance.ReviewPolicyService;
 import cn.medical.governance.AuditService;
 import cn.medical.delivery.DeliveryService;
+import cn.medical.pharmacy.PharmacyService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -24,7 +27,13 @@ public class ClinicalService {
     public record AttachmentView(String id, String originalName, String mediaType, long sizeBytes, long createdAt) {}
     public record MaterialView(String id, int versionNo, String symptomText, boolean shared, long createdAt, List<AttachmentView> attachments) {}
     public record ClinicalView(ClinicalMapper.Consultation consultation, List<MaterialView> materials,
-        List<ClinicalMapper.Message> messages, ClinicalMapper.Result result, List<ClinicalMapper.Correction> corrections) {}
+        List<ClinicalMapper.Message> messages, ClinicalMapper.Result result, List<ClinicalMapper.Correction> corrections,
+        String serviceMode) {}
+    public record DraftPrescription(String medicineId, int quantity, String usage) {}
+    public record StructuredResult(String chiefComplaint, String presentIllness, String historyAllergy,
+        String diagnosis, String treatmentPlan) {}
+    public record DraftView(String appointmentId, int versionNo, String chiefComplaint, String presentIllness,
+        String historyAllergy, String diagnosis, String treatmentPlan, List<DraftPrescription> prescriptions, Long savedAt) {}
     public record Download(ByteArrayResource resource, String mediaType, String originalName) {}
     public record ReviewSnapshot(List<MaterialView> materials, List<ClinicalMapper.Result> results,
         List<ClinicalMapper.Message> messages, List<ClinicalMapper.Correction> corrections) {}
@@ -36,13 +45,51 @@ public class ClinicalService {
     private final ReviewPolicyService policy;
     private final AuditService audit;
     private final DeliveryService delivery;
+    private final PharmacyService pharmacy;
+    private final ObjectMapper json;
 
     public ClinicalService(ClinicalMapper clinical, ReceptionService reception, BookingService booking, Clock clock,
-        ClinicalFileStore files, ReviewPolicyService policy, AuditService audit, DeliveryService delivery) {
+        ClinicalFileStore files, ReviewPolicyService policy, AuditService audit, DeliveryService delivery, PharmacyService pharmacy) {
         this.clinical = clinical; this.reception = reception; this.booking = booking; this.clock = clock;
         this.files = files;
         this.policy = policy; this.audit = audit;
         this.delivery = delivery;
+        this.pharmacy = pharmacy;
+        this.json = new ObjectMapper();
+    }
+
+    @Transactional
+    public DraftView draft(String doctor, String id) {
+        booking.lockCareScope(id);
+        requireDoctor(doctor, id);
+        return draftView(id, clinical.lockDraft(id));
+    }
+
+    @Transactional
+    public DraftView saveDraft(String doctor, String id, DraftView input) {
+        booking.lockCareScope(id);
+        requireDoctor(doctor, id);
+        var queue = reception.queueForAppointment(id);
+        if (queue == null || !queue.state().equals("IN_CONSULTATION"))
+            throw new ApiFailure(409, "DRAFT_NOT_ALLOWED", "只有接诊中的预约可以保存草稿");
+        validateDraft(input);
+        var current = clinical.lockDraft(id);
+        long now = clock.millis();
+        int next = input.versionNo() + 1;
+        String prescriptions = encodePrescriptions(input.prescriptions());
+        if (current == null) {
+            if (input.versionNo() != 0) throw new ApiFailure(409, "DRAFT_CONFLICT", "草稿版本已变化，请重新载入");
+            clinical.insertDraft(new ClinicalMapper.Draft(id, doctor, next, input.chiefComplaint(), input.presentIllness(),
+                input.historyAllergy(), input.diagnosis(), input.treatmentPlan(), prescriptions, now));
+        } else {
+            if (!current.doctorId().equals(doctor) || current.versionNo() != input.versionNo())
+                throw new ApiFailure(409, "DRAFT_CONFLICT", "草稿版本已变化，请重新载入");
+            if (clinical.updateDraft(id, next, input.chiefComplaint(), input.presentIllness(), input.historyAllergy(),
+                input.diagnosis(), input.treatmentPlan(), prescriptions, now, input.versionNo()) != 1)
+                throw new ApiFailure(409, "DRAFT_CONFLICT", "草稿版本已变化，请重新载入");
+        }
+        audit.record(doctor, "CLINICAL_DRAFT_SAVED", "APPOINTMENT", id, "保存接诊草稿版本 " + next);
+        return draftView(id, clinical.lockDraft(id));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -105,7 +152,12 @@ public class ClinicalService {
         booking.lockCareScope(id);
         var appointment = role.equals("PATIENT") ? requirePatient(actor, id) : requireDoctor(actor, id);
         var queue = reception.queueForAppointment(id);
-        if (!appointment.state().equals("CONFIRMED") || queue == null || !queue.state().equals("IN_CONSULTATION")) throw new ApiFailure(409, "CONSULTATION_NOT_OPEN", "叫号并开始接诊后才能发送图文消息");
+        if (!appointment.state().equals("CONFIRMED") || queue == null
+            || !appointment.serviceMode().equals("ONLINE")
+            || (role.equals("PATIENT") && !Set.of("WAITING", "CALLED", "IN_CONSULTATION").contains(queue.state()))
+            || (role.equals("DOCTOR") && !queue.state().equals("IN_CONSULTATION")))
+            throw new ApiFailure(409, "CONSULTATION_NOT_OPEN", role.equals("PATIENT")
+                ? "签到后即可留言，医生叫号后才能正式接诊" : "叫号并开始接诊后才能回复图文消息");
         if (body == null || body.isBlank() || body.length() > 10000) throw new ApiFailure(400, "INVALID_INPUT", "消息不能为空且不能超过10000字");
         ensureConsultation(id, clock.millis());
         String messageId=UUID.randomUUID().toString();
@@ -116,14 +168,36 @@ public class ClinicalService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ClinicalView submitResult(String doctor, String id, String body) {
+        return submitResult(doctor, id, body, null, List.of());
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ClinicalView submitResult(String doctor, String id, String body, List<PharmacyService.PrescriptionLineInput> prescriptions) {
+        return submitResult(doctor, id, body, null, prescriptions);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ClinicalView submitResult(String doctor, String id, String body, StructuredResult structured,
+        List<PharmacyService.PrescriptionLineInput> prescriptions) {
         booking.lockCareScope(id);
         var appointment = requireDoctor(doctor, id);
         var queue = reception.queueForAppointment(id);
         if (queue == null || !queue.state().equals("IN_CONSULTATION")) throw new ApiFailure(409, "ENCOUNTER_NOT_OPEN", "只有接诊中的预约可以提交结果");
-        if (body == null || body.isBlank() || body.length() > 20000) throw new ApiFailure(400, "INVALID_INPUT", "问诊结果不能为空且不能超过20000字");
+        if (body != null && body.length() > 20000) throw new ApiFailure(400, "INVALID_INPUT", "问诊结果不能超过20000字");
+        if (structured != null) validateStructuredResult(structured);
+        if (structured == null && (body == null || body.isBlank())) throw new ApiFailure(400, "INVALID_INPUT", "问诊结果不能为空且不能超过20000字");
+        pharmacy.reservePrescription(doctor, id, prescriptions);
         long now = clock.millis(); ensureConsultation(id, now);
         String type = appointment.serviceMode().equals("ONLINE") ? "ONLINE_CHAT" : "OFFLINE_RESULT";
-        clinical.insertResult(new ClinicalMapper.Result(UUID.randomUUID().toString(), id, clinical.nextResultVersion(id) + 1, doctor, type, body.trim(), now));
+        String chiefComplaint = structured == null ? "" : trim(structured.chiefComplaint());
+        String presentIllness = structured == null ? "" : trim(structured.presentIllness());
+        String historyAllergy = structured == null ? "" : trim(structured.historyAllergy());
+        String diagnosis = structured == null ? "" : trim(structured.diagnosis());
+        String treatmentPlan = structured == null ? "" : trim(structured.treatmentPlan());
+        String storedBody = trim(body);
+        if (storedBody.isEmpty()) storedBody = treatmentPlan;
+        clinical.insertResult(new ClinicalMapper.Result(UUID.randomUUID().toString(), id, clinical.nextResultVersion(id) + 1, doctor, type,
+            storedBody, chiefComplaint, presentIllness, historyAllergy, diagnosis, treatmentPlan, now));
         clinical.markReplied(id); clinical.closeConsultation(id, now);
         reception.completeEncounter(doctor, id); booking.completeAfterEncounter(id);
         audit.record(doctor, "CLINICAL_RESULT_SUBMITTED", "APPOINTMENT", id, "提交结果并结束接诊");
@@ -164,15 +238,63 @@ public class ClinicalService {
 
     private ClinicalView view(String id) { return view(id, false); }
     private ClinicalView view(String id, boolean doctor) {
+        var appointment = clinical.appointment(id);
         var materials = clinical.materials(id).stream().filter(material -> !doctor || material.shared()).map(material -> new MaterialView(material.id(), material.versionNo(), policy.display(id, "MATERIAL", material.id(), material.symptomText()), material.shared(), material.createdAt(),
             policy.limited(id, "MATERIAL", material.id()) ? List.of() : attachmentViews(material.id(), true))).toList();
-        var messages = clinical.messages(id).stream().map(m -> new ClinicalMapper.Message(m.id(), m.appointmentId(), m.authorId(), m.authorRole(), policy.display(id,"MESSAGE",m.id(),m.body()),m.createdAt())).toList();
+        List<ClinicalMapper.Message> messages = appointment != null && appointment.serviceMode().equals("ONLINE") ? clinical.messages(id).stream().map(m -> new ClinicalMapper.Message(m.id(), m.appointmentId(), m.authorId(), m.authorRole(), policy.display(id,"MESSAGE",m.id(),m.body()),m.createdAt())).toList() : List.of();
         var result = clinical.latestResult(id);
-        if (result != null) result = new ClinicalMapper.Result(result.id(), id, result.versionNo(), result.authorId(), result.encounterType(), policy.display(id,"RESULT",result.id(),result.body()),result.createdAt());
+        if (result != null) result = new ClinicalMapper.Result(result.id(), id, result.versionNo(), result.authorId(), result.encounterType(),
+            policy.display(id,"RESULT",result.id(),result.body()),
+            policy.display(id,"RESULT",result.id(),result.chiefComplaint()),
+            policy.display(id,"RESULT",result.id(),result.presentIllness()),
+            policy.display(id,"RESULT",result.id(),result.historyAllergy()),
+            policy.display(id,"RESULT",result.id(),result.diagnosis()),
+            policy.display(id,"RESULT",result.id(),result.treatmentPlan()), result.createdAt());
         var corrections = clinical.corrections(id).stream().map(c -> new ClinicalMapper.Correction(c.id(),c.resultId(),id,c.authorId(),
             policy.limited(id,"CORRECTION",c.id()) || policy.limited(id,"RESULT",c.resultId()) ? ReviewPolicyService.LIMITED : c.reason(),
             policy.limited(id,"RESULT",c.resultId()) ? ReviewPolicyService.LIMITED : policy.display(id,"CORRECTION",c.id(),c.body()),c.createdAt())).toList();
-        return new ClinicalView(clinical.consultation(id), materials, messages, result, corrections);
+        return new ClinicalView(clinical.consultation(id), materials, messages, result, corrections, appointment == null ? null : appointment.serviceMode());
+    }
+
+    private DraftView draftView(String id, ClinicalMapper.Draft draft) {
+        if (draft == null) return new DraftView(id, 0, "", "", "", "", "", List.of(), null);
+        return new DraftView(draft.appointmentId(), draft.versionNo(), draft.chiefComplaint(), draft.presentIllness(), draft.historyAllergy(),
+            draft.diagnosis(), draft.treatmentPlan(), decodePrescriptions(draft.prescriptionsJson()), draft.updatedAt());
+    }
+
+    private void validateDraft(DraftView input) {
+        if (input == null || input.versionNo() < 0) throw new ApiFailure(400, "INVALID_INPUT", "草稿版本无效");
+        if (input.chiefComplaint() == null || input.presentIllness() == null || input.historyAllergy() == null
+            || input.diagnosis() == null || input.treatmentPlan() == null)
+            throw new ApiFailure(400, "INVALID_INPUT", "病历草稿字段不能为空");
+        for (String value : new String[] { input.chiefComplaint(), input.presentIllness(), input.historyAllergy(), input.diagnosis(), input.treatmentPlan() })
+            if (value.length() > 4000) throw new ApiFailure(400, "INVALID_INPUT", "病历草稿字段不能超过4000字");
+        if (input.prescriptions() == null || input.prescriptions().size() > 50) throw new ApiFailure(400, "INVALID_INPUT", "草稿最多保存50项药品");
+        for (var line : input.prescriptions()) {
+            if (line == null || line.medicineId() == null || line.medicineId().isBlank() || line.quantity() < 0 || line.usage() == null || line.usage().length() > 1000)
+                throw new ApiFailure(400, "INVALID_INPUT", "药品草稿字段无效");
+        }
+    }
+
+    private void validateStructuredResult(StructuredResult input) {
+        for (String value : new String[] { input.chiefComplaint(), input.presentIllness(), input.historyAllergy(), input.diagnosis(), input.treatmentPlan() })
+            if (value != null && value.length() > 4000) throw new ApiFailure(400, "INVALID_INPUT", "结构化病历字段不能超过4000字");
+        if (input.chiefComplaint() == null || input.chiefComplaint().isBlank()
+            || input.diagnosis() == null || input.diagnosis().isBlank()
+            || input.treatmentPlan() == null || input.treatmentPlan().isBlank())
+            throw new ApiFailure(400, "INVALID_INPUT", "主诉、诊断和处理建议不能为空");
+    }
+
+    private String trim(String value) { return value == null ? "" : value.trim(); }
+
+    private String encodePrescriptions(List<DraftPrescription> prescriptions) {
+        try { return json.writeValueAsString(prescriptions == null ? List.of() : prescriptions); }
+        catch (JsonProcessingException error) { throw new ApiFailure(400, "INVALID_INPUT", "药品草稿格式无效"); }
+    }
+
+    private List<DraftPrescription> decodePrescriptions(String value) {
+        try { return value == null || value.isBlank() ? List.of() : json.readerForListOf(DraftPrescription.class).readValue(value); }
+        catch (JsonProcessingException error) { throw new ApiFailure(503, "DRAFT_UNAVAILABLE", "草稿暂时无法读取"); }
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)

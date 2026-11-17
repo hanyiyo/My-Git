@@ -5,6 +5,7 @@ import jakarta.validation.constraints.*;
 import java.util.List;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -17,6 +18,9 @@ public class AiController {
     public record AnalyzeInput(@NotBlank @Size(max=36) String consentId, @NotBlank @Size(max=10000) String symptomText,
         @NotBlank @Size(max=80) String idempotencyKey) {}
     public record ShareInput(@NotNull Boolean shared) {}
+    public record SummaryConsentInput(@NotNull Boolean accepted, @NotBlank @Size(max=40) String provider,
+        @NotBlank @Size(max=60) String purpose, @NotBlank @Size(max=120) String scope,
+        List<@NotBlank @Size(max=36) String> messageIds, List<@NotBlank @Size(max=36) String> materialIds) {}
     @PostMapping("/patient/appointments/{id}/ai/drafts/{taskId}/share")
     AiService.ResultView share(JwtAuthenticationToken auth, @PathVariable String id, @PathVariable String taskId, @Valid @RequestBody ShareInput input) {
         return ai.shareDraft(auth.getName(), id, taskId, input.shared());
@@ -39,6 +43,19 @@ public class AiController {
     void revoke(JwtAuthenticationToken auth, @PathVariable String id, @PathVariable String consentId) {
         ai.revoke(auth.getName(), id, consentId);
     }
+    @PostMapping("/patient/appointments/{id}/ai/summary-consents")
+    AiService.SummaryConsentView summaryConsent(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody SummaryConsentInput input) {
+        return ai.summaryConsent(auth.getName(), id, new AiService.SummaryConsentInput(input.accepted(), input.provider(), input.purpose(), input.scope(), input.messageIds(), input.materialIds()));
+    }
+    @GetMapping("/patient/appointments/{id}/ai/summary-consents")
+    List<AiService.SummaryConsentView> summaryConsents(JwtAuthenticationToken auth, @PathVariable String id) {
+        return ai.summaryConsents(auth.getName(), id);
+    }
+    @PostMapping("/patient/appointments/{id}/ai/summary-consents/{consentId}/revoke")
+    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    void revokeSummaryConsent(JwtAuthenticationToken auth, @PathVariable String id, @PathVariable String consentId) {
+        ai.revokeSummaryConsent(auth.getName(), id, consentId);
+    }
     @GetMapping("/admin/ai/calls")
     List<AiMapper.CallMetadata> calls() { return ai.callMetadata(); }
     @PostMapping("/patient/ai/consents")
@@ -58,6 +75,14 @@ public class AiController {
     List<AiService.ResultView> doctorResults(JwtAuthenticationToken auth, @PathVariable String id) {
         return ai.doctorResults(auth.getName(), id);
     }
+    @PostMapping("/doctor/clinical/{id}/ai/summarize")
+    AiService.ConversationSummary summarize(JwtAuthenticationToken auth, @PathVariable String id) {
+        return ai.summarizeConversation(auth.getName(), id);
+    }
     @GetMapping("/assistant/business")
     AiService.BusinessAnswer business(@RequestParam String question) { return ai.business(question); }
+    @PostMapping(value="/assistant/triage", consumes="multipart/form-data")
+    AiService.TriageAnswer triage(@RequestParam String question, @RequestPart(name="image", required=false) MultipartFile image) {
+        return ai.triage(question, image);
+    }
 }

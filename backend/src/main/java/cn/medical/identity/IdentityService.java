@@ -14,7 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class IdentityService {
-    public record Profile(String id, String identifier, List<String> roles, boolean enabled, String credentialStatus) {}
+    public record Profile(String id, String identifier, List<String> roles, boolean enabled, String credentialStatus,
+                          String displayName, String phoneNumber) {}
     public record Doctor(String id, String identifier, String displayName, String title, String biography, String credentialStatus, boolean enabled) {}
     public record Tokens(String accessToken, String refreshToken, long expiresIn, Profile account) {}
     private final AccountMapper accounts;
@@ -32,15 +33,28 @@ public class IdentityService {
 
     @Transactional
     public Profile register(String identifier, String password, String role, boolean privileged) {
+        return register(identifier, password, role, privileged, null, null);
+    }
+
+    @Transactional
+    public Profile register(String identifier, String password, String role, boolean privileged,
+                            String displayName, String phoneNumber) {
         String normalized = normalize(identifier);
         if (!Set.of("PATIENT", "DOCTOR", "ADMIN").contains(role) || (role.equals("ADMIN") && !privileged))
             throw new ApiFailure(403, "ROLE_NOT_ALLOWED", "管理员账户需要授权创建");
         if (password == null || password.length() < 12 || password.getBytes(StandardCharsets.UTF_8).length > 72) throw new ApiFailure(400, "INVALID_INPUT", "密码需至少12个字符，UTF-8编码不超过72字节");
+        if (role.equals("PATIENT")) {
+            if (displayName == null || displayName.isBlank() || displayName.length() > 120)
+                throw new ApiFailure(400, "INVALID_INPUT", "患者姓名不能为空且不超过120个字符");
+            if (phoneNumber == null || !phoneNumber.matches("1[3-9]\\d{9}"))
+                throw new ApiFailure(400, "INVALID_INPUT", "请输入有效的中国大陆手机号");
+        }
         String id = UUID.randomUUID().toString();
         try { accounts.insertAccount(id, normalized, passwords.encode(password), clock.millis()); }
         catch (DuplicateKeyException error) { throw new ApiFailure(409, "ACCOUNT_EXISTS", "账户已存在"); }
         accounts.insertRole(id, role);
         if (role.equals("DOCTOR")) accounts.insertDoctor(id);
+        if (role.equals("PATIENT")) accounts.insertPatientProfile(id, displayName.trim(), phoneNumber.trim());
         return profile(id);
     }
 
@@ -72,7 +86,9 @@ public class IdentityService {
     public Profile profile(String id) {
         var account = accounts.byId(id);
         if (account == null) throw new ApiFailure(404, "NOT_FOUND", "账户不存在");
-        return new Profile(account.id(), account.identifier(), accounts.roles(id), account.enabled(), accounts.credentialStatus(id));
+        var patient = accounts.patientProfile(id);
+        return new Profile(account.id(), account.identifier(), accounts.roles(id), account.enabled(), accounts.credentialStatus(id),
+                patient == null ? null : patient.displayName(), patient == null ? null : patient.phoneNumber());
     }
 
     public List<Doctor> doctors() { return accounts.doctors(); }

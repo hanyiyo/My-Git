@@ -4,12 +4,18 @@ async function register(page: Page, role: 'PATIENT' | 'DOCTOR') {
   const name = `browser-${crypto.randomUUID()}`
   await page.goto('/login')
   await page.getByRole('button', { name: '患者或医生注册' }).click()
+  if (role === 'PATIENT') {
+    await page.getByLabel('姓名', { exact: true }).fill('测试患者')
+    await page.getByLabel('手机号', { exact: true }).fill('13800138000')
+  }
   await page.getByLabel('账号', { exact: true }).fill(name)
   await page.getByLabel('密码', { exact: true }).fill(password)
   await page.getByLabel('注册身份').selectOption(role)
+  if (role === 'PATIENT') await page.getByLabel('图形验证码', { exact: true }).fill('AB7K')
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('注册成功')
   await expect(page.getByAltText('图形验证码')).toBeVisible()
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeEnabled()
   return name
 }
 async function login(page: Page, name: string, pass = password) {
@@ -21,13 +27,118 @@ async function login(page: Page, name: string, pass = password) {
 }
 test('患者完成注册、验证码登录、刷新恢复会话及退出，角色路由阻止越权', async ({ page, context }) => {
   const name = await register(page, 'PATIENT')
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/v1/catalog/departments', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'dept-demo', name: '内科', description: '常见病门诊', active: true }]),
+  }))
+  await page.route('**/api/v1/catalog/doctors', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'doctor-demo', displayName: '林医生', title: '主治医师', biography: '全科诊疗', credentialStatus: 'CERTIFIED', enabled: true, departmentId: 'dept-demo', departmentName: '内科' }]),
+  }))
+  await page.route('**/api/v1/catalog/schedules**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/v1/assistant/business?*', route => {
+    const question = new URL(route.request().url()).searchParams.get('question') ?? ''
+    if (question === '医院流程') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: '业务咨询暂不可用' } }) })
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(question.includes('咳嗽')
+      ? { mode: 'TRIAGE_ASSISTANCE', answer: '我可以协助查找科室，但不能提供诊断或处方。', sources: [] }
+      : { mode: 'LOCAL_FACTS', answer: '校医院地址：虚构路1号', sources: ['hospital.address'] }) })
+  })
+  let triageRequests = 0
+  await page.route('**/api/v1/assistant/triage', route => {
+    triageRequests += 1
+    if (triageRequests > 1) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: '导诊助手暂不可用' } }) })
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ mode: 'TRIAGE_ASSISTANCE', answer: '这是辅助结果，不是诊断或处方。', departmentHint: '内科', imageReceived: false, sources: ['configured-departments'] }) })
+  })
+  let appointmentWrites = 0
+  page.on('request', request => {
+    if (request.method() !== 'GET' && new URL(request.url()).pathname.endsWith('/appointments')) appointmentWrites += 1
+  })
   await login(page, name)
   await expect(page).toHaveURL(/\/patient$/)
-  await expect(page.getByText(`欢迎，${name}`)).toBeVisible()
+  await expect(page.getByRole('heading', { name: '欢迎回来，测试患者' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '快捷服务' })).toBeVisible()
+  await expect(page.getByRole('region', { name: '医院信息' })).toContainText('校医院')
+  await expect(page.getByRole('region', { name: '科室与医生' })).toContainText('内科')
+  await expect(page.getByRole('region', { name: '科室与医生' })).toContainText('林医生')
+  await expect(page.getByText('暂无当前预约', { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: /内科/ }).last().click()
+  await expect(page).toHaveURL(/\/patient\/catalog\?.*departmentId=dept-demo/)
+  await expect(page.getByLabel('科室', { exact: true })).toHaveValue('dept-demo')
+  await expect(page.getByText('当前筛选暂无可用号源')).toBeVisible()
+  await page.getByRole('link', { name: '首页', exact: true }).click()
+  await expect(page).toHaveURL(/\/patient$/)
+  await page.getByRole('link', { name: /林医生/ }).click()
+  await expect(page).toHaveURL(/\/patient\/catalog\?.*doctorId=doctor-demo/)
+  await page.goto('/patient/catalog?departmentId=missing&doctorId=missing&date=invalid&mode=WRONG&session=NOPE')
+  await expect(page).toHaveURL(/\/patient\/catalog\?mode=OFFLINE&date=\d{4}-\d{2}-\d{2}$/)
+  await expect(page.getByText('当前筛选暂无可用号源')).toBeVisible()
+  await page.getByRole('link', { name: '首页', exact: true }).click()
+  await expect(page).toHaveURL(/\/patient$/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await page.route('**/api/v1/catalog/hospital', route => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: '医院信息暂不可用' } }),
+  }), { times: 1 })
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('医院信息暂不可用')
+  await page.getByRole('button', { name: '重试加载' }).click()
+  await expect(page.getByRole('region', { name: '医院信息' })).toContainText('校医院')
   const refresh = (await context.cookies()).find(cookie => cookie.name === 'MEDICAL_REFRESH')
   expect(refresh?.httpOnly).toBeTruthy(); expect(refresh?.sameSite).toBe('Strict')
   expect(await page.evaluate(() => [localStorage.getItem('accessToken'), sessionStorage.getItem('refreshToken')])).toEqual([null, null])
-  await page.reload(); await expect(page.getByText(`欢迎，${name}`)).toBeVisible()
+  await page.route('**/api/v1/catalog/schedules?*', route => {
+    expect(new URL(route.request().url()).searchParams.get('departmentId')).toBe('dept-demo')
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+      { doctorId: 'doctor-demo', doctorName: '林医生', departmentId: 'dept-demo', departmentName: '内科', scheduleId: 'schedule-demo', id: 'schedule-demo', clinicDate: '2099-01-01', session: 'AM', serviceMode: 'ONLINE', advanceAvailable: true, walkInAvailable: false },
+    ]) })
+  })
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.getByRole('button', { name: '打开导诊助手' }).click()
+  const drawer = page.locator('.assistant-drawer')
+  await drawer.getByLabel('描述问题或症状').fill('医院流程')
+  await drawer.getByRole('button', { name: '获取辅助建议' }).click()
+  await expect(drawer.getByRole('alert')).toHaveText('业务咨询暂不可用')
+  await drawer.getByLabel('描述问题或症状').fill('医院地址在哪里？')
+  await drawer.getByRole('button', { name: '获取辅助建议' }).click()
+  await expect(drawer).toContainText('校医院地址：虚构路1号')
+  await drawer.getByLabel('描述问题或症状').fill('我最近咳嗽')
+  await drawer.getByRole('button', { name: '获取辅助建议' }).click()
+  await expect(drawer).toContainText('提交症状前请确认授权范围')
+  await drawer.getByRole('button', { name: '拒绝授权，继续自行查询' }).click()
+  await expect(drawer).toContainText('已拒绝本次授权，不影响你自行查询科室和挂号')
+  expect(triageRequests).toBe(0)
+  await drawer.getByRole('button', { name: '获取辅助建议' }).click()
+  await drawer.getByRole('checkbox', { name: /我已阅读并同意/ }).check()
+  await drawer.getByRole('button', { name: '同意授权并获取建议' }).click()
+  await expect(drawer).toContainText('AI 辅助导诊结果')
+  await expect(drawer).toContainText('林医生')
+  expect((await drawer.boundingBox())?.width).toBe(375)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  await drawer.locator('.assistant-recommendation').click()
+  await expect(drawer).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '立即挂号', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '展开筛选' }).click()
+  await expect(page.getByLabel('科室', { exact: true })).toBeEnabled()
+  await expect(page).toHaveURL(/\/patient\/catalog\?./)
+  const recommendationQuery = new URL(page.url()).searchParams
+  expect(recommendationQuery.get('departmentId')).toBe('dept-demo')
+  expect(recommendationQuery.get('doctorId')).toBe('doctor-demo')
+  expect(recommendationQuery.get('date')).toBe('2099-01-01')
+  expect(recommendationQuery.get('mode')).toBe('ONLINE')
+  expect(recommendationQuery.get('session')).toBe('AM')
+  expect(triageRequests).toBe(1)
+  expect(appointmentWrites).toBe(0)
+  await page.getByRole('button', { name: '展开导航' }).click()
+  await page.getByRole('link', { name: '首页', exact: true }).click()
+  await expect(page).toHaveURL(/\/patient$/)
+  await page.getByRole('button', { name: '打开导诊助手' }).click()
+  const failedDrawer = page.locator('.assistant-drawer')
+  await failedDrawer.getByLabel('描述问题或症状').fill('我最近咳嗽')
+  await failedDrawer.getByRole('button', { name: '获取辅助建议' }).click()
+  await failedDrawer.getByRole('checkbox', { name: /我已阅读并同意/ }).check()
+  await failedDrawer.getByRole('button', { name: '同意授权并获取建议' }).click()
+  await expect(failedDrawer.getByRole('alert')).toHaveText('导诊助手暂不可用')
+  await expect(failedDrawer.locator('.assistant-result')).toHaveCount(0)
   await page.goto('/admin'); await expect(page).toHaveURL(/\/patient$/)
   await page.getByRole('button', { name: '退出登录' }).click(); await expect(page).toHaveURL(/\/login$/)
   await page.goto('/patient'); await expect(page).toHaveURL(/\/login$/)
@@ -42,6 +153,53 @@ test('医生注册进入待审核工作台，错误验证码后保留账号并�
   await login(page, name)
   await expect(page).toHaveURL(/\/doctor$/)
   await expect(page.getByText('医生资质：待审核')).toBeVisible()
+})
+test('患者首页预约摘要按状态提供下一步入口', async ({ page }) => {
+  const name = await register(page, 'PATIENT')
+  const now = Date.now()
+  let state = 'PENDING_PAYMENT'
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify([{
+      id: 'appointment-demo', doctorName: '林医生', departmentName: '内科', clinicDate: '2099-01-01', session: 'AM',
+      serviceMode: 'OFFLINE', state, startsAt: now + 3600000, endsAt: now + 7200000,
+      serverNow: now, credential: null, payment: null, reception: null,
+    }]),
+  }))
+  await login(page, name)
+  await expect(page.getByText('待支付', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '去我的挂号完成支付' })).toHaveAttribute('href', '/patient/orders?state=PENDING_PAYMENT')
+  state = 'COMPLETED'
+  await page.reload()
+  await expect(page.getByText('已完成', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '查看问诊材料与结果' })).toHaveAttribute('href', '/patient/orders/appointment-demo/clinical')
+})
+test('患者首页预约加载失败显示重试并恢复为空状态', async ({ page }) => {
+  const name = await register(page, 'PATIENT')
+  await page.route('**/api/v1/patient/appointments', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: '预约服务暂不可用' } }),
+  }), { times: 1 })
+  await login(page, name)
+  await expect(page.getByRole('alert')).toContainText('预约服务暂不可用')
+  await page.getByRole('button', { name: '重试加载预约' }).click()
+  await expect(page.getByText('暂无当前预约', { exact: true })).toBeVisible()
+})
+test('患者首页显示通知未读数并在新通知和已读事件后刷新', async ({ page }) => {
+  const name = await register(page, 'PATIENT')
+  let unread = 3
+  await page.route('**/api/v1/notifications/unread', route => route.fulfill({ status: 200, contentType: 'application/json', body: String(unread) }))
+  await page.route('**/api/v1/notifications?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/v1/notifications/stream', route => route.abort())
+  await login(page, name)
+  const notificationLink = page.locator('a').filter({ hasText: '未读提醒' }).first()
+  await expect(notificationLink).toContainText('未读提醒：3')
+  unread = 4
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('medical-notification')))
+  await expect(notificationLink).toContainText('未读提醒：4')
+  unread = 2
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('medical-notification-read')))
+  await expect(notificationLink).toContainText('未读提醒：2')
+  await notificationLink.click()
+  await expect(page).toHaveURL(/\/notifications$/)
 })
 test('管理员使用配置的引导账户登录并刷新会话', async ({ page }) => {
   await page.goto('/login'); await login(page, 'admin-foundation-test', 'fictional-test-administrator-password')

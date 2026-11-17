@@ -2,27 +2,32 @@ let accessToken = ''
 let csrfToken = ''
 export function setAccessToken(value: string) { accessToken = value }
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message) } }
+async function readJson(response: Response): Promise<any> {
+  const text = await response.text()
+  if (!text.trim()) return undefined
+  try { return JSON.parse(text) } catch { return undefined }
+}
 export async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
   if (method !== 'GET') {
     const response = await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })
     if (!response.ok) throw new ApiError(response.status, '安全会话暂不可用，请重试')
-    csrfToken = (await response.json()).token
+    csrfToken = (await readJson(response))?.token ?? ''
   }
   const response = await fetch('/api/v1' + path, {
     method, credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), ...(csrfToken ? { 'X-XSRF-TOKEN': csrfToken } : {}) },
     body: data === undefined ? undefined : JSON.stringify(data)
   })
-  const body = response.status === 204 ? undefined : await response.json()
+  const body = response.status === 204 ? undefined : await readJson(response)
   if (!response.ok) throw new ApiError(response.status, body?.error?.message ?? '服务暂不可用，请重试')
   return body as T
 }
 export async function upload<T>(path: string, form: FormData): Promise<T> {
   const response = await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })
   if (!response.ok) throw new ApiError(response.status, '安全会话暂不可用，请重试')
-  csrfToken = (await response.json()).token
+  csrfToken = (await readJson(response))?.token ?? ''
   const result = await fetch('/api/v1' + path, { method: 'POST', credentials: 'same-origin', headers: { ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), ...(csrfToken ? { 'X-XSRF-TOKEN': csrfToken } : {}) }, body: form })
-  const body = await result.json()
+  const body = await readJson(result)
   if (!result.ok) throw new ApiError(result.status, body?.error?.message ?? '服务暂不可用，请重试')
   return body as T
 }

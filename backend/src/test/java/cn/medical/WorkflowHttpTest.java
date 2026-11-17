@@ -73,6 +73,40 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(scenario.doctor().browser().call("POST", "/api/v1/doctor/reception/" + scenario.appointmentId() + "/call", null).status()).isEqualTo(200);
         assertThat(scenario.doctor().browser().call("POST", "/api/v1/doctor/reception/" + scenario.appointmentId() + "/start", null).status()).isEqualTo(200);
     }
+
+    @Test void doctorHomeAggregatesOwnScheduleQueueAndActiveEncounterWithoutCrossDoctorData() throws Exception {
+        var scenario = scenario("ONLINE");
+        clock.now = Instant.ofEpochMilli(scenario.schedule().path("startsAt").asLong());
+        assertThat(scenario.patient().browser().call("POST", patientPath(scenario) + "/check-in", null).status()).isEqualTo(200);
+
+        var home = scenario.doctor().browser().call("GET", "/api/v1/doctor/home", null);
+        assertThat(home.status()).withFailMessage(home.body().toString()).isEqualTo(200);
+        assertThat(home.body().path("account").path("id").asText()).isEqualTo(scenario.doctor().id());
+        assertThat(home.body().path("doctor").path("departmentId").asText()).isEqualTo(scenario.departmentId());
+        assertThat(home.body().path("hospitalDate").asText()).isEqualTo(scenario.schedule().path("clinicDate").asText());
+        assertThat(home.body().path("currentSchedule").path("id").asText()).isEqualTo(scenario.schedule().path("id").asText());
+        assertThat(home.body().path("waitingCount").asInt()).isEqualTo(1);
+        assertThat(home.body().path("inConsultationCount").asInt()).isZero();
+        assertThat(home.body().path("activeAppointmentId").isNull()).isTrue();
+
+        var other = doctor(scenario.departmentId());
+        var otherHome = other.browser().call("GET", "/api/v1/doctor/home", null);
+        assertThat(otherHome.status()).isEqualTo(200);
+        assertThat(otherHome.body().path("account").path("id").asText()).isEqualTo(other.id());
+        assertThat(otherHome.body().path("waitingCount").asInt()).isZero();
+        assertThat(otherHome.body().path("currentSchedule").isNull()).isTrue();
+        assertThat(otherHome.body().toString()).doesNotContain(scenario.appointmentId(), scenario.doctor().id());
+    }
+    @Test void doctorReceptionKeepsCheckedInCareAfterEndButRejectsMiss() throws Exception {
+        var s = scenario("OFFLINE");
+        clock.now = Instant.ofEpochMilli(s.schedule().path("startsAt").asLong());
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/check-in", null).status()).isEqualTo(200);
+        clock.now = Instant.ofEpochMilli(s.schedule().path("endsAt").asLong());
+        assertThat(s.doctor().browser().call("POST", "/api/v1/doctor/reception/" + s.appointmentId() + "/call", null).status()).isEqualTo(200);
+        var miss = s.doctor().browser().call("POST", "/api/v1/doctor/reception/" + s.appointmentId() + "/miss", null);
+        assertThat(miss.status()).isEqualTo(409);
+        assertThat(miss.body().path("error").path("code").asText()).isEqualTo("SESSION_CLOSED");
+    }
     String patientPath(Scenario scenario) { return "/api/v1/patient/appointments/" + scenario.appointmentId(); }
     String doctorPath(Scenario scenario) { return "/api/v1/doctor/clinical/" + scenario.appointmentId(); }
     Reply materials(Browser browser, String appointment, boolean shared, String symptoms, FilePart... parts) throws Exception {
@@ -110,9 +144,18 @@ class WorkflowHttpTest extends HttpFixture {
             assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "过早消息")).status()).isEqualTo(409);
             var consent = patient.call("POST", patientPath(scenario) + "/ai/consents", Map.of("accepted", true, "provider", "LOCAL_MOCK", "purpose", "PRECONSULTATION_SUMMARY", "scope", "SYMPTOM_TEXT", "symptomText", "结束后 AI 材料")).body();
             start(scenario);
-            assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "患者图文消息")).status()).isEqualTo(200);
-            assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "医生回复")).status()).isEqualTo(200);
-            assertThat(patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("messages")).hasSize(2);
+            if (mode.equals("ONLINE")) {
+                assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "患者图文消息")).status()).isEqualTo(200);
+                assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "医生回复")).status()).isEqualTo(200);
+                assertThat(patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("messages")).hasSize(2);
+            } else {
+                assertThat(patient.call("POST", patientPath(scenario) + "/clinical/messages", Map.of("body", "患者图文消息")).status()).isEqualTo(409);
+                assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "医生回复")).status()).isEqualTo(409);
+                assertThat(doctor.call("GET", doctorPath(scenario), null).body().path("messages")).isEmpty();
+                assertThat(doctor.call("GET", doctorPath(scenario) + "/ai", null).body()).isEmpty();
+                var offlineSummary = doctor.call("POST", doctorPath(scenario) + "/ai/summarize", null);
+                assertThat(offlineSummary.status()).withFailMessage(offlineSummary.body().toString()).isEqualTo(409);
+            }
             assertThat(patient.call("POST", patientPath(scenario) + "/clinical/sharing/revoke", null).status()).isEqualTo(200);
             assertThat(download(doctor, "/api/v1/doctor/clinical/attachments/" + attachment).statusCode()).isEqualTo(403);
             assertThat(doctor.call("POST", doctorPath(scenario) + "/messages", Map.of("body", "撤回后回复")).body().path("materials")).isEmpty();
@@ -134,6 +177,88 @@ class WorkflowHttpTest extends HttpFixture {
             assertThat(patient.call("GET", patientPath(scenario) + "/clinical", null).body().path("result")).isEqualTo(result);
             clock.now = Instant.now();
         }
+    }
+    @Test void clinicalDraftsPersistByAppointmentAndRejectStaleVersions() throws Exception {
+        var scenario = scenario("ONLINE"); start(scenario); var doctor = scenario.doctor().browser();
+        var draftPath = doctorPath(scenario) + "/draft";
+        var initial = doctor.call("GET", draftPath, null);
+        assertThat(initial.status()).withFailMessage(initial.body().toString()).isEqualTo(200); assertThat(initial.body().path("versionNo").asInt()).isZero();
+        var body = Map.of("version", 0, "chiefComplaint", "持续咳嗽", "presentIllness", "三天", "historyAllergy", "无", "diagnosis", "", "treatmentPlan", "", "prescriptions", List.of(Map.of("medicineId", "demo-medicine", "quantity", 0, "usage", "")));
+        var saved = doctor.call("PUT", draftPath, body);
+        assertThat(saved.status()).isEqualTo(200); assertThat(saved.body().path("versionNo").asInt()).isEqualTo(1);
+        assertThat(doctor.call("GET", draftPath, null).body().path("chiefComplaint").asText()).isEqualTo("持续咳嗽");
+        var stale = doctor.call("PUT", draftPath, body);
+        assertThat(stale.status()).isEqualTo(409); assertThat(stale.body().path("error").path("code").asText()).isEqualTo("DRAFT_CONFLICT");
+        var foreign = actor("DOCTOR").browser();
+        assertThat(foreign.call("GET", draftPath, null).status()).isEqualTo(404);
+        assertThat(foreign.call("PUT", draftPath, body).status()).isEqualTo(404);
+    }
+
+    @Test void structuredClinicalResultPersistsRequiredFieldsAndPharmacySnapshot() throws Exception {
+        var scenario = scenario("ONLINE"); start(scenario);
+        var medicine = admin().call("POST", "/api/v1/admin/pharmacy/medicines", Map.of(
+            "name", "结构化测试药", "spec", "10片/盒", "feeMinor", 1250, "stock", 3, "threshold", 1, "active", true));
+        assertThat(medicine.status()).isEqualTo(201);
+        String medicineId = medicine.body().path("id").asText();
+        var invalid = new HashMap<String, Object>();
+        invalid.put("body", ""); invalid.put("chiefComplaint", ""); invalid.put("presentIllness", "三天");
+        invalid.put("historyAllergy", "无"); invalid.put("diagnosis", ""); invalid.put("treatmentPlan", "");
+        invalid.put("prescriptions", List.of());
+        assertThat(scenario.doctor().browser().call("POST", doctorPath(scenario) + "/result", invalid).status()).isEqualTo(400);
+
+        var submitted = new HashMap<String, Object>();
+        submitted.put("body", "补充观察说明"); submitted.put("chiefComplaint", "持续咳嗽"); submitted.put("historyAllergy", "青霉素过敏");
+        submitted.put("diagnosis", "上呼吸道感染"); submitted.put("treatmentPlan", "口服并复诊");
+        submitted.put("prescriptions", List.of(Map.of("medicineId", medicineId, "quantity", 2, "usage", "每日两次，每次一片")));
+        var finished = scenario.doctor().browser().call("POST", doctorPath(scenario) + "/result", submitted);
+        assertThat(finished.status()).withFailMessage(finished.body().toString()).isEqualTo(200);
+        assertThat(finished.body().path("result").path("chiefComplaint").asText()).isEqualTo("持续咳嗽");
+        assertThat(finished.body().path("result").path("presentIllness").asText()).isEmpty();
+        assertThat(finished.body().path("result").path("diagnosis").asText()).isEqualTo("上呼吸道感染");
+        assertThat(finished.body().path("result").path("treatmentPlan").asText()).isEqualTo("口服并复诊");
+        var order = scenario.doctor().browser().call("GET", "/api/v1/doctor/pharmacy/appointments/" + scenario.appointmentId() + "/prescriptions", null);
+        assertThat(order.status()).withFailMessage(order.body().toString()).isEqualTo(200); assertThat(order.body().path("state").asText()).isEqualTo("PENDING_PAYMENT");
+        assertThat(order.body().path("totalMinor").asLong()).isEqualTo(2500);
+        assertThat(order.body().path("lines").get(0).path("usage").asText()).isEqualTo("每日两次，每次一片");
+        String orderId = order.body().path("id").asText();
+        var patientClinical = scenario.patient().browser().call("GET", patientPath(scenario) + "/clinical", null);
+        assertThat(patientClinical.body().path("result").path("historyAllergy").asText()).isEqualTo("青霉素过敏");
+        var paid = scenario.patient().browser().call("POST", "/api/v1/patient/pharmacy/orders/" + orderId + "/pay", null);
+        assertThat(paid.status()).isEqualTo(200); assertThat(paid.body().path("state").asText()).isEqualTo("PAID");
+        assertThat(scenario.patient().browser().call("GET", patientPath(scenario) + "/clinical", null).body().path("result").path("diagnosis").asText()).isEqualTo("上呼吸道感染");
+    }
+
+    @Test void expiredPharmacyPaymentReleasesStockWithoutRemovingClinicalResult() throws Exception {
+        var scenario = scenario("OFFLINE"); start(scenario);
+        var medicine = admin().call("POST", "/api/v1/admin/pharmacy/medicines", Map.of(
+            "name", "超时测试药", "spec", "5片/盒", "feeMinor", 800, "stock", 2, "threshold", 1, "active", true));
+        String medicineId = medicine.body().path("id").asText();
+        var submitted = Map.of("body", "观察说明", "chiefComplaint", "头痛", "presentIllness", "今天", "historyAllergy", "无",
+            "diagnosis", "偏头痛", "treatmentPlan", "休息", "prescriptions", List.of(Map.of("medicineId", medicineId, "quantity", 1, "usage", "必要时一次一片")));
+        assertThat(scenario.doctor().browser().call("POST", doctorPath(scenario) + "/result", submitted).status()).isEqualTo(200);
+        var orders = scenario.patient().browser().call("GET", "/api/v1/patient/pharmacy/orders", null).body();
+        var order = java.util.stream.StreamSupport.stream(orders.spliterator(), false)
+            .filter(value -> value.path("appointmentId").asText().equals(scenario.appointmentId())).findFirst().orElseThrow();
+        String orderId = order.path("id").asText();
+        long expiresAt = order.path("expiresAt").asLong();
+        clock.now = Instant.ofEpochMilli(expiresAt + 1);
+        var expired = scenario.patient().browser().call("POST", "/api/v1/patient/pharmacy/orders/" + orderId + "/pay", null);
+        assertThat(expired.status()).isEqualTo(409);
+        assertThat(scenario.patient().browser().call("GET", patientPath(scenario) + "/clinical", null).body().path("result").path("diagnosis").asText()).isEqualTo("偏头痛");
+        var medicines = admin().call("GET", "/api/v1/admin/pharmacy/medicines", null).body();
+        var restored = java.util.stream.StreamSupport.stream(medicines.spliterator(), false)
+            .filter(value -> value.path("id").asText().equals(medicineId)).findFirst().orElseThrow();
+        assertThat(restored.path("availableStock").asInt()).withFailMessage(restored.toString()).isEqualTo(2);
+    }
+    @Test void legacyPrescriptionPayloadWithoutUsageRemainsAccepted() throws Exception {
+        var scenario = scenario("OFFLINE"); start(scenario);
+        var medicine = admin().call("POST", "/api/v1/admin/pharmacy/medicines", Map.of(
+            "name", "兼容旧处方药", "spec", "6片/盒", "feeMinor", 600, "stock", 2, "threshold", 1, "active", true));
+        String medicineId = medicine.body().path("id").asText();
+        var response = scenario.doctor().browser().call("POST", "/api/v1/doctor/pharmacy/appointments/" + scenario.appointmentId() + "/prescriptions",
+            Map.of("lines", List.of(Map.of("medicineId", medicineId, "quantity", 1))));
+        assertThat(response.status()).withFailMessage(response.body().toString()).isEqualTo(200);
+        assertThat(response.body().path("lines").get(0).path("usage").asText()).isEqualTo("未指定");
     }
     @Test void concurrentCompletionSerializesTheReadOnlyBoundary() throws Exception {
         var scenario = scenario("ONLINE"); start(scenario);
@@ -361,7 +486,61 @@ class WorkflowHttpTest extends HttpFixture {
         var address = admin().call("GET", "/api/v1/assistant/business?question=" + java.net.URLEncoder.encode("医院地址在哪里", StandardCharsets.UTF_8), null).body();
         assertThat(address.path("answer").asText()).contains(hospital.path("address").asText());
         var symptom = admin().call("GET", "/api/v1/assistant/business?question=" + java.net.URLEncoder.encode("我胸痛，医院地址在哪", StandardCharsets.UTF_8), null).body();
-        assertThat(symptom.path("mode").asText()).isEqualTo("PRECONSULTATION_REQUIRED"); assertThat(symptom.path("answer").asText()).contains("急救");
+        assertThat(symptom.path("mode").asText()).isEqualTo("TRIAGE_ASSISTANCE"); assertThat(symptom.path("answer").asText()).contains("急救");
+    }
+    @Test void doctorSummaryRequiresExactPatientScopeKeepsVersionsAndHonorsRevocation() throws Exception {
+        var s = scenario("ONLINE"); start(s);
+        var firstMessage = s.patient().browser().call("POST", patientPath(s) + "/clinical/messages", Map.of("body", "首条授权症状消息")).body();
+        var material = materials(s.patient().browser(), s.appointmentId(), true, "授权症状材料", PDF).body();
+        String firstMessageId = firstMessage.path("messages").get(0).path("id").asText();
+        String materialId = material.path("materials").get(0).path("id").asText();
+        var consent = s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents", Map.of(
+            "accepted", true, "provider", "LOCAL_MOCK", "purpose", "DOCTOR_SYMPTOM_SUMMARY", "scope", "EXACT_MESSAGES_AND_MATERIALS",
+            "messageIds", List.of(firstMessageId), "materialIds", List.of(materialId)));
+        assertThat(consent.status()).isEqualTo(200);
+        String firstConsent = consent.body().path("id").asText();
+        long firstConsentCreatedAt = consent.body().path("createdAt").asLong();
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body()).isEmpty();
+        assertThat(s.doctor().browser().call("POST", doctorPath(s) + "/ai/summarize", null).status()).isEqualTo(200);
+        var first = s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body();
+        assertThat(first).hasSize(1); assertThat(first.get(0).path("purpose").asText()).isEqualTo("DOCTOR_SYMPTOM_SUMMARY");
+        assertThat(first.get(0).path("analysis").path("summary").asText()).contains("首条授权症状消息");
+        var secondMessage = s.patient().browser().call("POST", patientPath(s) + "/clinical/messages", Map.of("body", "未授权新增症状消息")).body();
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body().toString()).doesNotContain("未授权新增症状消息");
+        String secondMessageId = secondMessage.path("messages").get(1).path("id").asText();
+        var expanded = s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents", Map.of(
+            "accepted", true, "provider", "LOCAL_MOCK", "purpose", "DOCTOR_SYMPTOM_SUMMARY", "scope", "EXACT_MESSAGES_AND_MATERIALS",
+            "messageIds", List.of(firstMessageId, secondMessageId), "materialIds", List.of(materialId)));
+        assertThat(expanded.status()).isEqualTo(200);
+        assertThat(expanded.body().path("createdAt").asLong()).isGreaterThan(firstConsentCreatedAt);
+        assertThat(s.doctor().browser().call("POST", doctorPath(s) + "/ai/summarize", null).status()).isEqualTo(200);
+        var second = s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body();
+        assertThat(second).hasSize(1); assertThat(second.get(0).path("versionNo").asInt()).isEqualTo(2);
+        String activeConsent = expanded.body().path("id").asText();
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents/" + activeConsent + "/revoke", null).status()).isEqualTo(204);
+        assertThat(s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents/" + firstConsent + "/revoke", null).status()).isEqualTo(204);
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body()).isEmpty();
+        var failedConsent = s.patient().browser().call("POST", patientPath(s) + "/ai/summary-consents", Map.of(
+            "accepted", true, "provider", "EXTERNAL_TEXT", "purpose", "DOCTOR_SYMPTOM_SUMMARY", "scope", "EXACT_MESSAGES_AND_MATERIALS",
+            "messageIds", List.of(firstMessageId, secondMessageId), "materialIds", List.of(materialId)));
+        assertThat(failedConsent.status()).isEqualTo(200);
+        assertThat(s.doctor().browser().call("POST", doctorPath(s) + "/ai/summarize", null).status()).isEqualTo(503);
+        assertThat(s.doctor().browser().call("GET", doctorPath(s) + "/ai", null).body().get(0).path("analysis").isNull()).isTrue();
+    }
+    @Test void patientAssistantTriageUsesRealHttpBoundaryWithoutCreatingPreconsultationTask() throws Exception {
+        var patient = actor("PATIENT").browser();
+        String boundary = "Assistant" + UUID.randomUUID();
+        String payload = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"question\"\r\n\r\n我最近咳嗽\r\n--" + boundary + "--\r\n";
+        String csrf = patient.call("GET", "/api/v1/auth/csrf", null).body().path("token").asText();
+        var response = patient.http.send(HttpRequest.newBuilder(URI.create(patient.base + "/api/v1/assistant/triage"))
+            .header("Authorization", "Bearer " + patient.access).header("X-XSRF-TOKEN", csrf)
+            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+            .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8)).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(200);
+        var result = JSON.readTree(response.body());
+        assertThat(result.path("mode").asText()).isEqualTo("TRIAGE_ASSISTANCE");
+        assertThat(result.path("departmentHint").asText()).isNotBlank();
+        assertThat(patient.call("GET", "/api/v1/patient/ai/results", null).body()).isEmpty();
     }
     String submitSuspension(Scenario s) throws Exception {
         var reply = s.doctor().browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "虚构停诊理由"));
@@ -399,26 +578,18 @@ class WorkflowHttpTest extends HttpFixture {
         var stopped=deliveryMapper.byDedupe("clinic-suspended:"+id+":"+s.appointmentId());assertThat(stopped).isNotNull();assertThat(stopped.eventType()).isEqualTo("CLINIC_SUSPENDED");
         assertThat(deliveryMapper.byDedupe("appointment-cancelled:"+s.appointmentId()+":CLINIC_SUSPENSION")).isNotNull();
     }
-    @Test void substitutionRequiresPatientChoiceRetainsSlotAndRevokesOriginalDoctor() throws Exception {
+    @Test void substitutionApprovalMigratesOrderAndPatientMayCancelFromOrders() throws Exception {
         var s = scenario("ONLINE"); var head = doctor(s.departmentId()); var substitute = doctor(s.departmentId());
         assertThat(materials(s.patient().browser(), s.appointmentId(), true, "替诊共享材料").status()).isEqualTo(200);
         approveSubstitution(s, head, substitute);
         assertThat(s.patient().browser().call("GET","/api/v1/notifications/unread",null).body().asInt()).isGreaterThanOrEqualTo(2);
-        deliveryService.retry();assertThat(s.patient().browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTION_PENDING");
+        deliveryService.retry();assertThat(s.patient().browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTION_MIGRATED");
         assertThat(substitute.browser().call("GET","/api/v1/notifications",null).body().toString()).contains("SUBSTITUTE_INVITED");
-        assertThat(substitute.browser().call("POST", "/api/v1/doctor/catalog/suspensions", Map.of("scheduleId", s.schedule().path("id").asText(), "reason", "禁止叠加变更")).status()).isEqualTo(409);
         var ordersBefore = s.patient().browser().call("GET", "/api/v1/patient/appointments", null).body().get(0);
-        assertThat(ordersBefore.path("substitutionPending").asBoolean()).isTrue();
-        assertThat(ordersBefore.path("doctorName").asText()).isEqualTo("虚构工作流医生");
-        var choices = s.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body(); assertThat(choices).hasSize(1);
-        var choice = choices.get(0); assertThat(choice.path("deadlineAt").asLong()).isEqualTo(clock.millis() + Duration.ofHours(2).toMillis());
+        assertThat(ordersBefore.path("substitutionPending").asBoolean()).isFalse();
+        var choices = s.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body(); assertThat(choices).isEmpty();
         assertThat(s.patient().browser().call("GET", patientPath(s), null).body().path("state").asText()).isEqualTo("CONFIRMED");
-        assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(403);
-        assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
-        String path = "/api/v1/patient/substitution-choices/" + choice.path("id").asText();
-        assertThat(actor("PATIENT").browser().call("POST", path, Map.of("accepted", true, "reason", "越权")).status()).isEqualTo(404);
-        var accepted = s.patient().browser().call("POST", path, Map.of("accepted", true, "reason", "同意新医生")); assertThat(accepted.status()).isEqualTo(200);
-        assertThat(s.patient().browser().call("POST", path, Map.of("accepted", true, "reason", "重复同意")).body()).isEqualTo(accepted.body());
+        assertThat(substitute.browser().call("GET", doctorPath(s), null).status()).isEqualTo(200);
         assertThat(s.doctor().browser().call("GET", doctorPath(s), null).status()).isEqualTo(404);
         assertThat(substitute.browser().call("GET", doctorPath(s), null).body().path("materials")).hasSize(1);
         var updated = admin().call("GET", "/api/v1/admin/catalog/schedules", null).body();
@@ -446,10 +617,9 @@ class WorkflowHttpTest extends HttpFixture {
         assertThat(other.doctor().browser().call("POST", "/api/v1/doctor/catalog/head/suspensions/" + own + "/review", Map.of("plan", "STOP", "reason", "自审禁止")).status()).isEqualTo(403);
         assertThat(admin().call("POST", "/api/v1/admin/catalog/suspensions/" + own + "/review", Map.of("approve", true, "reason", "管理员回避审核")).status()).isEqualTo(200);
         var expiry = scenario("ONLINE"); var head2 = doctor(expiry.departmentId()); var substitute2 = doctor(expiry.departmentId()); approveSubstitution(expiry, head2, substitute2);
-        var choice = expiry.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body().get(0);
-        clock.now = Instant.ofEpochMilli(choice.path("deadlineAt").asLong());
-        var expired = expiry.patient().browser().call("POST", "/api/v1/patient/substitution-choices/" + choice.path("id").asText(), Map.of("accepted", true, "reason", "超时同意"));
-        assertThat(expired.body().path("state").asText()).isEqualTo("EXPIRED");
+        assertThat(expiry.patient().browser().call("GET", "/api/v1/patient/substitution-choices", null).body()).isEmpty();
+        assertThat(expiry.patient().browser().call("GET", patientPath(expiry), null).body().path("state").asText()).isEqualTo("CONFIRMED");
+        assertThat(expiry.patient().browser().call("POST", patientPath(expiry) + "/cancel", null).status()).isEqualTo(200);
         assertThat(expiry.patient().browser().call("GET", patientPath(expiry), null).body().path("state").asText()).isEqualTo("CANCELLED");
     }
     @Test void emergencyStopCanBeAppliedWithoutAnOrdinaryRequestAndDoesNotRepeat() throws Exception {
@@ -537,7 +707,7 @@ class WorkflowHttpTest extends HttpFixture {
         String material = uploaded.path("materials").get(0).path("id").asText(), attachment = uploaded.path("materials").get(0).path("attachments").get(0).path("id").asText();
         start(s);
         assertThat(s.patient().browser().call("POST",patientPath(s)+"/clinical/messages",Map.of("body","受限消息原文")).status()).isEqualTo(200);
-        var completed = s.doctor().browser().call("POST",doctorPath(s)+"/result",Map.of("body","受限结果原文")).body();
+        var completed = s.doctor().browser().call("POST",doctorPath(s)+"/result",Map.of("body","受限结果原文", "chiefComplaint", "受限主诉字段", "presentIllness", "受限现病史字段", "historyAllergy", "受限既往史字段", "diagnosis", "受限诊断字段", "treatmentPlan", "受限处理建议字段")).body();
         var corrected = s.doctor().browser().call("POST",doctorPath(s)+"/corrections",Map.of("reason","受限更正理由","body","受限更正原文")).body();
         var reviewer = reviewer(); String review = review(reviewer,s,"ALL");
         assertThat(flag(reviewer,review,s,"MATERIAL",generated.path("materialId").asText(),"LIMITED").status()).isEqualTo(200);
@@ -551,7 +721,7 @@ class WorkflowHttpTest extends HttpFixture {
             assertThat(flag(reviewer,review,s,target[0],target[1],"LIMITED").status()).isEqualTo(200);
         for (Browser reader : List.of(s.patient().browser(),s.doctor().browser())) {
             String path = reader == s.patient().browser() ? patientPath(s)+"/clinical" : doctorPath(s);
-            assertThat(reader.call("GET",path,null).body().toString()).doesNotContain("另一份受限材料","受限消息原文","受限结果原文","受限更正原文","受限更正理由");
+            assertThat(reader.call("GET",path,null).body().toString()).doesNotContain("另一份受限材料","受限消息原文","受限结果原文","受限主诉字段","受限现病史字段","受限既往史字段","受限诊断字段","受限处理建议字段","受限更正原文","受限更正理由");
         }
         var originals = reviewer.browser().call("GET","/api/v1/admin/medical/reviews/"+review+"/content",null).body().toString();
         assertThat(originals).contains("另一份受限材料","受限消息原文","受限结果原文","受限更正原文");
@@ -714,15 +884,12 @@ class WorkflowHttpTest extends HttpFixture {
             first.get();
         } finally { release.countDown();org.mockito.Mockito.reset(sseTransport); }
     }
-    @Test void durableHoldAndSubstitutionTasksExpireOnceAndReminderHonorsWindow() throws Exception {
+    @Test void durableHoldExpiresOnceAndSubstitutionMigrationDoesNotCreatePatientCancellationTask() throws Exception {
         var s=scenario("ONLINE");var head=doctor(s.departmentId());var substitute=doctor(s.departmentId());assignHead(s,head);
         approveSubstitution(s,head,substitute);
-        var choice=s.patient().browser().call("GET","/api/v1/patient/substitution-choices",null).body().get(0);
-        clock.now=Instant.ofEpochMilli(choice.path("deadlineAt").asLong());
+         assertThat(s.patient().browser().call("GET","/api/v1/patient/substitution-choices",null).body()).isEmpty();
         assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
-        assertThat(s.patient().browser().call("GET",patientPath(s),null).body().path("state").asText()).isEqualTo("CANCELLED");
-        assertThat(s.patient().browser().call("GET",patientPath(s)+"/billing",null).body().path("refund").path("state").asText()).isEqualTo("REFUND_PENDING");
-        assertThat(admin().call("POST","/api/v1/admin/test/runtime/scan",null).status()).isEqualTo(200);
+         assertThat(s.patient().browser().call("GET",patientPath(s),null).body().path("state").asText()).isEqualTo("CONFIRMED");
         clock.now=Instant.now();var pending=scenario("ONLINE");var other=actor("PATIENT");
         var hold=other.browser().call("POST","/api/v1/patient/appointments",Map.of("scheduleId",pending.schedule().path("id").asText(),"source","ADVANCE","idempotencyKey",identifier())).body();
         clock.now=Instant.ofEpochMilli(hold.path("holdExpiresAt").asLong());admin().call("POST","/api/v1/admin/test/runtime/scan",null);

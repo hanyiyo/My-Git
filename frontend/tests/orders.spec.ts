@@ -22,7 +22,8 @@ async function login(page: Page, identifier: string, pass: string) {
   accessToken = (await result.json()).accessToken as string
 }
 async function register(page: Page, identifier: string, role: string) {
-  const result = await post(page, '/auth/register', { identifier, password, role })
+  const result = await post(page, '/auth/register', { identifier, password, role,
+    ...(role === 'PATIENT' ? { displayName: '测试患者', phoneNumber: '13800138000', challengeId: (await page.request.get('/api/v1/auth/captcha').then(response => response.json())).challengeId, captcha: 'AB7K' } : {}) })
   expect(result.status()).toBe(201)
   return (await result.json()).account.id as string
 }
@@ -41,14 +42,15 @@ test('患者订单页展示待支付订单并完成模拟支付与取消退款',
   await register(page, patientIdentifier, 'PATIENT')
   await login(page, patientIdentifier, password)
   await page.goto('/patient/catalog')
-  await page.getByLabel('查询日期').fill(date)
-  await page.getByRole('button', { name: '查询排班' }).click()
+  await page.getByLabel('选择日期').fill(date)
+  await page.getByRole('button', { name: '线上问诊', exact: true }).click()
   const resource = page.getByRole('listitem').filter({ hasText: '订单演示医生' })
   await expect(resource).toContainText('线上')
-  await resource.getByRole('button', { name: '提前预约' }).click()
-  await expect(page.getByRole('status')).toContainText('预约登记已提交，待支付')
-  await page.getByRole('link', { name: '返回工作台' }).click()
-  await page.getByRole('link', { name: '我的预约订单' }).click()
+  await resource.getByRole('button', { name: '预约挂号', exact: true }).click()
+  const confirmation = page.getByRole('dialog')
+  await confirmation.getByRole('button', { name: '确认挂号', exact: true }).click()
+  await expect(confirmation.getByRole('heading', { name: '已提交，待付款' })).toBeVisible()
+  await confirmation.getByRole('button', { name: '去我的挂号' }).click()
   const appointment = (await page.getByRole('listitem').first().getAttribute('data-appointment-id')) ?? ''
   expect(appointment).not.toBe('')
   await expect(page.getByRole('heading', { name: '我的预约订单' })).toBeVisible()
@@ -60,6 +62,8 @@ test('患者订单页展示待支付订单并完成模拟支付与取消退款',
   await expect(order).toContainText('¥20.00')
   await expect(order).toContainText('支付截止')
   await order.getByRole('button', { name: '模拟支付' }).click()
+  await expect(page.getByText('暂无待付款挂号。')).toBeVisible()
+  await page.getByRole('link', { name: '查看全部挂号', exact: true }).click()
   await expect(order).toContainText('已确认')
   await expect(order).toContainText('支付事实：已支付 ¥20.00（模拟支付）')
   await expect(order).toContainText('支付时间：')
@@ -106,4 +110,43 @@ test('签到按钮按服务器窗口开放，不受患者设备时间影响', as
   await page.goto('/patient/orders')
   await expect(page.locator('[data-appointment-id="window-0"]').getByRole('button', { name: '签到', exact: true })).toBeEnabled()
   await expect(page.locator('[data-appointment-id="window-1"]').getByRole('button', { name: '签到', exact: true })).toBeDisabled()
+})
+
+test('通知刷新不打断取消操作，旧刷新响应不能覆盖取消结果', async ({ page }) => {
+  const identifier = `refresh-patient-${crypto.randomUUID()}`
+  await register(page, identifier, 'PATIENT')
+  await login(page, identifier, password)
+  const now = Date.now()
+  const order = {
+    id: 'refresh-order', doctorName: '虚构医生', departmentName: '演示科室', clinicDate: '2026-11-13',
+    session: 'AM', serviceMode: 'ONLINE', feeMinor: 1000, holdExpiresAt: now + 600000,
+    startsAt: now + 86400000, endsAt: now + 100000000, serverNow: now, state: 'CONFIRMED',
+    credential: 'EXAMPLE', payment: null, refund: null, reception: null
+  }
+  let deferNext = false, release!: () => void, started!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  const refreshing = new Promise<void>(resolve => { started = resolve })
+  await page.route('**/api/v1/patient/appointments', async route => {
+    const snapshot = { ...order }
+    if (deferNext) { deferNext = false; started(); await pending }
+    await route.fulfill({ json: [snapshot] })
+  })
+  await page.route('**/api/v1/patient/appointments/refresh-order/cancel', async route => {
+    order.state = 'CANCELLED'
+    await route.fulfill({ json: order })
+  })
+  await page.goto('/patient/orders')
+  const cancel = page.getByRole('button', { name: '取消预约', exact: true })
+  await expect(cancel).toBeVisible()
+  deferNext = true
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('medical-notification', { detail: { objectId: 'refresh-order' } })))
+  await refreshing
+  await expect(cancel).toBeEnabled()
+  await cancel.click()
+  await expect(page.getByText('状态：已取消')).toBeVisible()
+  const staleResponse = page.waitForResponse(response => response.url().endsWith('/patient/appointments'))
+  release()
+  await (await staleResponse).finished()
+  await page.evaluate(() => new Promise(requestAnimationFrame))
+  await expect(page.getByText('状态：已取消')).toBeVisible()
 })

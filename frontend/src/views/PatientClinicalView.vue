@@ -6,21 +6,21 @@ import { useNotificationRefresh } from '../useNotificationRefresh'
 
 interface Attachment { id: string; originalName: string; mediaType: string; sizeBytes: number }
 interface Material { id: string; versionNo: number; symptomText: string; shared: boolean; attachments: Attachment[] }
-interface AiResult { taskId: string; state: string; provider: string; purpose: string; attempts: number; errorCode: string | null; versionNo: number; stale: boolean; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string; provider: string } | null; recommendations: { doctorId: string; doctorName: string; departmentName: string; scheduleId: string; clinicDate: string; session: string; serviceMode: string }[] }
-interface Clinical { consultation: { state: string } | null; materials: Material[]; messages: { authorRole: string; body: string }[]; result: { body: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
+interface Clinical { consultation: { state: string } | null; serviceMode: 'ONLINE' | 'OFFLINE'; materials: Material[]; messages: { id: string; authorRole: string; body: string }[]; result: { body: string; chiefComplaint: string; presentIllness: string; historyAllergy: string; diagnosis: string; treatmentPlan: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
+interface PharmacyOrder { id: string; appointmentId: string; state: string; totalMinor: number; expiresAt: number; lines: { medicineId: string; name: string; spec: string; feeMinor: number; quantity: number; usage: string }[] }
+interface SummaryConsent { id: string; provider: string; purpose: string; scope: string; accepted: boolean; messageIds: string[]; materialIds: string[]; createdAt: number; revokedAt: number | null }
 
 const route = useRoute(), id = String(route.params.id)
-const clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([])
-const drafts = ref<AiResult[]>([])
-const symptoms = ref(''), files = ref<File[]>([]), message = ref(''), aiSymptoms = ref(''), aiConsent = ref(false)
-const error = ref(''), busy = ref(false), aiBusy = ref(false)
+const clinical = ref<Clinical | null>(null), orders = ref<PharmacyOrder[]>([]), summaryConsents = ref<SummaryConsent[]>([])
+const symptoms = ref(''), files = ref<File[]>([]), message = ref('')
+const selectedMessageIds = ref<string[]>([]), selectedMaterialIds = ref<string[]>([])
+const error = ref(''), busy = ref(false)
 
 async function load() {
-  clinical.value = null; aiResults.value = []; drafts.value = []; error.value = ''
+  clinical.value = null; error.value = ''
   try {
-    clinical.value = await api<Clinical>(`/patient/appointments/${id}/clinical`)
-    aiResults.value = await api<AiResult[]>(`/patient/appointments/${id}/ai/results`)
-    drafts.value = (await api<AiResult[]>('/patient/ai/results')).filter(item => item.state === 'SUCCEEDED')
+    clinical.value = await api<Clinical>(`/patient/appointments/${id}/clinical`); orders.value = (await api<PharmacyOrder[]>('/patient/pharmacy/orders')).filter(order => order.appointmentId === id)
+    summaryConsents.value = clinical.value.serviceMode === 'ONLINE' ? await api<SummaryConsent[]>(`/patient/appointments/${id}/ai/summary-consents`) : []
   } catch (failure) { error.value = failure instanceof Error ? failure.message : '问诊记录加载失败' }
 }
 async function submitMaterials() {
@@ -29,23 +29,10 @@ async function submitMaterials() {
   catch (failure) { error.value = failure instanceof Error ? failure.message : '材料提交失败' }
   finally { busy.value = false }
 }
-async function runPreconsultation() {
-  if (!aiConsent.value) { error.value = '请先确认预问诊授权'; return }
-  aiBusy.value = true; error.value = ''
-  try {
-    const consent = await api<{ id: string }>(`/patient/appointments/${id}/ai/consents`, 'POST', { accepted: true, provider: 'LOCAL_MOCK', purpose: 'PRECONSULTATION_SUMMARY', scope: 'SYMPTOM_TEXT', symptomText: aiSymptoms.value })
-    const result = await api<AiResult>(`/patient/appointments/${id}/ai/preconsultations`, 'POST', { consentId: consent.id, symptomText: aiSymptoms.value, idempotencyKey: `web-${Date.now()}` })
-    aiResults.value = [result, ...aiResults.value.filter(item => item.taskId !== result.taskId)]; aiSymptoms.value = ''; aiConsent.value = false; await load()
-  } catch (failure) { error.value = failure instanceof Error ? failure.message : '预问诊暂不可用' }
-  finally { aiBusy.value = false }
-}
-async function shareDraft(taskId: string) {
-  busy.value = true; error.value = ''
-  try { await api(`/patient/appointments/${id}/ai/drafts/${taskId}/share`, 'POST', { shared: true }); await load() }
-  catch (failure) { error.value = failure instanceof Error ? failure.message : '共享摘要失败' }
-  finally { busy.value = false }
-}
 async function sendMessage() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/patient/appointments/${id}/clinical/messages`, 'POST', { body: message.value }); message.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '消息发送失败' } finally { busy.value = false } }
+async function authorizeSummary() { busy.value = true; error.value = ''; try { await api<SummaryConsent>(`/patient/appointments/${id}/ai/summary-consents`, 'POST', { accepted: true, provider: 'LOCAL_MOCK', purpose: 'DOCTOR_SYMPTOM_SUMMARY', scope: 'EXACT_MESSAGES_AND_MATERIALS', messageIds: selectedMessageIds.value, materialIds: selectedMaterialIds.value }); await load() } catch (failure) { error.value = failure instanceof Error ? failure.message : '摘要授权失败' } finally { busy.value = false } }
+async function revokeSummary() { const active = summaryConsents.value.find(item => item.accepted && !item.revokedAt); if (!active) return; busy.value = true; error.value = ''; try { await api<void>(`/patient/appointments/${id}/ai/summary-consents/${active.id}/revoke`, 'POST'); await load() } catch (failure) { error.value = failure instanceof Error ? failure.message : '摘要授权撤回失败' } finally { busy.value = false } }
+async function pay(orderId: string) { busy.value = true; error.value = ''; try { await api<PharmacyOrder>(`/patient/pharmacy/orders/${orderId}/pay`, 'POST'); await load() } catch (failure) { error.value = failure instanceof Error ? failure.message : '药费支付失败' } finally { busy.value = false } }
 async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/patient/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60_000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
 onMounted(load)
 useNotificationRefresh(load, id)
@@ -57,12 +44,6 @@ useNotificationRefresh(load, id)
     <h2>问诊材料与结果</h2>
     <p v-if="error" role="alert" class="notice">{{ error }}</p>
     <p v-if="clinical?.consultation">问诊状态：{{ clinical.consultation.state === 'CLOSED' ? '已结束（只读）' : clinical.consultation.state }}</p>
-    <section v-if="drafts.length && clinical?.consultation?.state !== 'CLOSED'"><h3>已有预约前摘要</h3>
-      <article v-for="item in drafts" :key="item.taskId"><p>{{ item.analysis?.summary }}<span v-if="item.stale">（材料更新后已过时）</span></p>
-        <button type="button" :disabled="busy || aiResults.some(result => result.taskId === item.taskId)" @click="shareDraft(item.taskId)">确认将此文本和摘要共享给当前医生</button>
-      </article>
-    </section>
-
     <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="submitMaterials">
       <label for="symptoms">症状文本</label>
       <textarea id="symptoms" v-model="symptoms" maxlength="10000" required></textarea>
@@ -71,32 +52,12 @@ useNotificationRefresh(load, id)
       <button :disabled="busy">提交并确认共享</button>
     </form>
 
-    <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="runPreconsultation">
-      <h3>AI 文本预问诊</h3>
-      <p class="hint">提交前请确认：本次仅将症状文本交给已标识的本地模拟 Provider，用于生成辅助摘要、追问和科室建议；不用于诊断或处方。</p>
-      <label for="aiSymptoms">预问诊症状文本</label>
-      <textarea id="aiSymptoms" v-model="aiSymptoms" maxlength="10000" required></textarea>
-      <label><input v-model="aiConsent" type="checkbox"> 我已阅读并同意本次预问诊授权范围</label>
-      <button :disabled="aiBusy || !aiConsent">{{ aiBusy ? '分析中…' : '确认授权并分析' }}</button>
-    </form>
-
-    <section v-if="aiResults.length">
-      <h3>AI 辅助结果</h3>
-      <article v-for="item in aiResults" :key="item.taskId" class="notice">
-        <p>状态：{{ item.state }} · Provider：{{ item.provider }} · 版本：{{ item.versionNo }}<span v-if="item.stale">（材料更新后已过时）</span></p>
-        <template v-if="item.analysis">
-          <p>{{ item.analysis.summary }}</p><p>持续时间：{{ item.analysis.duration }} · 建议科室：{{ item.analysis.departmentHint }}</p>
-          <p>追问：{{ item.analysis.followUpQuestions }}</p><p>风险提示：{{ item.analysis.riskAlert }}</p><p>{{ item.analysis.safetyNotice }}</p>
-          <p v-if="item.recommendations.length">可参考排班：<span v-for="recommendation in item.recommendations" :key="recommendation.scheduleId">{{ recommendation.doctorName }}（{{ recommendation.departmentName }}，{{ recommendation.clinicDate }} {{ recommendation.session }}） </span></p>
-        </template>
-        <p v-else>AI 暂不可用（{{ item.errorCode }}），不影响自行预约或医生接诊。</p>
-      </article>
-    </section>
-
     <section v-if="clinical?.materials.length"><h3>材料版本</h3><ul class="resource-list"><li v-for="material in clinical.materials" :key="material.id"><strong>版本 {{ material.versionNo }}</strong><p>{{ material.symptomText }}</p><p v-for="attachment in material.attachments" :key="attachment.id"><button type="button" class="secondary" @click="openAttachment(attachment.id)">{{ attachment.originalName }}</button></p></li></ul></section>
     <button type="button" class="secondary" @click="load">刷新问诊记录</button>
-    <section v-if="clinical?.messages.length"><h3>图文消息</h3><p v-for="(item, index) in clinical.messages" :key="index">{{ item.authorRole === 'PATIENT' ? '患者' : '医生' }}：{{ item.body }}</p></section>
-    <section v-if="clinical?.result"><h3>医生结果（只读）</h3><p>{{ clinical.result.body }}</p><p>作者：{{ clinical.result.authorId }} · 版本：{{ clinical.result.versionNo }} · 时间：{{ new Date(clinical.result.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p></section>
+    <section v-if="clinical?.messages.length"><h3>图文消息</h3><p v-for="item in clinical.messages" :key="item.id">{{ item.authorRole === 'PATIENT' ? '患者' : '医生' }}：{{ item.body }}</p></section>
+    <section v-if="clinical?.serviceMode === 'ONLINE' && clinical.consultation?.state !== 'CLOSED'" class="summary-consent" aria-label="医生症状摘要授权"><h3>医生症状摘要授权</h3><p>只授权你勾选的本次消息和已共享材料；之后新增内容不会自动加入。</p><fieldset v-if="clinical.messages.length"><legend>选择图文消息</legend><label v-for="item in clinical.messages" :key="item.id"><input v-model="selectedMessageIds" type="checkbox" :value="item.id">{{ item.authorRole === 'PATIENT' ? '患者' : '医生' }}：{{ item.body }}</label></fieldset><fieldset v-if="clinical.materials.length"><legend>选择已共享材料</legend><label v-for="item in clinical.materials" :key="item.id"><input v-model="selectedMaterialIds" type="checkbox" :value="item.id">材料版本 {{ item.versionNo }}：{{ item.symptomText }}</label></fieldset><p v-if="summaryConsents.some(item => item.accepted && !item.revokedAt)" role="status">已授权本次范围，提供方：LOCAL_MOCK <button type="button" class="secondary" :disabled="busy" @click="revokeSummary">撤回摘要授权</button></p><button v-else type="button" :disabled="busy || (!selectedMessageIds.length && !selectedMaterialIds.length)" @click="authorizeSummary">授权勾选范围生成摘要</button></section>
+    <section v-if="clinical?.result"><h3>医生结果（只读）</h3><dl><dt>主诉</dt><dd>{{ clinical.result.chiefComplaint }}</dd><dt>现病史</dt><dd>{{ clinical.result.presentIllness }}</dd><dt>既往史/过敏史</dt><dd>{{ clinical.result.historyAllergy }}</dd><dt>诊断</dt><dd>{{ clinical.result.diagnosis }}</dd><dt>处理建议</dt><dd>{{ clinical.result.treatmentPlan }}</dd></dl><p v-if="clinical.result.body">补充说明：{{ clinical.result.body }}</p><p>作者：{{ clinical.result.authorId }} · 版本：{{ clinical.result.versionNo }} · 时间：{{ new Date(clinical.result.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p></section>
+    <section v-for="order in orders" :key="order.id"><h3>药费订单：{{ order.state === 'PENDING_PAYMENT' ? '待缴费' : order.state === 'PAID' ? '已支付' : '已超时' }}</h3><p>合计：{{ (order.totalMinor / 100).toFixed(2) }} 元</p><p v-for="line in order.lines" :key="line.medicineId">{{ line.name }} · {{ line.spec }} × {{ line.quantity }} · {{ line.usage }}</p><button v-if="order.state === 'PENDING_PAYMENT'" :disabled="busy" @click="pay(order.id)">模拟支付药费</button></section>
     <section v-if="clinical?.corrections.length"><h3>追加更正</h3><p v-for="correction in clinical.corrections" :key="correction.reason + correction.body">{{ correction.reason }}：{{ correction.body }}</p></section>
     <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="sendMessage"><label for="message">图文消息</label><textarea id="message" v-model="message" maxlength="10000" required></textarea><button :disabled="busy">发送消息</button></form>
   </section>

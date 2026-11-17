@@ -148,7 +148,7 @@ class CatalogHttpTest extends HttpFixture {
         assertThat(admin.call("PUT", "/api/v1/admin/catalog/doctors/" + doctor.id(), Map.of("displayName", "虚构周医生", "title", "主治医师", "biography", "", "departmentId", otherDepartment, "credentialStatus", "CERTIFIED")).status()).isEqualTo(409);
     }
 
-    @Test void onlineAdvanceAndOfflineWalkInCloseAtExactHospitalTimeBoundaries() throws Exception {
+    @Test void onlineAndOfflineWalkInCloseAtExactHospitalTimeBoundaries() throws Exception {
         var admin = admin(); String department = department(admin); var online = doctor(admin, department, "CERTIFIED"); var offline = doctor(admin, department, "CERTIFIED");
         var date = LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(2);
         var first = admin.call("POST", "/api/v1/admin/catalog/schedules", schedule(online.id(), department, date, "AM", "ONLINE", 2));
@@ -156,7 +156,12 @@ class CatalogHttpTest extends HttpFixture {
         assertThat(first.status()).isEqualTo(201); assertThat(second.status()).isEqualTo(201);
         clock.now = Instant.ofEpochMilli(first.body().path("startsAt").asLong());
         assertThat(admin.call("POST", "/api/v1/admin/catalog/schedules", schedule(offline.id(), department, date, "AM", "ONLINE", 2)).status()).isEqualTo(400);
-        assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id(), null).body().size()).isZero();
+        var onlineWalkIn = admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id(), null).body();
+        assertThat(onlineWalkIn.size()).isEqualTo(1);
+        assertThat(onlineWalkIn.get(0).path("walkInAvailable").asBoolean()).isTrue();
+        assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id() + "&session=PM", null).body().size()).isZero();
+        assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + online.id() + "&session=AM", null).body().size()).isEqualTo(1);
+        assertThat(admin.call("GET", "/api/v1/catalog/schedules?session=EVENING", null).status()).isEqualTo(400);
         var walkIn = admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + offline.id(), null).body();
         assertThat(walkIn.size()).isEqualTo(1);
         assertThat(walkIn.get(0).path("walkInAvailable").asBoolean()).isTrue();
@@ -179,5 +184,30 @@ class CatalogHttpTest extends HttpFixture {
         assertThat(defaults.body().toString()).contains(included).doesNotContain(excluded);
         assertThat(admin.call("GET", "/api/v1/catalog/schedules?doctorId=" + doctor.id() + "&date=" + today.plusDays(7), null).body().toString()).contains(excluded);
         assertThat(doctor.browser().call("GET", "/api/v1/doctor/catalog/schedules", null).body().toString()).contains(included, excluded);
+    }
+
+    @Test void scheduleMetricsExposeConfirmedAndTemporaryOccupancyForDoctorWorkspace() throws Exception {
+        var admin = admin(); String department = department(admin); var doctor = doctor(admin, department, "CERTIFIED");
+        var date = LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(3);
+        var created = admin.call("POST", "/api/v1/admin/catalog/schedules", schedule(doctor.id(), department, date, "AM", "ONLINE", 3));
+        assertThat(created.status()).isEqualTo(201);
+        String scheduleId = created.body().path("id").asText();
+        var pendingPatient = new Browser(port); String pendingName = identifier(); pendingPatient.register(pendingName, "PATIENT"); pendingPatient.login(pendingName, PASSWORD);
+        var pending = pendingPatient.call("POST", "/api/v1/patient/appointments", Map.of("scheduleId", scheduleId, "source", "ADVANCE", "idempotencyKey", identifier()));
+        assertThat(pending.status()).isEqualTo(201);
+        var confirmedPatient = new Browser(port); String confirmedName = identifier(); confirmedPatient.register(confirmedName, "PATIENT"); confirmedPatient.login(confirmedName, PASSWORD);
+        var confirmed = confirmedPatient.call("POST", "/api/v1/patient/appointments", Map.of("scheduleId", scheduleId, "source", "ADVANCE", "idempotencyKey", identifier()));
+        assertThat(confirmed.status()).isEqualTo(201);
+        String paymentPath = "/api/v1/patient/appointments/" + confirmed.body().path("id").asText() + "/simulate-payment";
+        assertThat(confirmedPatient.call("POST", paymentPath, null).status()).isEqualTo(200);
+        var doctorSchedule = doctor.browser().call("GET", "/api/v1/doctor/catalog/schedules", null).body().get(0);
+        assertThat(doctorSchedule.path("id").asText()).isEqualTo(scheduleId);
+        assertThat(doctorSchedule.path("capacity").asInt()).isEqualTo(3);
+        assertThat(doctorSchedule.path("confirmedAppointments").asInt()).isEqualTo(1);
+        assertThat(doctorSchedule.path("pendingHolds").asInt()).isEqualTo(1);
+        assertThat(doctorSchedule.path("availableSlots").asInt()).isEqualTo(1);
+        assertThat(doctorSchedule.path("waitingPatients").asInt()).isZero();
+        assertThat(doctorSchedule.path("completedPatients").asInt()).isZero();
+        assertThat(doctor.browser().call("GET", "/api/v1/doctor/catalog/schedules", null).body().toString()).contains("confirmedAppointments", "pendingHolds", "inConsultationPatients");
     }
 }

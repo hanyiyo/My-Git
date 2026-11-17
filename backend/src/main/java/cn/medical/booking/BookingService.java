@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.util.UUID;
 import java.util.List;
 import java.util.Set;
+import java.time.ZoneId;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +46,8 @@ public class BookingService {
     public BookingMapper.Appointment create(String patient, String schedule, String source, String key) {
         catalog.lockMutation(schedule);
         var session = catalog.registrationSession(schedule);
+        String expectedSource = session.clinicDate().equals(clock.instant().atZone(ZoneId.of("Asia/Shanghai")).toLocalDate()) ? "WALK_IN" : "ADVANCE";
+        if (!expectedSource.equals(source)) throw new ApiFailure(409, "REGISTRATION_SOURCE_CONFLICT", "登记来源必须与提交时的医院日期一致");
         // The stable patient/day/half row always precedes catalog/slot and appointment locks.
         booking.ensureGuard(patient, session.clinicDate(), session.session());
         var occupied = booking.lockGuard(patient, session.clinicDate(), session.session());

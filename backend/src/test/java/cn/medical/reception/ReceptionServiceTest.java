@@ -54,6 +54,25 @@ class ReceptionServiceTest {
 
         assertThat(service.markNoShows()).isEqualTo(1);
         verify(mapper).insertNoShow("appointment", "schedule", "doctor", "patient", 1_000L);
+        verify(mapper).markNoShow("appointment");
+        verify(mapper).releaseSessionGuard("appointment");
+    }
+
+    @Test
+    void onlineMissRequiresFiveMinutesAndNoPatientReplyAfterCall() {
+        var mapper = mock(ReceptionMapper.class);
+        var called = entry("IN_CONSULTATION", 0);
+        when(mapper.queue("appointment")).thenReturn(called);
+        when(mapper.appointment("appointment")).thenReturn(appointment(0L, 600_000L));
+        var early = new ReceptionService(mapper, Clock.fixed(Instant.ofEpochMilli(1_000L), ZoneOffset.UTC));
+        assertThatThrownBy(() -> early.miss("doctor", "appointment"))
+            .isInstanceOfSatisfying(ApiFailure.class, failure -> assertThat(failure.code).isEqualTo("CALL_WAITING"));
+
+        when(mapper.hasPatientReplyAfter("appointment", 500L)).thenReturn(false);
+        when(mapper.miss("appointment", 301_000L)).thenReturn(1);
+        when(mapper.queue("appointment")).thenReturn(entry("MISSED", 0));
+        var afterWait = new ReceptionService(mapper, Clock.fixed(Instant.ofEpochMilli(301_000L), ZoneOffset.UTC));
+        assertThat(afterWait.miss("doctor", "appointment").state()).isEqualTo("MISSED");
     }
 
     private static ReceptionMapper.Appointment appointment(long startsAt, long endsAt) {

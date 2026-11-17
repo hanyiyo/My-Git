@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useSession } from '../session'
 const router = useRouter(), session = useSession()
-const identifier = ref(''), password = ref(''), captcha = ref(''), challengeId = ref(''), image = ref('')
+const identifier = ref(''), password = ref(''), displayName = ref(''), phoneNumber = ref(''), captcha = ref(''), challengeId = ref(''), image = ref('')
 const role = ref('PATIENT'), register = ref(false), message = ref(''), busy = ref(false)
 const refreshing = ref(false)
+const patientRegistration = computed(() => register.value && role.value === 'PATIENT')
 async function refresh() {
   if (refreshing.value) return
   refreshing.value = true; challengeId.value = ''; image.value = ''; captcha.value = ''
@@ -19,10 +20,12 @@ async function submit() {
   busy.value = true; message.value = ''
   try {
     if (register.value) {
-      await api('/auth/register', 'POST', { identifier: identifier.value, password: password.value, role: role.value })
+      await api('/auth/register', 'POST', { identifier: identifier.value, password: password.value, role: role.value,
+        displayName: displayName.value, phoneNumber: phoneNumber.value,
+        ...(patientRegistration.value ? { challengeId: challengeId.value, captcha: captcha.value } : {}) })
       register.value = false
-      const ready = await refresh()
-      if (ready) message.value = '注册成功，请输入图形验证码后登录'
+      await refresh()
+      message.value = '注册成功，请输入图形验证码后登录'
     } else {
       await session.login(identifier.value, password.value, challengeId.value, captcha.value)
       await router.push('/' + session.account!.roles[0]!.toLowerCase())
@@ -36,10 +39,12 @@ onMounted(refresh)
   <section class="card"><h2>{{ register ? '创建账户' : '账户登录' }}</h2><p class="hint">患者、医生和管理员使用同一安全登录入口。</p>
     <p v-if="message" role="status" class="notice">{{ message }}</p>
     <form @submit.prevent="submit">
+      <template v-if="patientRegistration"><label for="displayName">姓名</label><input id="displayName" v-model="displayName" autocomplete="name" required maxlength="120">
+      <label for="phoneNumber">手机号</label><input id="phoneNumber" v-model="phoneNumber" type="tel" autocomplete="tel" required pattern="1[3-9][0-9]{9}" maxlength="11"></template>
       <label for="identifier">账号</label><input id="identifier" v-model="identifier" autocomplete="username" required maxlength="190">
       <label for="password">密码</label><input id="password" v-model="password" type="password" :autocomplete="register ? 'new-password' : 'current-password'" required minlength="12" maxlength="72"><small>12–72 位，仅使用虚构演示账户。</small>
       <template v-if="register"><label for="role">注册身份</label><select id="role" v-model="role"><option value="PATIENT">患者</option><option value="DOCTOR">医生（资质待审核）</option></select></template>
-      <template v-else><label for="captcha">图形验证码</label><div class="captcha"><input id="captcha" v-model="captcha" :disabled="busy || refreshing || !challengeId" autocomplete="off" required maxlength="8"><img v-if="image" :src="image" alt="图形验证码"><button class="secondary" type="button" :disabled="busy || refreshing" @click="refresh">{{ refreshing ? '刷新中…' : '换一张' }}</button></div></template>
+      <template v-if="!register || patientRegistration"><label for="captcha">图形验证码</label><div class="captcha"><input id="captcha" v-model="captcha" :disabled="busy || refreshing || !challengeId" autocomplete="off" required maxlength="8"><img v-if="image" :src="image" alt="图形验证码"><button class="secondary" type="button" :disabled="busy || refreshing" @click="refresh">{{ refreshing ? '刷新中…' : '换一张' }}</button></div></template>
       <button :disabled="busy || (!register && (refreshing || !challengeId))" type="submit">{{ busy ? '处理中…' : register ? '注册' : '登录' }}</button>
     </form><button class="text" type="button" :disabled="busy" @click="register = !register; message = ''">{{ register ? '已有账户，返回登录' : '患者或医生注册' }}</button>
   </section>

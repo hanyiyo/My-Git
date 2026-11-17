@@ -1,0 +1,24 @@
+.ai-master-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 7px; }
+.ai-master-title h2 { margin: 0; }
+.ai-state, .ai-mode { font-size: 10px; padding: 4px 8px; border-radius: 6px; background: #dff3ea; color: #4d947e; }
+.ai-state.off { background: #f5e7e3; color: #b36c5e; }
+.ai-mode { background: #ffffffa3; color: #7296b8; }
+.ai-config-workspace .rules-card dd { white-space: normal; overflow-wrap: anywhere; max-width: 65%; text-align: right; font-size: 13px; }
+.ai-config-workspace .ai-long-value { display: block; }
+.ai-config-workspace .ai-long-value dd { max-width: none; text-align: left; margin-top: 7px; font-weight: 400; font-size: 11px; line-height: 1.9; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ai-card-action { display: flex; align-items: center; gap: 12px; margin-top: 13px; flex-wrap: wrap; }
+.ai-card-action small { font-size: 10px; color: #93a8b9; }
+.ai-record-link { display: inline-flex; gap: 7px; align-items: center; font-size: 11px; color: #347cdb; text-decoration: none; padding: 9px 0; }
+.ai-record-link .ph-icon { width: 14px; height: 14px; }
+.ai-config-workspace .rules-history-changes { overflow-wrap: anywhere; white-space: pre-wrap; }
+.ai-fields .wide { grid-column: 1 / -1; }
+.ai-field { display: grid; align-content: start; gap: 7px; min-width: 0; }
+.ai-config-workspace .ai-field label, .ai-config-workspace .ai-field-label { display: block; font-size: 11px; color: #7893aa; font-weight: 500; margin: 0; }
+.ai-config-workspace .ai-field textarea, .ai-config-workspace .ai-field select { width: 100%; min-width: 0; min-height: 39px; padding: 9px 10px; border: 1px solid #dce7ee; border-radius: 7px; background: #fff; color: #55758f; font: inherit; font-size: 12px; }
+.ai-field textarea { resize: vertical; line-height: 1.8; }
+.ai-field small { color: #8ea4b6; font-size: 10px; line-height: 1.7; }
+.ai-key-control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 8px; background: #f6f9fd; }
+.ai-key-control > span { font-size: 11px; margin-right: auto; color: #7292aa; }
+.ai-config-workspace .ai-test-error { background: #fff4f2; color: #b56159; }
+.ai-config-workspace textarea[aria-invalid=true] { border-color: #dc9e95; }
+@media(max-width:760px) { .ai-master { flex-wrap: wrap; } .ai-master > div { min-width: 200px; } .ai-master > button { margin-left: 46px !important; } .ai-config-dialog footer { flex-wrap: wrap; } .ai-fields .wide { grid-column: auto; } }

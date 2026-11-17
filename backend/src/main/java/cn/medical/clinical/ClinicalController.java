@@ -8,6 +8,7 @@ import org.springframework.http.*;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import cn.medical.pharmacy.PharmacyService;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -15,8 +16,13 @@ public class ClinicalController {
     private final ClinicalService clinical;
     public ClinicalController(ClinicalService clinical) { this.clinical = clinical; }
     public record MessageInput(@NotBlank @Size(max=10000) String body) {}
-    public record ResultInput(@NotBlank @Size(max=20000) String body) {}
+    public record ResultInput(@Size(max=20000) String body,
+        @Size(max=4000) String chiefComplaint, @Size(max=4000) String presentIllness,
+        @Size(max=4000) String historyAllergy, @Size(max=4000) String diagnosis,
+        @Size(max=4000) String treatmentPlan, List<PharmacyService.PrescriptionLineInput> prescriptions) {}
     public record CorrectionInput(@NotBlank @Size(max=500) String reason, @NotBlank @Size(max=20000) String body) {}
+    public record DraftInput(@NotNull @Min(0) Integer version, String chiefComplaint, String presentIllness,
+        String historyAllergy, String diagnosis, String treatmentPlan, List<ClinicalService.DraftPrescription> prescriptions) {}
 
     @GetMapping("/patient/appointments/{id}/clinical")
     ClinicalService.ClinicalView patientView(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.patientView(auth.getName(), id); }
@@ -33,10 +39,22 @@ public class ClinicalController {
 
     @GetMapping("/doctor/clinical/{id}")
     ClinicalService.ClinicalView doctorView(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.doctorView(auth.getName(), id); }
+    @GetMapping("/doctor/clinical/{id}/draft")
+    ClinicalService.DraftView doctorDraft(JwtAuthenticationToken auth, @PathVariable String id) { return clinical.draft(auth.getName(), id); }
+    @PutMapping("/doctor/clinical/{id}/draft")
+    ClinicalService.DraftView saveDoctorDraft(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody DraftInput input) {
+        return clinical.saveDraft(auth.getName(), id, new ClinicalService.DraftView(id, input.version(), input.chiefComplaint(), input.presentIllness(),
+            input.historyAllergy(), input.diagnosis(), input.treatmentPlan(), input.prescriptions(), null));
+    }
     @PostMapping("/doctor/clinical/{id}/messages")
     ClinicalService.ClinicalView doctorMessage(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody MessageInput input) { return clinical.message(auth.getName(), id, "DOCTOR", input.body()); }
     @PostMapping("/doctor/clinical/{id}/result")
-    ClinicalService.ClinicalView result(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody ResultInput input) { return clinical.submitResult(auth.getName(), id, input.body()); }
+    ClinicalService.ClinicalView result(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody ResultInput input) {
+        var structured = input.chiefComplaint() == null && input.presentIllness() == null && input.historyAllergy() == null
+            && input.diagnosis() == null && input.treatmentPlan() == null ? null
+            : new ClinicalService.StructuredResult(input.chiefComplaint(), input.presentIllness(), input.historyAllergy(), input.diagnosis(), input.treatmentPlan());
+        return clinical.submitResult(auth.getName(), id, input.body(), structured, input.prescriptions() == null ? List.of() : input.prescriptions());
+    }
     @PostMapping("/doctor/clinical/{id}/corrections")
     ClinicalService.ClinicalView correction(JwtAuthenticationToken auth, @PathVariable String id, @Valid @RequestBody CorrectionInput input) { return clinical.correction(auth.getName(), id, input.reason(), input.body()); }
     @GetMapping("/doctor/clinical/attachments/{id}")

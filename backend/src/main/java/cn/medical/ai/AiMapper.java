@@ -18,6 +18,11 @@ public interface AiMapper {
         String provider, String body, long createdAt) {}
     record CallLog(String id, String taskId, String provider, String purpose, String state, int attempt,
         long durationMs, String errorCode, long createdAt) {}
+    record SummaryConsent(String id, String appointmentId, String patientId, String provider, String purpose,
+        String scope, String messageIds, String materialIds, boolean accepted, long createdAt, Long revokedAt) {}
+    record DoctorSummary(String id, String appointmentId, String doctorId, String consentId, int versionNo,
+        String inputHash, String provider, String state, String errorCode, String body, int messageCount,
+        long createdAt, Long finishedAt, String modelVersion, String promptVersion) {}
 
     @Insert("INSERT INTO ai_consent (id, appointment_id, patient_id, provider, purpose, scope, accepted, created_at, text_hash) VALUES (#{id}, #{appointmentId}, #{patientId}, #{provider}, #{purpose}, #{scope}, #{accepted}, #{createdAt}, #{textHash})")
     void insertConsent(Consent consent);
@@ -75,4 +80,21 @@ public interface AiMapper {
 
     @Insert("INSERT INTO ai_call_log (id, task_id, provider, purpose, state, attempt, duration_ms, error_code, created_at) VALUES (#{id}, #{taskId}, #{provider}, #{purpose}, #{state}, #{attempt}, #{durationMs}, #{errorCode}, #{createdAt})")
     void insertCallLog(CallLog log);
+
+    @Insert("INSERT INTO ai_summary_consent (id, appointment_id, patient_id, provider, purpose, scope, message_ids, material_ids, accepted, created_at) VALUES (#{id}, #{appointmentId}, #{patientId}, #{provider}, #{purpose}, #{scope}, #{messageIds}, #{materialIds}, #{accepted}, #{createdAt})")
+    void insertSummaryConsent(SummaryConsent consent);
+    @Select("SELECT id, appointment_id, patient_id, provider, purpose, scope, message_ids, material_ids, accepted, created_at, revoked_at FROM ai_summary_consent WHERE id=#{id} AND appointment_id=#{appointmentId} AND patient_id=#{patientId}")
+    SummaryConsent summaryConsent(@Param("id") String id, @Param("appointmentId") String appointmentId, @Param("patientId") String patientId);
+    @Select("SELECT id, appointment_id, patient_id, provider, purpose, scope, message_ids, material_ids, accepted, created_at, revoked_at FROM ai_summary_consent WHERE appointment_id=#{appointmentId} AND patient_id=#{patientId} ORDER BY created_at DESC, id DESC")
+    List<SummaryConsent> summaryConsents(@Param("appointmentId") String appointmentId, @Param("patientId") String patientId);
+    @Select("SELECT id, appointment_id, patient_id, provider, purpose, scope, message_ids, material_ids, accepted, created_at, revoked_at FROM ai_summary_consent WHERE appointment_id=#{appointmentId} AND patient_id=#{patientId} AND accepted=TRUE AND revoked_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1")
+    SummaryConsent latestSummaryConsent(@Param("appointmentId") String appointmentId, @Param("patientId") String patientId);
+    @Update("UPDATE ai_summary_consent SET revoked_at=#{now} WHERE id=#{id} AND patient_id=#{patientId} AND revoked_at IS NULL")
+    int revokeSummaryConsent(@Param("id") String id, @Param("patientId") String patientId, @Param("now") long now);
+    @Insert("INSERT INTO ai_doctor_summary (id, appointment_id, doctor_id, consent_id, version_no, input_hash, provider, state, error_code, body, message_count, created_at, finished_at, model_version, prompt_version) VALUES (#{id}, #{appointmentId}, #{doctorId}, #{consentId}, #{versionNo}, #{inputHash}, #{provider}, #{state}, #{errorCode}, #{body}, #{messageCount}, #{createdAt}, #{finishedAt}, #{modelVersion}, #{promptVersion})")
+    void insertDoctorSummary(DoctorSummary summary);
+    @Select("SELECT id, appointment_id, doctor_id, consent_id, version_no, input_hash, provider, state, error_code, body, message_count, created_at, finished_at, model_version, prompt_version FROM ai_doctor_summary WHERE appointment_id=#{appointmentId} ORDER BY version_no DESC, id DESC")
+    List<DoctorSummary> doctorSummaries(@Param("appointmentId") String appointmentId);
+    @Select("SELECT COALESCE(MAX(version_no), 0) FROM ai_doctor_summary WHERE appointment_id=#{appointmentId}")
+    int nextDoctorSummaryVersion(@Param("appointmentId") String appointmentId);
 }

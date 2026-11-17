@@ -1,74 +1,53 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, download } from '../api'
 import { useNotificationRefresh } from '../useNotificationRefresh'
-interface AiResult { taskId: string; state: string; provider: string; versionNo: number; stale: boolean; errorCode: string | null; analysis: { summary: string; duration: string; departmentHint: string; followUpQuestions: string; riskAlert: string; safetyNotice: string } | null }
-interface Clinical { consultation: { state: string } | null; materials: { id: string; versionNo: number; symptomText: string; attachments: { id: string; originalName: string }[] }[]; messages: { authorRole: string; body: string }[]; result: { body: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
-const route = useRoute(), id = String(route.params.id), clinical = ref<Clinical | null>(null), aiResults = ref<AiResult[]>([]), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), busy = ref(false)
-const message = ref('')
+interface Clinical { consultation: { state: string } | null; serviceMode: 'ONLINE' | 'OFFLINE'; materials: { id: string; versionNo: number; symptomText: string; attachments: { id: string; originalName: string }[] }[]; messages: { id: string; authorRole: string; body: string }[]; result: { body: string; chiefComplaint: string; presentIllness: string; historyAllergy: string; diagnosis: string; treatmentPlan: string; authorId: string; versionNo: number; createdAt: number } | null; corrections: { reason: string; body: string }[] }
+interface Prescription { medicineId: string; quantity: number; usage: string }
+interface Medicine { id: string; name: string; spec: string; feeMinor: number; stock: number; active: boolean }
+interface PharmacyOrder { id: string; state: string; totalMinor: number; expiresAt: number; lines: { medicineId: string; name: string; spec: string; feeMinor: number; quantity: number; usage: string }[] }
+interface Draft { appointmentId: string; versionNo: number; chiefComplaint: string; presentIllness: string; historyAllergy: string; diagnosis: string; treatmentPlan: string; prescriptions: Prescription[]; savedAt: number | null }
+interface AiResult { taskId: string; state: string; provider: string; purpose: string; versionNo: number; stale: boolean; errorCode: string | null; analysis: { summary: string } | null }
+interface ConversationSummary { analysis: { summary: string } | null; messageCount: number; provider: string }
+const route = useRoute(), id = String(route.params.id)
+const clinical = ref<Clinical | null>(null), draft = ref<Draft | null>(null), order = ref<PharmacyOrder | null>(null), medicines = ref<Medicine[]>([]), aiResults = ref<AiResult[]>([]), summary = ref<ConversationSummary | null>(null)
+const message = ref(''), result = ref(''), reason = ref(''), correction = ref(''), error = ref(''), saveState = ref('草稿尚未修改'), busy = ref(false), dirty = ref(false), saving = ref(false)
+let saveQueue = Promise.resolve(), loading = false
+const fields = [['chiefComplaint', '主诉'], ['presentIllness', '现病史'], ['historyAllergy', '既往史/过敏史'], ['diagnosis', '诊断'], ['treatmentPlan', '处理建议']] as const
+function markDirty() { dirty.value = true; saveState.value = '正在保存…'; void persist() }
+async function persist() { if (!dirty.value || !draft.value) return; const snapshot = JSON.parse(JSON.stringify(draft.value)) as Draft; saveQueue = saveQueue.then(async () => { if (!dirty.value || !draft.value || draft.value.versionNo !== snapshot.versionNo) return; saving.value = true; try { const saved = await api<Draft>(`/doctor/clinical/${id}/draft`, 'PUT', { ...snapshot, version: snapshot.versionNo }); if (draft.value) { const changed = JSON.stringify(draft.value) !== JSON.stringify(snapshot); draft.value = changed ? draft.value : saved; dirty.value = changed; saveState.value = changed ? '正在保存…' : `已保存 ${new Date(saved.savedAt ?? Date.now()).toLocaleTimeString('zh-CN')}`; error.value = ''; if (changed) void persist() } } catch (failure) { saveState.value = '草稿未保存'; if (draft.value && clinical.value?.consultation?.state !== 'CLOSED') error.value = failure instanceof Error ? failure.message : '草稿保存失败' } finally { saving.value = false } }); await saveQueue }
+async function load(background = false) {
+  if (loading || (background && (dirty.value || saving.value || busy.value))) return
+  loading = true
+  clinical.value = null; draft.value = null; order.value = null; medicines.value = []; aiResults.value = []; summary.value = null; error.value = ''
+  try {
+    clinical.value = await api<Clinical>(`/doctor/clinical/${id}`)
+    if (clinical.value.consultation?.state !== 'CLOSED') {
+      medicines.value = await api<Medicine[]>('/doctor/pharmacy/medicines')
+      draft.value = await api<Draft>(`/doctor/clinical/${id}/draft`)
+      saveState.value = draft.value.savedAt ? '已恢复草稿' : '草稿自动保存'; dirty.value = false
+    } else order.value = await api<PharmacyOrder | null>(`/doctor/pharmacy/appointments/${id}/prescriptions`)
+    if (clinical.value.serviceMode === 'ONLINE') aiResults.value = await api<AiResult[]>(`/doctor/clinical/${id}/ai`)
+  } catch (failure) { error.value = failure instanceof Error ? failure.message : '诊室记录加载失败' }
+  finally { loading = false }
+}
 async function sendMessage() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/messages`, 'POST', { body: message.value }); message.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '消息发送失败' } finally { busy.value = false } }
-async function load() { clinical.value = null; aiResults.value = []; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}`); aiResults.value = await api<AiResult[]>(`/doctor/clinical/${id}/ai`) } catch (failure) { error.value = failure instanceof Error ? failure.message : '问诊记录加载失败' } }
-async function submitResult() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/result`, 'POST', { body: result.value }); result.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '结果提交失败' } finally { busy.value = false } }
+async function submitResult() { busy.value = true; error.value = ''; try { if (!draft.value) throw new Error('接诊草稿不可用'); if (![draft.value.chiefComplaint, draft.value.diagnosis, draft.value.treatmentPlan].every(value => value.trim())) throw new Error('请填写主诉、诊断和处理建议'); const submission = JSON.parse(JSON.stringify(draft.value)) as Draft; await persist(); clinical.value = await api<Clinical>(`/doctor/clinical/${id}/result`, 'POST', { body: result.value.trim() || submission.treatmentPlan, chiefComplaint: submission.chiefComplaint, presentIllness: submission.presentIllness, historyAllergy: submission.historyAllergy, diagnosis: submission.diagnosis, treatmentPlan: submission.treatmentPlan, prescriptions: submission.prescriptions }); error.value = ''; result.value = ''; draft.value = null; dirty.value = false; order.value = await api<PharmacyOrder | null>(`/doctor/pharmacy/appointments/${id}/prescriptions`) } catch (failure) { error.value = failure instanceof Error ? failure.message : '结果提交失败' } finally { busy.value = false } }
 async function submitCorrection() { busy.value = true; error.value = ''; try { clinical.value = await api<Clinical>(`/doctor/clinical/${id}/corrections`, 'POST', { reason: reason.value, body: correction.value }); reason.value = ''; correction.value = '' } catch (failure) { error.value = failure instanceof Error ? failure.message : '更正提交失败' } finally { busy.value = false } }
-async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/doctor/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60_000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
-onMounted(load)
-useNotificationRefresh(load, id)
+async function summarizeConversation() { busy.value = true; error.value = ''; try { summary.value = await api<ConversationSummary>(`/doctor/clinical/${id}/ai/summarize`, 'POST') } catch (failure) { error.value = failure instanceof Error ? failure.message : '图文摘要暂不可用' } finally { busy.value = false } }
+async function openAttachment(attachmentId: string) { try { const url = URL.createObjectURL(await download(`/doctor/clinical/attachments/${attachmentId}`)); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000) } catch (failure) { error.value = failure instanceof Error ? failure.message : '附件下载失败' } }
+onMounted(() => { void load() }); onBeforeUnmount(() => { void persist() }); useNotificationRefresh(() => load(true), id)
 </script>
 <template>
   <RouterLink to="/doctor/reception">返回候诊队列</RouterLink>
-  <section class="card catalog">
-    <h2>患者问诊记录</h2>
-    <p v-if="error" role="alert" class="notice">{{ error }}</p>
-    <p v-if="clinical?.consultation">问诊状态：{{ clinical.consultation.state }}</p>
-    <button type="button" class="secondary" @click="load">刷新问诊记录</button>
-    <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="sendMessage"><label for="doctor-message">回复患者</label><textarea id="doctor-message" v-model="message" maxlength="10000" required></textarea><button :disabled="busy">发送回复</button></form>
-
-    <section v-for="material in clinical?.materials" :key="material.id">
-      <h3>材料版本 {{ material.versionNo }}</h3>
-      <p>{{ material.symptomText }}</p>
-      <p v-for="attachment in material.attachments" :key="attachment.id">
-        <button type="button" class="secondary" @click="openAttachment(attachment.id)">
-          {{ attachment.originalName }}
-        </button>
-      </p>
-    </section>
-
-    <section v-if="clinical?.messages.length">
-      <h3>图文消息</h3>
-      <p v-for="item in clinical.messages" :key="item.authorRole + item.body">
-        {{ item.authorRole === 'PATIENT' ? '患者' : '医生' }}：{{ item.body }}
-      </p>
-    </section>
-
-    <section v-if="aiResults.length">
-      <h3>AI 预问诊辅助摘要</h3>
-      <article v-for="item in aiResults" :key="item.taskId" class="notice">
-        <p>状态：{{ item.state }} · Provider：{{ item.provider }} · 版本：{{ item.versionNo }}<span v-if="item.stale">（材料更新后已过时）</span></p>
-        <template v-if="item.analysis"><p>{{ item.analysis.summary }}</p><p>持续时间：{{ item.analysis.duration }} · 建议科室：{{ item.analysis.departmentHint }}</p><p>追问：{{ item.analysis.followUpQuestions }}</p><p>风险提示：{{ item.analysis.riskAlert }}</p><p>{{ item.analysis.safetyNotice }}</p></template>
-        <p v-else>AI 暂不可用（{{ item.errorCode }}），不影响医生继续接诊。</p>
-      </article>
-    </section>
-
-    <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="submitResult">
-      <label for="result">问诊结果/面诊登记</label>
-      <textarea id="result" v-model="result" maxlength="20000" required></textarea>
-      <button :disabled="busy">提交结果并结束接诊</button>
-    </form>
-
-    <section v-if="clinical?.consultation?.state === 'CLOSED'">
-      <h3>追加更正</h3>
-      <form @submit.prevent="submitCorrection">
-        <label for="reason">更正原因</label>
-        <input id="reason" v-model="reason" maxlength="500" required>
-        <label for="correction">更正内容</label>
-        <textarea id="correction" v-model="correction" maxlength="20000" required></textarea>
-        <button :disabled="busy">追加更正</button>
-      </form>
-    </section>
-
-    <p v-if="clinical?.result">当前结果：{{ clinical.result.body }}</p>
-    <section v-if="clinical?.corrections.length"><h3>更正记录</h3><p v-for="(item, index) in clinical.corrections" :key="index">{{ item.reason }}：{{ item.body }}</p></section>
-    <p v-if="clinical?.result">作者：{{ clinical.result.authorId }} · 版本：{{ clinical.result.versionNo }} · 时间：{{ new Date(clinical.result.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}</p>
+  <section class="card catalog" aria-label="医生诊室">
+    <h2>患者问诊记录</h2><p v-if="error" role="alert" class="notice">{{ error }} <button v-if="saveState === '草稿未保存'" class="secondary" @click="persist">重试保存</button></p>
+    <p v-if="clinical?.consultation">问诊状态：{{ clinical.consultation.state }} · {{ clinical.serviceMode === 'ONLINE' ? '线上问诊' : '线下面诊' }}</p><button type="button" class="secondary" @click="load()">刷新问诊记录</button>
+    <section v-if="clinical?.serviceMode === 'ONLINE' && clinical.consultation?.state !== 'CLOSED'"><form @submit.prevent="sendMessage"><label for="doctor-message">回复患者</label><textarea id="doctor-message" v-model="message" maxlength="10000" required></textarea><button :disabled="busy">发送回复</button></form><h3>图文消息</h3><p v-for="item in clinical.messages" :key="item.id">{{ item.authorRole === 'PATIENT' ? '患者' : '医生' }}：{{ item.body }}</p></section>
+    <section v-if="clinical?.materials.length"><h3>患者授权材料</h3><article v-for="material in clinical.materials" :key="material.id"><p>材料版本 {{ material.versionNo }}：{{ material.symptomText }}</p><p v-for="attachment in material.attachments" :key="attachment.id"><button type="button" class="secondary" @click="openAttachment(attachment.id)">{{ attachment.originalName }}</button></p></article></section>
+    <section v-if="draft && clinical?.consultation?.state !== 'CLOSED'" class="doctor-draft" aria-label="接诊草稿"><h3>本次接诊草稿</h3><p role="status">{{ saveState }} <button v-if="dirty && !saving" class="secondary" @click="persist">重试保存</button></p><label v-for="field in fields" :key="field[0]">{{ field[1] }}<textarea v-model="draft[field[0]]" maxlength="4000" rows="3" :aria-label="field[1]" @input="markDirty"></textarea></label><h4>开药输入（可选）</h4><p v-if="medicines.length === 0">暂无可用药品目录</p><div v-for="(line, index) in draft.prescriptions" :key="index" class="draft-prescription"><label :for="`medicine-${index}`">药品{{ index + 1 }}<select :id="`medicine-${index}`" v-model="line.medicineId" :aria-label="`药品${index + 1}`" @change="markDirty"><option value="">选择启用药品</option><option v-for="medicine in medicines" :key="medicine.id" :value="medicine.id">{{ medicine.name }} · {{ medicine.spec }} · {{ (medicine.feeMinor / 100).toFixed(2) }} 元</option></select></label><input v-model.number="line.quantity" type="number" min="0" :aria-label="`药品${index + 1}数量`" @input="markDirty"><input v-model="line.usage" placeholder="用法用量" :aria-label="`药品${index + 1}用法用量`" @input="markDirty"><button type="button" class="secondary" @click="draft?.prescriptions.splice(index, 1); markDirty()">移除</button></div><button type="button" class="secondary" @click="draft.prescriptions.push({ medicineId: '', quantity: 0, usage: '' }); markDirty()">添加药品输入</button></section>
+    <section v-if="clinical?.serviceMode === 'ONLINE' && aiResults.length"><h3>医生可见 AI 摘要</h3><article v-for="item in aiResults" :key="item.taskId" class="notice"><p>{{ item.purpose === 'DOCTOR_SYMPTOM_SUMMARY' ? '医生症状摘要' : '患者材料辅助摘要' }} · 状态：{{ item.state }} · 版本：{{ item.versionNo }} · 提供方：{{ item.provider }}<span v-if="item.stale"> · 已过时</span></p><p v-if="item.analysis">{{ item.analysis.summary }}</p><p v-else>AI 暂不可用（{{ item.errorCode }}）</p></article></section><section v-if="clinical?.serviceMode === 'ONLINE' && clinical.consultation?.state !== 'CLOSED'"><p>仅在患者授权具体消息或材料范围后生成；新增内容不会扩大旧授权。</p><button type="button" class="secondary" :disabled="busy" @click="summarizeConversation">重新生成医生症状摘要</button><article v-if="summary" class="notice"><h3>本次生成结果</h3><p v-if="summary.analysis">{{ summary.analysis.summary }}</p><p v-else>摘要暂不可用，已有摘要仍保留。</p><p>消息数：{{ summary.messageCount }} · {{ summary.provider }}</p></article></section>
+    <form v-if="clinical?.consultation?.state !== 'CLOSED'" @submit.prevent="submitResult"><label for="result">补充结果说明（可选）</label><textarea id="result" v-model="result" maxlength="20000"></textarea><button :disabled="busy">提交病历并结束接诊</button></form><section v-if="clinical?.consultation?.state === 'CLOSED'"><h3>追加更正</h3><form @submit.prevent="submitCorrection"><label for="reason">更正原因</label><input id="reason" v-model="reason" maxlength="500" required><label for="correction">更正内容</label><textarea id="correction" v-model="correction" maxlength="20000" required></textarea><button :disabled="busy">追加更正</button></form></section><section v-if="clinical?.result"><h3>已提交病历（只读）</h3><dl><dt>主诉</dt><dd>{{ clinical.result.chiefComplaint }}</dd><dt>现病史</dt><dd>{{ clinical.result.presentIllness }}</dd><dt>既往史/过敏史</dt><dd>{{ clinical.result.historyAllergy }}</dd><dt>诊断</dt><dd>{{ clinical.result.diagnosis }}</dd><dt>处理建议</dt><dd>{{ clinical.result.treatmentPlan }}</dd></dl><p>作者：{{ clinical.result.authorId }} · 版本：{{ clinical.result.versionNo }}</p></section><section v-if="order"><h3>药费订单：{{ order.state === 'PENDING_PAYMENT' ? '待缴费' : order.state === 'PAID' ? '已支付' : '已超时' }}</h3><p>合计：{{ (order.totalMinor / 100).toFixed(2) }} 元</p><p v-for="line in order.lines" :key="line.medicineId">{{ line.name }} · {{ line.spec }} × {{ line.quantity }} · {{ line.usage }}</p></section><section v-if="clinical?.corrections.length"><h3>更正记录</h3><p v-for="(item, index) in clinical.corrections" :key="index">{{ item.reason }}：{{ item.body }}</p></section>
   </section>
 </template>

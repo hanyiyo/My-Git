@@ -2,7 +2,9 @@ name: Verify
 on: [push, pull_request]
 jobs:
   identity:
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 does not support Ubuntu 26.04, which is now returned
+    # by ubuntu-latest. Keep the runner on the supported Ubuntu 24.04 image.
+    runs-on: ubuntu-24.04
     services:
       mysql:
         image: mysql:8.4
