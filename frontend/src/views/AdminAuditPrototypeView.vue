@@ -41,6 +41,7 @@ async function openDetails(event: AuditEvent) {
   if (!drawer.value?.open) drawer.value?.showModal()
 }
 function closed() {
+  if (drawer.value?.open) return
   selectedId.value = ''; notice.value = ''
   if (opener?.isConnected) opener.focus()
 }

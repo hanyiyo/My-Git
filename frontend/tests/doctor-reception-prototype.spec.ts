@@ -8,7 +8,14 @@ async function holdWrites(page: Page) {
   }))
 }
 async function releaseWrites(page: Page) { await page.evaluate(() => (window as any).releaseReceptionTestLock()) }
-const snapshot = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medical-reception-prototype-v1')!))
+async function snapshot(page: Page) {
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem('medical-reception-prototype-v1')
+    if (!raw) return 'missing'
+    try { JSON.parse(raw); return 'ready' } catch { return 'invalid' }
+  })).toBe('ready')
+  return page.evaluate(() => JSON.parse(localStorage.getItem('medical-reception-prototype-v1')!))
+}
 async function controls(page: Page) { await page.getByRole('button', { name: '演示设置', exact: true }).click(); return page.getByRole('dialog', { name: '原型演示设置' }) }
 async function setTime(page: Page, time: string) {
   const dialog = await controls(page)
@@ -255,6 +262,10 @@ test('存储损坏明确提示且需确认重置，不将未保存进度显示�
   const dialog = await controls(page); await dialog.getByRole('button', { name: '重置演示', exact: true }).click(); await dialog.getByRole('button', { name: '取消', exact: true }).click()
   expect(await page.evaluate(() => localStorage.getItem('medical-reception-prototype-v1'))).toBe('{broken')
   await dialog.getByRole('button', { name: '重置演示', exact: true }).click(); await dialog.getByRole('button', { name: '确认重置', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('medical-reception-prototype-v1') || '').version === 1 ? 'ready' : 'invalid' }
+    catch { return 'invalid' }
+  })).toBe('ready')
   expect((await snapshot(page)).visits.find((v: any) => v.id === 'demo-001').status).toBe('WAITING')
 })
 

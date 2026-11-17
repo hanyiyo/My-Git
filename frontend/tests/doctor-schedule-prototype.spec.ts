@@ -4,7 +4,14 @@ const path = '/prototype/doctor-home/schedules'
 const detail = (page: Page) => page.getByRole('complementary', { name: '所选日期详情' })
 const today = (page: Page) => page.getByRole('region', { name: '今日排班', exact: true })
 const day = (page: Page, date: string) => page.locator(`[data-calendar-date="${date}"]`)
-const snapshot = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medical-reception-prototype-v1')!))
+async function snapshot(page: Page) {
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem('medical-reception-prototype-v1')
+    if (!raw) return 'missing'
+    try { JSON.parse(raw); return 'ready' } catch { return 'invalid' }
+  })).toBe('ready')
+  return page.evaluate(() => JSON.parse(localStorage.getItem('medical-reception-prototype-v1')!))
+}
 async function select(page: Page, date = '2026-11-16', mode: 'all' | 'online' | 'offline' = 'all') {
   await page.goto(`${path}?month=${date.slice(0, 7)}&date=${date}&mode=${mode}`)
   await expect(detail(page)).toBeVisible()

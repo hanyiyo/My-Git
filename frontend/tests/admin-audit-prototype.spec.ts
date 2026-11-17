@@ -106,6 +106,7 @@ test('行与键盘打开详情，刷新同步抽屉并保留筛选，关闭恢�
   await expect(page.getByLabel('业务模块')).toHaveValue('药品库存')
   await expect(page.getByLabel('审计日志关键词')).toHaveValue('MED-001')
   await row.press('Space')
+  await expect(drawer(page)).toBeVisible()
   await drawer(page).getByRole('button', { name: '关闭日志详情' }).click()
   await expect(drawer(page)).not.toBeVisible()
   await row.click()
